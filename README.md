@@ -50,6 +50,109 @@ Cada campo vem com **confiança própria**. Na planilha, célula vermelha é aba
 de 0.60, amarela abaixo de 0.85, cinza é campo ausente no carimbo. Você revisa
 o vermelho, não o lote.
 
+## Modo automático (vigia)
+
+O vigia é o CAMP Vision 2 rodando como serviço: varre a pasta montada, acha
+projetos prontos, lê, escreve a planilha e avança o semáforo que você já
+desenhou para o QNAP:
+
+```
+enviado_windows  ──vigia──▶  campvision_concluido  ──QNAP──▶  sincronizado
+```
+
+Quem manda é o `status.json` no disco, nunca estado em memória: reiniciar o Mac
+não perde nem repete nada, e o vigia **preserva os campos que as outras máquinas
+escreveram** no mesmo arquivo, só acrescentando os dele.
+
+```bash
+python vigia.py --pasta /Volumes/acervos   # define a pasta (salva no config)
+python vigia.py                            # painel ao vivo, até Ctrl+C
+python vigia.py --status                   # o que está pendente agora
+python vigia.py --uma-vez                  # processa e sai (para cron)
+python vigia.py --relatorio 2026-09-03     # regera o relatório de um dia
+```
+
+O painel mostra situação, fila, barra da prancha atual, contadores do dia,
+custo acumulado e as últimas linhas de atividade. Fora de um terminal (dentro
+do LaunchAgent, por exemplo) ele se desliga sozinho e vira log corrido — sem
+lixo de escape ANSI no arquivo.
+
+**Ctrl+C encerra com elegância:** termina a prancha em andamento, grava o
+checkpoint e sai. O projeto interrompido não avança de status, então na próxima
+subida ele é retomado do ponto onde parou.
+
+A Fase 2 continua **desligada** por padrão mesmo aqui. O vigia automatiza a
+leitura, não a decisão de mexer nos arquivos.
+
+### Instalar como serviço do macOS
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+python vigia.py --pasta /Volumes/acervos
+./launchagent/instalar.sh
+```
+
+Sobe no login, volta sozinho se cair. O script escreve a chave no plist com
+permissão 600, porque um LaunchAgent não lê o seu `~/.zshrc`.
+
+```bash
+launchctl list | grep campvision2      # está rodando?
+tail -f ~/.campvision2/vigia.log       # acompanhar
+./launchagent/instalar.sh --remover    # desinstalar
+```
+
+Para ver o painel, pare o serviço e rode `python vigia.py` na mão.
+
+## Relatório diário
+
+Todo dia na hora configurada (`hora_relatorio`, padrão 18:00) o vigia fecha o
+dia a partir do diário de eventos e escreve `.txt` e `.html` em
+`~/.campvision2/relatorios/`. Ele traz projetos processados, pranchas lidas,
+percentual com carimbo, erros, **campos esperando revisão**, tempo de máquina e
+custo do dia — mais a linha de cada projeto e um destaque para o que falhou.
+
+Para receber por email, no `~/.campvision2/config.json`:
+
+```json
+{
+  "email_ativo": true,
+  "email_para": "voce@exemplo.com",
+  "email_de": "vigia@exemplo.com",
+  "smtp_servidor": "smtp.exemplo.com",
+  "smtp_porta": 587,
+  "smtp_usuario": "vigia@exemplo.com"
+}
+```
+
+A senha vai na variável `CAMPVISION_SMTP_SENHA`, nunca no config. Falha de
+email não derruba o vigia: o arquivo é escrito de qualquer jeito e o motivo vai
+para o log.
+
+## GitHub e auto-atualização
+
+O repositório já está inicializado com o primeiro commit. Para publicar:
+
+```bash
+git remote add origin git@github.com:SEU-USUARIO/campvision2.git
+git push -u origin main
+```
+
+O `.gitignore` já barra o que não pode subir: `config.json` (pode conter a
+chave), checkpoints, planilhas e logs.
+
+Com um remoto configurado, o vigia verifica atualizações a cada hora
+(`intervalo_atualizacao_minutos`), **só entre projetos, nunca no meio de um
+lote**. Se veio código novo, ele faz `pull --ff-only` e se reinicia sozinho para
+carregar a versão nova — o LaunchAgent não precisa saber de nada. Se você tiver
+alterações locais não commitadas naquele Mac, a atualização é pulada com aviso,
+sem sobrescrever seu trabalho.
+
+Assim você desenvolve num Mac, dá push, e os outros pegam a versão nova sozinhos.
+Para desligar: `--sem-auto-atualizar` ou `"auto_atualizar": false`.
+
+O `.github/workflows/testes.yml` roda os 50 testes a cada push, em Python 3.10 e
+3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
+
 ## Montar o ambiente
 
 Nada aqui exige AVX2, GPU ou compilação — roda igual no Mac Pro 2013 e no
@@ -149,6 +252,9 @@ python cli.py /caminho/da/pasta        # modo automático, para o LaunchAgent
 | `ModuleNotFoundError: anthropic` | ambiente virtual não ativado — falta o `source .venv/bin/activate` |
 | Build na barra de título não é o que você instalou | está rodando de outra pasta (Lixeira, Downloads antigo) |
 | Lote não reprocessa nada | checkpoint da execução anterior — apague `campvision2_checkpoint.jsonl` da pasta |
+| Vigia não acha projeto nenhum | `status.json` não está como `enviado_windows`; confira com `python vigia.py --status` |
+| Vigia no ar mas parado | pasta SMB caiu — ele avisa no log e segue tentando, sem morrer |
+| "não é um repositório git" | falta `git remote add origin ...` — a auto-atualização fica desligada até lá |
 
 ## Custo
 
@@ -177,8 +283,8 @@ código já isola a chamada em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-27 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
-geradas na hora.
+50 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+geradas na hora. Rodam também no GitHub Actions a cada push.
 
 ## Segurança do lote
 
