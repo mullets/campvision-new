@@ -1,0 +1,6 @@
+# CAMP Vision 2 — dependências mínimas de propósito.
+# Sem torch, sem ultralytics, sem opencv, sem tesseract, sem sqlalchemy,
+# sem imagecodecs, sem pin de numpy. Roda em Mac antigo sem drama.
+anthropic>=0.40
+Pillow>=10.0
+openpyxl>=3.1

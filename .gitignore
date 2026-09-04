@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+# Nunca versionar: chave de API, estado local, saídas de lote
+config.json
+*.jsonl
+catalogacao.xlsx
+catalogacao.csv
+relatorio.txt
+campvision2.log
+vigia.log
+relatorios/
