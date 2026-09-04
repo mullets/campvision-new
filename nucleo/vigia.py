@@ -109,6 +109,28 @@ def _pasta_de_imagens(pasta: Path, config: Config) -> Path | None:
     return pasta if imagem.listar_imagens(pasta, config.extensoes) else None
 
 
+def garantir_status(pasta: Path, config: Config) -> str:
+    """Cria o status.json quando a pasta não tem um.
+
+    Pasta com imagens e sem semáforo é pasta que chegou por fora do fluxo do
+    Windows (cópia manual, disco antigo, importação). Em vez de ignorar em
+    silêncio — que foi como projetos inteiros ficaram parados —, o vigia cria
+    o arquivo já marcado como pronto e registra quem o criou.
+    """
+    caminho = pasta / NOME_STATUS
+    if caminho.exists():
+        return ler_status(caminho)
+    if not config.criar_status_ausente:
+        return ""
+    escrever_status(
+        caminho,
+        config.status_pronto,
+        {"criado_por": "campvision2", "origem": "pasta sem status.json"},
+    )
+    _log.info("Pasta %s não tinha status.json — criado como '%s'.", pasta.name, config.status_pronto)
+    return config.status_pronto
+
+
 def varrer(raiz: Path, config: Config) -> list[Projeto]:
     """Lista os projetos prontos para processar, em ordem de chegada."""
     if not raiz.is_dir():
@@ -117,16 +139,16 @@ def varrer(raiz: Path, config: Config) -> list[Projeto]:
     for pasta in raiz.iterdir():
         if not pasta.is_dir() or pasta.name.startswith("."):
             continue
-        status = ler_status(pasta / NOME_STATUS)
+        pasta_imagens = _pasta_de_imagens(pasta, config)
+        if pasta_imagens is None:
+            continue  # sem imagem não é projeto: não cria status à toa
+        status = garantir_status(pasta, config)
         if config.exigir_status_json:
             if status != config.status_pronto:
                 continue
         else:
             if status == config.status_concluido or (pasta / NOME_PLANILHA).exists():
                 continue
-        pasta_imagens = _pasta_de_imagens(pasta, config)
-        if pasta_imagens is None:
-            continue
         achados.append((pasta.stat().st_mtime, Projeto(pasta, pasta_imagens, pasta.name)))
     return [p for _, p in sorted(achados, key=lambda item: item[0])]
 
@@ -260,8 +282,13 @@ class Vigia:
         if datetime.now() < self._proximo_relatorio:
             return
         dia = (self._proximo_relatorio - timedelta(minutes=1)).date()
+        pasta = self.pasta_estado / "relatorios"
         do_dia = mod_eventos.ler(self.caminho_eventos, dia)
-        caminho = relatorio_diario.escrever(do_dia, self.pasta_estado / "relatorios", dia)
+        caminho = relatorio_diario.escrever(do_dia, pasta, dia)
+        # O geral é reescrito junto: sempre reflete o acervo inteiro até agora.
+        relatorio_diario.escrever_geral(
+            mod_eventos.ler(self.caminho_eventos), pasta, self.estado.fila
+        )
         erro = relatorio_diario.enviar_email(
             self.config, caminho.read_text(encoding="utf-8"), dia
         )

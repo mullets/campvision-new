@@ -214,7 +214,7 @@ class Janela(tk.Tk):
         )
         if not confirma:
             return
-        mensagens = aplicar_executar(acoes, simular=False, gravar_exif=True)
+        mensagens = aplicar_executar(acoes, simular=False, identidade=self.config_app.identidade())
         for m in mensagens:
             logging.getLogger("cv2.aplicar").info(m)
         self.status.set(f"Aplicado: {len(acoes)} prancha(s) organizadas.")

@@ -32,7 +32,10 @@ class TestVarredura(unittest.TestCase):
             montar_projeto(raiz, "SBU-Casa-1972", "campvision_concluido")
             montar_projeto(raiz, "PMR-Museu-1988", None)
             achados = vigia.varrer(raiz, Config())
-            self.assertEqual([p.nome for p in achados], ["OCG-Teatro-1968"])
+            # PMR não tinha status.json: o vigia cria um e ela entra na fila.
+            self.assertEqual(
+                sorted(p.nome for p in achados), ["OCG-Teatro-1968", "PMR-Museu-1988"]
+            )
 
     def test_sem_exigir_status_pega_pasta_nao_catalogada(self):
         with TemporaryDirectory() as tmp:
@@ -102,6 +105,15 @@ class TestProcessamento(unittest.TestCase):
             projeto = vigia.varrer(raiz, cfg)[0]
             vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
             self.assertEqual(vigia.varrer(raiz, cfg), [], "não pode reprocessar")
+
+    def test_status_criado_nao_reprocessa_no_ciclo_seguinte(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            montar_projeto(raiz, "PMR-Museu-1988", None, 2)
+            cfg = Config(trabalhadores=1)
+            projeto = vigia.varrer(raiz, cfg)[0]
+            vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
+            self.assertEqual(vigia.varrer(raiz, cfg), [])
 
     def test_falha_de_um_projeto_nao_levanta_excecao(self):
         class ClienteQuebrado:

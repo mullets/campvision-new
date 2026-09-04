@@ -5,6 +5,8 @@
     python vigia.py --uma-vez                # processa o que está pronto e sai (cron)
     python vigia.py --sem-painel             # log corrido, para LaunchAgent
     python vigia.py --relatorio 2026-09-03   # regera o relatório de um dia
+    python vigia.py --relatorio-geral         # acervo inteiro desde o começo
+    python vigia.py --identidade              # confere o crédito que vai nas imagens
     python vigia.py --status                 # o que está pendente agora, sem processar
 
 Ctrl+C encerra com elegância: termina a prancha em andamento, grava o
@@ -118,6 +120,34 @@ def _comando_status(config: Config) -> int:
     return 0
 
 
+def _comando_identidade(config: Config) -> int:
+    """Mostra exatamente o que será gravado dentro de cada imagem."""
+    from nucleo import metadados as mod_metadados
+
+    identidade = config.identidade()
+    print("Identidade gravada em toda imagem que sai da Fase 2:\n")
+    print(f"  Publisher / Credit   {identidade.credito}")
+    print(f"  WebStatement         {identidade.site or '(vazio)'}")
+    print(f"  Copyright (exemplo)  {identidade.direitos('OSWALDO CORRÊA GONÇALVES')}")
+    print(f"  Contato              {identidade.contato or '(vazio)'}")
+    print(f"  exiftool             {'encontrado' if mod_metadados.disponivel() else 'AUSENTE — brew install exiftool'}")
+    faltando = identidade.problemas()
+    if faltando:
+        print(f"\n  ATENÇÃO: falta preencher {', '.join(faltando)} em {CAMINHO_CONFIG}")
+        return 1
+    return 0
+
+
+def _comando_relatorio_geral(config: Config) -> int:
+    todos = mod_eventos.ler(PASTA_ESTADO / "eventos.jsonl")
+    pendentes = None
+    if config.pasta_vigiada and Path(config.pasta_vigiada).is_dir():
+        pendentes = len(mod_vigia.varrer(Path(config.pasta_vigiada), config))
+    caminho = relatorio_diario.escrever_geral(todos, PASTA_ESTADO / "relatorios", pendentes)
+    print(caminho.read_text(encoding="utf-8"))
+    return 0
+
+
 def _comando_relatorio(config: Config, texto_data: str) -> int:
     try:
         dia = date.fromisoformat(texto_data) if texto_data != "hoje" else date.today()
@@ -140,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--sem-painel", action="store_true", help="Log corrido, sem redesenho")
     p.add_argument("--status", action="store_true", help="Mostra o pendente e sai")
     p.add_argument("--relatorio", metavar="AAAA-MM-DD", help="Regera o relatório de um dia")
+    p.add_argument("--relatorio-geral", action="store_true", help="Acervo inteiro desde o começo")
+    p.add_argument("--identidade", action="store_true", help="Mostra o crédito gravado nas imagens")
     p.add_argument("--sem-auto-atualizar", action="store_true")
     p.add_argument("--intervalo", type=int, help="Segundos entre varreduras")
     args = p.parse_args(argv)
@@ -156,6 +188,10 @@ def main(argv: list[str] | None = None) -> int:
 
     registro.configurar(PASTA_ESTADO / "vigia.log")
 
+    if args.identidade:
+        return _comando_identidade(config)
+    if args.relatorio_geral:
+        return _comando_relatorio_geral(config)
     if args.relatorio:
         return _comando_relatorio(config, args.relatorio)
     if args.status:

@@ -15,16 +15,16 @@ import csv
 import logging
 import re
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import metadados as mod_metadados
 from .esquema import CAMPOS
+from .metadados import Identidade
 
 _log = logging.getLogger("cv2.aplicar")
 
 INVALIDOS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-ATRIBUICAO_PADRAO = "CAMP - Casa da Arquitetura Moderna Paulista"
 
 
 @dataclass
@@ -108,13 +108,25 @@ def planejar(
     return acoes
 
 
-def executar(acoes: list[Acao], simular: bool = True, gravar_exif: bool = False) -> list[str]:
-    """Copia os arquivos para o destino. `simular=True` só descreve."""
+def executar(
+    acoes: list[Acao],
+    simular: bool = True,
+    identidade: Identidade | None = None,
+) -> list[str]:
+    """Copia os arquivos para o destino e grava os metadados.
+
+    `simular=True` só descreve. Os metadados institucionais são gravados
+    SEMPRE que a cópia acontece de verdade — não é opcional, é o que garante
+    que o crédito da CAMP viaje dentro da imagem.
+    """
     mensagens: list[str] = []
+    if simular:
+        return [f"[simulação] {a.origem.name} -> {a.destino}" for a in acoes]
+
+    identidade = identidade or Identidade()
+    gravados: list[tuple[Path, dict[str, str]]] = []
+
     for acao in acoes:
-        if simular:
-            mensagens.append(f"[simulação] {acao.origem.name} -> {acao.destino}")
-            continue
         acao.destino.parent.mkdir(parents=True, exist_ok=True)
         final = acao.destino
         n = 2
@@ -123,33 +135,29 @@ def executar(acoes: list[Acao], simular: bool = True, gravar_exif: bool = False)
             n += 1
         shutil.copy2(acao.origem, final)
         mensagens.append(f"{acao.origem.name} -> {final}")
-        if gravar_exif:
-            erro = _gravar_exif(final, acao.metadados)
-            if erro:
-                mensagens.append(f"  aviso EXIF: {erro}")
+        gravados.append((final, acao.metadados))
+
+    # Um processo do exiftool para o lote inteiro, não um por arquivo.
+    quantos, avisos = mod_metadados.gravar_em_lote(gravados, identidade)
+    mensagens.append(f"Metadados gravados em {quantos}/{len(gravados)} arquivo(s).")
+    mensagens.extend(f"AVISO: {a}" for a in avisos)
     return mensagens
 
 
-def _gravar_exif(caminho: Path, metadados: dict[str, str], atribuicao: str = ATRIBUICAO_PADRAO) -> str:
-    """Grava metadados via exiftool, se disponível. Copyright = autor + instituição."""
-    if not shutil.which("exiftool"):
-        return "exiftool não encontrado no PATH — pulei os metadados."
-    autor = metadados.get("Arquiteto") or metadados.get("Escritório") or ""
-    copyright_ = f"{autor} / {atribuicao}" if autor else atribuicao
-    descricao = " | ".join(
-        f"{rotulo}: {valor}" for rotulo, valor in metadados.items() if valor
-    )[:1800]
-    argumentos = [
-        "exiftool", "-overwrite_original", "-charset", "utf8",
-        f"-Artist={autor}",
-        f"-Copyright={copyright_}",
-        f"-XMP-dc:Rights={copyright_}",
-        f"-XMP-dc:Title={metadados.get('Título da prancha', '')}",
-        f"-ImageDescription={descricao}",
-        str(caminho),
+def regravar_metadados(pasta: Path, planilha: Path, identidade: Identidade) -> list[str]:
+    """Regrava metadados em arquivos JÁ organizados, sem copiar nada de novo.
+
+    Serve para quando a identidade muda (site novo, licença nova) e você quer
+    atualizar um acervo inteiro sem reprocessar."""
+    linhas = ler_planilha(planilha)
+    itens: list[tuple[Path, dict[str, str]]] = []
+    for linha in linhas:
+        nome = (linha.get("Arquivo") or "").strip()
+        alvo = pasta / nome
+        if not nome or not alvo.exists():
+            continue
+        itens.append((alvo, {c.rotulo: linha.get(c.rotulo, "") for c in CAMPOS}))
+    quantos, avisos = mod_metadados.gravar_em_lote(itens, identidade)
+    return [f"Metadados regravados em {quantos}/{len(itens)} arquivo(s)."] + [
+        f"AVISO: {a}" for a in avisos
     ]
-    try:
-        proc = subprocess.run(argumentos, capture_output=True, text=True, timeout=90)
-    except (OSError, subprocess.TimeoutExpired) as erro:
-        return str(erro)
-    return "" if proc.returncode == 0 else proc.stderr.strip()[:200]

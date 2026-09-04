@@ -50,6 +50,66 @@ Cada campo vem com **confiança própria**. Na planilha, célula vermelha é aba
 de 0.60, amarela abaixo de 0.85, cinza é campo ausente no carimbo. Você revisa
 o vermelho, não o lote.
 
+## Metadados dentro do arquivo
+
+Regra da casa: **toda imagem que sai daqui leva o nome e o site da CAMP dentro
+dela**. Nome de arquivo se perde, pasta se reorganiza, planilha fica para trás —
+o metadado viaja junto com a imagem. Se alguém baixar uma prancha do portal daqui
+a dez anos, o crédito ainda está lá.
+
+Preencha a identidade em `~/.campvision2/config.json`:
+
+```json
+{
+  "identidade_nome": "CAMP - Casa da Arquitetura Moderna Paulista",
+  "identidade_site": "https://SEU-DOMINIO",
+  "identidade_licenca": "CC BY-NC 4.0",
+  "identidade_contato": "acervo@SEU-DOMINIO"
+}
+```
+
+Confira a qualquer momento o que será gravado:
+
+```bash
+python vigia.py --identidade
+```
+
+O app **avisa alto** se `identidade_site` estiver vazio, em vez de assinar as
+imagens pela metade.
+
+### O que é escrito
+
+| Onde | O quê |
+|---|---|
+| `EXIF:Artist`, `XMP-dc:Creator`, `IPTC:By-line` | o arquiteto — autoria da **obra** |
+| `XMP-dc:Publisher`, `Credit`, `Source` | a CAMP — instituição **guardiã**, sempre |
+| `XMP-xmpRights:WebStatement`, `CreatorWorkURL` | o site |
+| `EXIF:Copyright`, `XMP-dc:Rights`, `IPTC:CopyrightNotice` | autor / CAMP — licença |
+| `Title`, `Description`, `Headline`, `City`, `State` | o que o carimbo disse |
+| `XMP-dc:Subject`, `IPTC:Keywords` | projeto, arquiteto, tipo, cidade, ano, CAMP |
+| `XMP-xmp:CreatorTool` | CAMP Vision 2 + build que gravou |
+
+Distinção que importa para acervo: o **arquiteto** é Creator, a **CAMP** é
+Publisher. Confundir os dois é atribuir a autoria da obra à instituição.
+
+O crédito institucional vai **mesmo quando o carimbo não foi lido**. Prancha
+ilegível continua sendo patrimônio identificado da CAMP.
+
+`Ano: 1968` vira `XMP-dc:Date=1968`, não `1968:01:01` — registrar mês e dia
+seria inventar precisão que o carimbo não tem.
+
+A gravação é em **lote**: um processo do exiftool para o acervo inteiro
+(`-@ argfile`), não um por arquivo. Mil pranchas levam segundos, não minutos.
+Acentuação vai em UTF-8 e volta íntegra.
+
+Mudou o site ou a licença? Regrave sem reprocessar nada:
+
+```bash
+python cli.py /caminho/da/pasta --regravar-metadados catalogacao.xlsx
+```
+
+Nada disso toca o original: a Fase 2 copia, e o metadado vai na cópia.
+
 ## Modo automático (vigia)
 
 O vigia é o CAMP Vision 2 rodando como serviço: varre a pasta montada, acha
@@ -64,12 +124,21 @@ Quem manda é o `status.json` no disco, nunca estado em memória: reiniciar o Ma
 não perde nem repete nada, e o vigia **preserva os campos que as outras máquinas
 escreveram** no mesmo arquivo, só acrescentando os dele.
 
+**Pasta sem `status.json` ganha um.** Projeto que chegou por fora do fluxo do
+Windows — cópia manual, disco antigo, importação — era ignorado em silêncio.
+Agora o vigia cria o semáforo já marcado como pronto e anota `criado_por:
+campvision2`, para você saber depois quais entraram por essa porta. Pasta sem
+imagem nenhuma não ganha status: não é projeto. E status que já existe nunca é
+mexido. Para desligar: `"criar_status_ausente": false`.
+
 ```bash
 python vigia.py --pasta /Volumes/acervos   # define a pasta (salva no config)
 python vigia.py                            # painel ao vivo, até Ctrl+C
 python vigia.py --status                   # o que está pendente agora
 python vigia.py --uma-vez                  # processa e sai (para cron)
 python vigia.py --relatorio 2026-09-03     # regera o relatório de um dia
+python vigia.py --relatorio-geral          # acervo inteiro desde o começo
+python vigia.py --identidade               # confere o crédito que vai nas imagens
 ```
 
 O painel mostra situação, fila, barra da prancha atual, contadores do dia,
@@ -103,7 +172,9 @@ tail -f ~/.campvision2/vigia.log       # acompanhar
 
 Para ver o painel, pare o serviço e rode `python vigia.py` na mão.
 
-## Relatório diário
+## Relatórios
+
+### Diário
 
 Todo dia na hora configurada (`hora_relatorio`, padrão 18:00) o vigia fecha o
 dia a partir do diário de eventos e escreve `.txt` e `.html` em
@@ -128,6 +199,18 @@ A senha vai na variável `CAMPVISION_SMTP_SENHA`, nunca no config. Falha de
 email não derruba o vigia: o arquivo é escrito de qualquer jeito e o motivo vai
 para o log.
 
+### Geral
+
+Reescrito junto com o diário, sempre refletindo o acervo inteiro desde o
+começo: período de trabalho, projetos, pranchas catalogadas, taxa de carimbo
+lido, ritmo por dia, tempo de máquina, **custo total e custo por prancha**, a
+fila atual e a lista de projetos do maior para o menor. É o número que serve
+para prestação de contas e para saber quanto ainda falta.
+
+```bash
+python vigia.py --relatorio-geral
+```
+
 ## GitHub e auto-atualização
 
 O repositório já está inicializado com o primeiro commit. Para publicar:
@@ -150,7 +233,7 @@ sem sobrescrever seu trabalho.
 Assim você desenvolve num Mac, dá push, e os outros pegam a versão nova sozinhos.
 Para desligar: `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 50 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 80 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ## Montar o ambiente
@@ -255,6 +338,8 @@ python cli.py /caminho/da/pasta        # modo automático, para o LaunchAgent
 | Vigia não acha projeto nenhum | `status.json` não está como `enviado_windows`; confira com `python vigia.py --status` |
 | Vigia no ar mas parado | pasta SMB caiu — ele avisa no log e segue tentando, sem morrer |
 | "não é um repositório git" | falta `git remote add origin ...` — a auto-atualização fica desligada até lá |
+| "falta preencher identidade.site" | preencha `identidade_site` no config antes de publicar imagens |
+| Metadados não gravados | `brew install exiftool` — sem ele a cópia acontece, o metadado não |
 
 ## Custo
 
@@ -283,7 +368,7 @@ código já isola a chamada em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-50 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+80 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora. Rodam também no GitHub Actions a cada push.
 
 ## Segurança do lote

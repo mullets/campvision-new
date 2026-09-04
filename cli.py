@@ -4,6 +4,7 @@
     python cli.py /caminho/da/pasta --sem-consolidacao --trabalhadores 6
     python cli.py /caminho/da/pasta --aplicar catalogacao.xlsx        # Fase 2 (simulação)
     python cli.py /caminho/da/pasta --aplicar catalogacao.xlsx --valendo
+    python cli.py /caminho/da/pasta --regravar-metadados catalogacao.xlsx
 
 Sai com código 0 se tudo correu, 1 se houve erro fatal, 2 se o lote terminou
 com pranchas em erro (útil para o watcher decidir se muda o status.json).
@@ -16,7 +17,7 @@ import sys
 from pathlib import Path
 
 from nucleo import grupos, lote, planilha, registro
-from nucleo.aplicar import executar as aplicar_executar, planejar
+from nucleo.aplicar import executar as aplicar_executar, planejar, regravar_metadados
 from nucleo.config import VERSAO_BUILD, Config
 from nucleo.visao import ClienteAnthropic
 
@@ -30,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--do-zero", action="store_true", help="Ignora o checkpoint")
     p.add_argument("--aplicar", type=Path, default=None, help="Fase 2 a partir da planilha")
     p.add_argument("--valendo", action="store_true", help="Fase 2 sem simulação")
+    p.add_argument("--regravar-metadados", type=Path, default=None,
+                   help="Só regrava metadados em arquivos já organizados")
     args = p.parse_args(argv)
 
     if not args.pasta.is_dir():
@@ -38,15 +41,25 @@ def main(argv: list[str] | None = None) -> int:
 
     registro.configurar(args.pasta / "campvision2.log")
 
+    config = Config.carregar(Path.home() / ".campvision2" / "config.json")
+
+    if args.regravar_metadados:
+        caminho = args.regravar_metadados
+        if not caminho.is_absolute():
+            caminho = args.pasta / caminho
+        for mensagem in regravar_metadados(args.pasta, caminho, config.identidade()):
+            print(mensagem)
+        return 0
+
     if args.aplicar:
         caminho = args.aplicar if args.aplicar.is_absolute() else args.pasta / args.aplicar
         acoes = planejar(args.pasta, caminho)
-        for mensagem in aplicar_executar(acoes, simular=not args.valendo, gravar_exif=args.valendo):
+        for mensagem in aplicar_executar(acoes, simular=not args.valendo,
+                                         identidade=config.identidade()):
             print(mensagem)
         print(f"{len(acoes)} prancha(s) {'aplicadas' if args.valendo else 'simuladas'}.")
         return 0
 
-    config = Config.carregar(Path.home() / ".campvision2" / "config.json")
     if args.modelo:
         config.modelo = args.modelo
     if args.trabalhadores:

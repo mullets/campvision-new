@@ -63,6 +63,13 @@ class Config:
     # Retoma de onde parou usando o checkpoint .jsonl; desligue para reprocessar tudo.
     retomar_checkpoint: bool = True
 
+    # --- Identidade institucional (vai DENTRO de cada imagem) ---
+    # Preencha antes de publicar qualquer coisa: o app avisa se estiver vazio.
+    identidade_nome: str = "CAMP - Casa da Arquitetura Moderna Paulista"
+    identidade_site: str = ""
+    identidade_licenca: str = "Todos os direitos reservados"
+    identidade_contato: str = ""
+
     # --- Vigia (modo automático) ---
     # Raiz montada por SMB onde os projetos chegam do Windows/QNAP.
     pasta_vigiada: str = ""
@@ -70,6 +77,8 @@ class Config:
     # Só processa pasta com status.json marcado como pronta. Desligue para
     # processar qualquer pasta com imagens e sem catalogacao.xlsx.
     exigir_status_json: bool = True
+    # Pasta com imagens e SEM status.json ganha um, criado pelo vigia.
+    criar_status_ausente: bool = True
     status_pronto: str = "enviado_windows"
     status_concluido: str = "campvision_concluido"
     # Aplica a Fase 2 sozinho ao terminar a leitura. Padrão FALSE de propósito:
@@ -121,6 +130,17 @@ class Config:
             dados.pop("api_key", None)
         caminho.write_text(
             json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def identidade(self):
+        """Identidade institucional para os metadados."""
+        from .metadados import Identidade
+
+        return Identidade(
+            nome=self.identidade_nome,
+            site=self.identidade_site,
+            licenca=self.identidade_licenca,
+            contato=self.identidade_contato,
         )
 
     def custo_estimado_usd(self, tokens_entrada: int, tokens_saida: int) -> float:
