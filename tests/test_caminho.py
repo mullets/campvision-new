@@ -1,0 +1,214 @@
+"""Testes das pistas de pasta — projeto, ano, fundo e divergência."""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from nucleo import caminho
+from nucleo.caminho import PistaDePasta, aplicar, combinam, extrair
+from nucleo.config import Config
+from nucleo.esquema import Leitura
+
+RAIZ = Path("/acervos")
+
+
+def pista_de(relativo: str) -> PistaDePasta:
+    return extrair(RAIZ / relativo, RAIZ)
+
+
+class TestExtracao(unittest.TestCase):
+    def test_ano_em_pasta_propria(self):
+        p = pista_de("Fundo OCG/1968/TeatroDeSantos")
+        self.assertEqual(p.projeto, "Teatro De Santos")
+        self.assertEqual(p.ano, "1968")
+        self.assertEqual(p.fundo, "Fundo OCG")
+
+    def test_ano_embutido_no_nome(self):
+        p = pista_de("OCG-TeatroDeSantos-1968")
+        self.assertEqual(p.projeto, "Teatro De Santos")
+        self.assertEqual(p.ano, "1968")
+        self.assertEqual(p.fundo, "OCG")
+
+    def test_prefixo_de_fundo_vira_fundo_nao_projeto(self):
+        p = pista_de("SBU_Eletropaulo_CARMONA")
+        self.assertEqual(p.fundo, "SBU")
+        self.assertNotIn("SBU", p.projeto)
+
+    def test_pasta_estrutural_nao_vira_projeto(self):
+        p = pista_de("Fundo OCG/1968/TeatroDeSantos/JPG")
+        self.assertEqual(p.projeto, "Teatro De Santos")
+        p2 = pista_de("OCG/CasaBaeta/TIF")
+        self.assertEqual(p2.projeto, "Casa Baeta")
+
+    def test_ano_de_pasta_vence_ano_embutido_acima(self):
+        p = pista_de("Acervo 1990/1968/CasaBaeta")
+        self.assertEqual(p.ano, "1968")
+
+    def test_codigo_de_digitalizacao_e_descartado_do_nome(self):
+        p = pista_de("DEST3524 CasaDaPraia 1972")
+        self.assertEqual(p.projeto, "Casa Da Praia")
+        self.assertEqual(p.ano, "1972")
+
+    def test_palavras_de_estrutura_nao_viram_fundo(self):
+        p = pista_de("Acervo/Projetos/1972/Casa da Praia")
+        self.assertEqual(p.projeto, "Casa da Praia")
+        self.assertEqual(p.ano, "1972")
+        self.assertEqual(p.fundo, "")
+
+    def test_ano_implausivel_e_ignorado(self):
+        p = pista_de("Casa 0350")
+        self.assertEqual(p.ano, "")
+
+    def test_sem_raiz_usa_so_o_nome_da_pasta(self):
+        p = extrair(Path("/qualquer/lugar/CasaBaeta-1956"))
+        self.assertEqual(p.projeto, "Casa Baeta")
+        self.assertEqual(p.ano, "1956")
+
+    def test_como_campos_omite_vazio(self):
+        self.assertEqual(PistaDePasta(projeto="X").como_campos(), {"projeto": "X"})
+        self.assertEqual(PistaDePasta().como_campos(), {})
+
+
+class TestCombinam(unittest.TestCase):
+    def test_grafias_diferentes_da_mesma_coisa(self):
+        self.assertTrue(combinam("TEATRO DE SANTOS", "Teatro De Santos"))
+        self.assertTrue(combinam("CASA DA PRAIA", "Casa Praia"))
+        self.assertTrue(combinam("RESIDÊNCIA BAETA", "Casa Baeta"))
+
+    def test_coisas_realmente_diferentes(self):
+        self.assertFalse(combinam("TEATRO DE SANTOS", "EDIFÍCIO COPAN"))
+
+    def test_vazio_nao_e_divergencia(self):
+        self.assertTrue(combinam("", "qualquer coisa"))
+        self.assertTrue(combinam("qualquer coisa", ""))
+
+
+class TestAplicar(unittest.TestCase):
+    def _leitura(self, **valores) -> Leitura:
+        return Leitura(
+            arquivo="p1.jpg",
+            valores=dict(valores),
+            confiancas={k: 0.9 for k in valores},
+            carimbo_encontrado=True,
+        )
+
+    def test_preenche_campo_que_o_carimbo_nao_deu(self):
+        leitura = self._leitura(projeto="TEATRO DE SANTOS")
+        preenchidos, _ = aplicar([leitura], pista_de("OCG/1968/TeatroDeSantos"))
+        self.assertEqual(preenchidos, 1)
+        self.assertEqual(leitura.valores["ano"], "1968")
+        self.assertIn("ano", leitura.campos_da_pasta)
+        self.assertEqual(leitura.confiancas["ano"], 0.5)
+
+    def test_nunca_sobrescreve_o_que_foi_lido(self):
+        leitura = self._leitura(projeto="TEATRO DE SANTOS", ano="1967")
+        aplicar([leitura], pista_de("OCG/1968/TeatroDeSantos"))
+        self.assertEqual(leitura.valores["ano"], "1967", "o carimbo sempre vence a pasta")
+        self.assertNotIn("ano", leitura.campos_da_pasta)
+
+    def test_acusa_divergencia_entre_carimbo_e_pasta(self):
+        leitura = self._leitura(projeto="EDIFÍCIO COPAN")
+        _, divergencias = aplicar([leitura], pista_de("OCG/1968/TeatroDeSantos"))
+        self.assertEqual(divergencias, 1)
+        self.assertIn("projeto", leitura.divergencias)
+
+    def test_concordancia_nao_gera_divergencia(self):
+        leitura = self._leitura(projeto="TEATRO DE SANTOS", ano="1968")
+        _, divergencias = aplicar([leitura], pista_de("OCG/1968/TeatroDeSantos"))
+        self.assertEqual(divergencias, 0)
+        self.assertEqual(leitura.divergencias, [])
+
+    def test_guarda_a_pista_mesmo_sem_preencher_nada(self):
+        leitura = self._leitura(projeto="TEATRO DE SANTOS", ano="1968")
+        aplicar([leitura], pista_de("Fundo OCG/1968/TeatroDeSantos"))
+        self.assertEqual(leitura.pista_fundo, "Fundo OCG")
+        self.assertEqual(leitura.pista_ano, "1968")
+
+    def test_pode_conferir_sem_preencher(self):
+        leitura = self._leitura(projeto="TEATRO DE SANTOS")
+        preenchidos, _ = aplicar(
+            [leitura], pista_de("OCG/1968/TeatroDeSantos"), preencher_faltantes=False
+        )
+        self.assertEqual(preenchidos, 0)
+        self.assertEqual(leitura.valores.get("ano", ""), "")
+        self.assertEqual(leitura.pista_ano, "1968", "a pista continua registrada")
+
+    def test_prancha_sem_carimbo_fica_com_projeto_e_ano_da_pasta(self):
+        vazia = Leitura(arquivo="ilegivel.jpg", valores={}, confiancas={})
+        preenchidos, _ = aplicar([vazia], pista_de("OCG/1968/TeatroDeSantos"))
+        self.assertEqual(preenchidos, 2)
+        self.assertEqual(vazia.valores["projeto"], "Teatro De Santos")
+        self.assertEqual(vazia.valores["ano"], "1968")
+        self.assertEqual(sorted(vazia.campos_da_pasta), ["ano", "projeto"])
+
+
+class TestIntegracaoComOVigia(unittest.TestCase):
+    def test_pistas_chegam_na_planilha(self):
+        from openpyxl import load_workbook
+
+        from nucleo import vigia
+        from tests.test_acervo import com_imagens
+        from tests.test_nucleo import ClienteFalso, resposta_padrao
+
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "Fundo OCG" / "1968" / "TeatroDeSantos", 2)
+            cfg = Config(trabalhadores=1, consolidar_por_projeto=False, pasta_vigiada=str(raiz))
+            projeto = vigia.varrer(raiz, cfg)[0]
+            # a resposta falsa diz CASA DA PRAIA: diverge da pasta TeatroDeSantos
+            vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
+            caminho_xlsx = projeto.pasta / "catalogacao" / "catalogacao.xlsx"
+            ws = load_workbook(caminho_xlsx).active
+            cabecalho = [c.value for c in ws[1]]
+            self.assertIn("Fundo (pasta)", cabecalho)
+            coluna = cabecalho.index("Divergência") + 1
+            self.assertIn("carimbo ≠ pasta", str(ws.cell(row=2, column=coluna).value))
+            coluna_fundo = cabecalho.index("Fundo (pasta)") + 1
+            self.assertEqual(ws.cell(row=2, column=coluna_fundo).value, "Fundo OCG")
+
+    def test_pode_ser_desligado(self):
+        from nucleo import vigia
+        from tests.test_acervo import com_imagens
+        from tests.test_nucleo import ClienteFalso, resposta_padrao
+
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "Fundo OCG" / "1968" / "TeatroDeSantos", 1)
+            cfg = Config(
+                trabalhadores=1, consolidar_por_projeto=False,
+                usar_pasta_como_pista=False, pasta_vigiada=str(raiz),
+            )
+            projeto = vigia.varrer(raiz, cfg)[0]
+            vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
+            leituras = __import__(
+                "nucleo.planilha", fromlist=["ler_json"]
+            ).ler_json(projeto.pasta / "catalogacao" / "leituras.json")
+            self.assertEqual(leituras[0].pista_fundo, "")
+
+
+class TestProveniencia(unittest.TestCase):
+    def test_a_pasta_nunca_entra_no_prompt_do_modelo(self):
+        """A instrução do leitor não pode conter nada de caminho de pasta."""
+        from nucleo import visao
+
+        texto = (visao.INSTRUCOES + visao.INSTRUCOES_RECORTE).lower()
+        for proibido in ("pasta", "diretório", "caminho do arquivo", "nome do arquivo"):
+            self.assertNotIn(proibido, texto)
+
+    def test_leitor_recebe_so_a_imagem(self):
+        from nucleo.visao import LeitorDeCarimbo
+        from tests.test_nucleo import ClienteFalso, prancha_falsa, resposta_padrao
+
+        with TemporaryDirectory() as tmp:
+            alvo = prancha_falsa(Path(tmp) / "TeatroDeSantos-1968-003.jpg", 800, 600)
+            cliente = ClienteFalso([resposta_padrao()])
+            LeitorDeCarimbo(Config(), cliente).ler(alvo)
+            enviado = str(cliente.chamadas[0]["mensagens"])
+            self.assertNotIn("TeatroDeSantos", enviado, "o nome do arquivo não pode vazar")
+            self.assertNotIn("1968", enviado)
+
+
+if __name__ == "__main__":
+    unittest.main()

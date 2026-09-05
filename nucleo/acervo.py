@@ -58,6 +58,17 @@ class ProjetoNoAcervo:
         )
 
     @property
+    def fundo(self) -> str:
+        for leitura in self.leituras:
+            if leitura.pista_fundo:
+                return leitura.pista_fundo
+        return ""
+
+    @property
+    def divergencias(self) -> int:
+        return sum(1 for l in self.leituras if l.divergencias)
+
+    @property
     def anos(self) -> str:
         valores = sorted({l.valores.get("ano", "") for l in self.leituras if l.valores.get("ano")})
         if not valores:
@@ -160,8 +171,8 @@ def _aba_acervo(wb: Workbook, projetos: list[ProjetoNoAcervo]) -> None:
 def _aba_projetos(wb: Workbook, projetos: list[ProjetoNoAcervo]) -> None:
     ws = wb.create_sheet("Projetos")
     colunas = [
-        "Pasta", "Projeto (lido)", "Arquiteto", "Cidade", "Ano(s)",
-        "Pranchas", "Com carimbo", "%", "A revisar", "Status", "Fase",
+        "Pasta", "Fundo", "Projeto (lido)", "Arquiteto", "Cidade", "Ano(s)",
+        "Pranchas", "Com carimbo", "%", "A revisar", "Divergências", "Status", "Fase",
     ]
     ws.append(colunas)
     for celula in ws[1]:
@@ -172,6 +183,7 @@ def _aba_projetos(wb: Workbook, projetos: list[ProjetoNoAcervo]) -> None:
         pct = round(projeto.com_carimbo / projeto.pranchas * 100) if projeto.pranchas else 0
         ws.append([
             projeto.caminho_relativo,
+            projeto.fundo,
             projeto.campo_predominante("projeto"),
             projeto.campo_predominante("arquiteto"),
             projeto.campo_predominante("cidade"),
@@ -180,29 +192,33 @@ def _aba_projetos(wb: Workbook, projetos: list[ProjetoNoAcervo]) -> None:
             projeto.com_carimbo,
             pct,
             projeto.a_revisar,
+            projeto.divergencias,
             projeto.status,
             projeto.fase,
         ])
         if pct < 80:
-            ws.cell(row=ws.max_row, column=8).fill = _VERMELHO
+            ws.cell(row=ws.max_row, column=9).fill = _VERMELHO
         elif pct < 95:
-            ws.cell(row=ws.max_row, column=8).fill = _AMARELO
+            ws.cell(row=ws.max_row, column=9).fill = _AMARELO
+        if projeto.divergencias:
+            ws.cell(row=ws.max_row, column=11).fill = _VERMELHO
 
     total = sum(p.pranchas for p in projetos)
     carimbos = sum(p.com_carimbo for p in projetos)
     ws.append([])
     ws.append([
-        f"TOTAL: {len(projetos)} projeto(s)", "", "", "", "",
+        f"TOTAL: {len(projetos)} projeto(s)", "", "", "", "", "",
         total, carimbos,
         round(carimbos / total * 100) if total else 0,
-        sum(p.a_revisar for p in projetos), "", "",
+        sum(p.a_revisar for p in projetos),
+        sum(p.divergencias for p in projetos), "", "",
     ])
     for celula in ws[ws.max_row]:
         celula.font = Font(bold=True)
 
     ws.freeze_panes = "B2"
     for i, nome in enumerate(colunas, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = 38 if i <= 2 else max(11, len(nome) + 4)
+        ws.column_dimensions[get_column_letter(i)].width = 38 if i in (1, 3) else max(11, len(nome) + 4)
 
 
 def _aba_pendentes(wb: Workbook, pendentes: list[str]) -> None:

@@ -17,7 +17,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .esquema import CAMPOS, Leitura
+from .esquema import CAMPOS, CAMPOS_POR_NOME, Leitura
 
 _log = logging.getLogger("cv2.planilha")
 
@@ -25,6 +25,9 @@ LIMIAR_ATENCAO = 0.60
 LIMIAR_BOM = 0.85
 
 _VERMELHO = PatternFill("solid", fgColor="FFC7CE")
+# Azul = veio da PASTA, não do carimbo. Cor própria de propósito: você tem que
+# conseguir ver de relance o que foi lido e o que foi deduzido do caminho.
+_AZUL = PatternFill("solid", fgColor="DDEBF7")
 _AMARELO = PatternFill("solid", fgColor="FFEB9C")
 _CINZA = PatternFill("solid", fgColor="EEEEEE")
 _CABECALHO = PatternFill("solid", fgColor="1F3864")
@@ -33,9 +36,13 @@ _CABECALHO = PatternFill("solid", fgColor="1F3864")
 def _colunas() -> list[str]:
     fixas = ["Arquivo", "OK?", "Grupo/Projeto", "Carimbo?", "Confiança média"]
     campos = [c.rotulo for c in CAMPOS]
+    da_pasta = ["Fundo (pasta)", "Projeto (pasta)", "Ano (pasta)", "Divergência"]
     espelho = [f"conf. {c.rotulo}" for c in CAMPOS]
     lidos = [f"lido: {c.rotulo}" for c in CAMPOS if c.do_projeto]
-    return fixas + campos + ["Rotação", "Passes", "Nota da IA", "Erro"] + espelho + lidos
+    return (
+        fixas + campos + da_pasta
+        + ["Rotação", "Passes", "Nota da IA", "Erro"] + espelho + lidos
+    )
 
 
 def _linha(leitura: Leitura) -> list[object]:
@@ -47,6 +54,15 @@ def _linha(leitura: Leitura) -> list[object]:
         round(leitura.confianca_media, 2),
     ]
     campos = [leitura.valores.get(c.nome, "") for c in CAMPOS]
+    rotulos_divergentes = ", ".join(
+        CAMPOS_POR_NOME[n].rotulo for n in leitura.divergencias if n in CAMPOS_POR_NOME
+    )
+    da_pasta: list[object] = [
+        leitura.pista_fundo,
+        leitura.pista_projeto,
+        leitura.pista_ano,
+        f"carimbo ≠ pasta: {rotulos_divergentes}" if rotulos_divergentes else "",
+    ]
     extras: list[object] = [
         leitura.rotacao,
         leitura.passes,
@@ -55,7 +71,7 @@ def _linha(leitura: Leitura) -> list[object]:
     ]
     espelho = [round(leitura.confiancas.get(c.nome, 0.0), 2) for c in CAMPOS]
     lidos = [leitura.lidos_originais.get(c.nome, "") for c in CAMPOS if c.do_projeto]
-    return fixas + campos + extras + espelho + lidos
+    return fixas + campos + da_pasta + extras + espelho + lidos
 
 
 def _ordenar(leituras: list[Leitura]) -> list[Leitura]:
@@ -87,7 +103,8 @@ def escrever_xlsx(leituras: list[Leitura], destino: Path) -> Path:
 
     inicio_campos = 6  # 1-based: depois das 5 colunas fixas
     n_campos = len(CAMPOS)
-    inicio_espelho = inicio_campos + n_campos + 4
+    coluna_divergencia = inicio_campos + n_campos + 3
+    inicio_espelho = inicio_campos + n_campos + 8
 
     for leitura in _ordenar(leituras):
         ws.append(_linha(leitura))
@@ -95,12 +112,16 @@ def escrever_xlsx(leituras: list[Leitura], destino: Path) -> Path:
         for i, campo in enumerate(CAMPOS):
             confianca = leitura.confiancas.get(campo.nome, 0.0)
             celula = ws.cell(row=linha, column=inicio_campos + i)
-            if not str(celula.value or "").strip():
+            if campo.nome in leitura.campos_da_pasta:
+                celula.fill = _AZUL  # veio do caminho, não do carimbo
+            elif not str(celula.value or "").strip():
                 celula.fill = _CINZA
             elif confianca < LIMIAR_ATENCAO:
                 celula.fill = _VERMELHO
             elif confianca < LIMIAR_BOM:
                 celula.fill = _AMARELO
+        if leitura.divergencias:
+            ws.cell(row=linha, column=coluna_divergencia).fill = _VERMELHO
         if leitura.erro or not leitura.carimbo_encontrado:
             ws.cell(row=linha, column=4).fill = _VERMELHO
 

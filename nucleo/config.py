@@ -57,6 +57,9 @@ class Config:
     usar_cache_de_regiao: bool = True
     # Consolida os campos por projeto no fim do lote (1 chamada de texto por grupo).
     consolidar_por_projeto: bool = True
+    # A pasta (projeto/ano) preenche campo que o carimbo não deu. A pasta NUNCA
+    # é mostrada ao modelo: entra depois da leitura, marcada como outra fonte.
+    usar_pasta_como_pista: bool = True
 
     # --- Lote ---
     trabalhadores: int = 4

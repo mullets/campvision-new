@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import atualizador, eventos as mod_eventos, grupos, imagem, lote, planilha
+from . import atualizador, caminho as mod_caminho, eventos as mod_eventos, grupos, imagem, lote, planilha
 from . import relatorio_diario
 from .config import Config
 from .planilha import LIMIAR_ATENCAO
@@ -40,6 +40,7 @@ class Projeto:
     pasta: Path
     pasta_imagens: Path
     nome: str
+    raiz: Path | None = None
 
     @property
     def caminho_status(self) -> Path:
@@ -161,7 +162,9 @@ def _e_ignoravel(pasta: Path, config: Config) -> bool:
     return nome in {"catalogacao", config.pasta_acervo.strip("/"), "__MACOSX", "node_modules"}
 
 
-def descobrir(raiz: Path, config: Config, _profundidade: int = 0) -> list[Projeto]:
+def descobrir(
+    raiz: Path, config: Config, _profundidade: int = 0, _raiz: Path | None = None
+) -> list[Projeto]:
     """Acha projetos em qualquer nível abaixo da raiz.
 
     Regra: uma pasta que tem imagens (direto ou numa subpasta JPG/) É um
@@ -183,9 +186,9 @@ def descobrir(raiz: Path, config: Config, _profundidade: int = 0) -> list[Projet
             continue
         pasta_imagens = _pasta_de_imagens(pasta, config)
         if pasta_imagens is not None:
-            achados.append(Projeto(pasta, pasta_imagens, pasta.name))
+            achados.append(Projeto(pasta, pasta_imagens, pasta.name, _raiz or raiz))
             continue  # é projeto: não desce mais
-        achados.extend(descobrir(pasta, config, _profundidade + 1))
+        achados.extend(descobrir(pasta, config, _profundidade + 1, _raiz or raiz))
     return achados
 
 
@@ -241,6 +244,16 @@ def processar(
             _, c_in, c_out = grupos.consolidar(resultado.leituras, cliente)
             t_in += c_in
             t_out += c_out
+
+        # A pasta entra AQUI: depois da leitura e da consolidação, nunca antes.
+        if config.usar_pasta_como_pista and resultado.leituras:
+            pista = mod_caminho.extrair(projeto.pasta, projeto.raiz)
+            preenchidos, divergentes = mod_caminho.aplicar(resultado.leituras, pista)
+            if preenchidos or divergentes:
+                _log.info(
+                    "Pasta %s: %d campo(s) preenchidos pela pasta, %d divergência(s).",
+                    projeto.nome, preenchidos, divergentes,
+                )
 
         custo = config.custo_estimado_usd(t_in, t_out)
         destino = projeto.pasta / "catalogacao"

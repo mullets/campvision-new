@@ -47,8 +47,8 @@ planilha, corrigida em cinco segundos — nunca mais uma prancha em pasta errada
    nunca aplica valor que nenhuma prancha leu.
 
 Cada campo vem com **confiança própria**. Na planilha, célula vermelha é abaixo
-de 0.60, amarela abaixo de 0.85, cinza é campo ausente no carimbo. Você revisa
-o vermelho, não o lote.
+de 0.60, amarela abaixo de 0.85, cinza é campo ausente no carimbo e **azul veio
+da pasta, não do carimbo**. Você revisa o vermelho, não o lote.
 
 ## Metadados dentro do arquivo
 
@@ -208,7 +208,7 @@ Escrita em `_catalogacao/acervo.xlsx` ao fim de cada rodada, com três abas:
 | Aba | O quê |
 |---|---|
 | **Acervo** | uma linha por prancha do acervo inteiro, com a pasta de origem, filtro ligado e as mesmas cores de confiança |
-| **Projetos** | uma linha por projeto: pranchas, cobertura de carimbo, campos a revisar, status e fase — com totais no rodapé |
+| **Projetos** | uma linha por projeto: fundo, pranchas, cobertura de carimbo, campos a revisar, divergências, status e fase — com totais no rodapé |
 | **Pendentes** | o que ainda não passou pela leitura |
 
 Ela é **remontada dos `catalogacao/leituras.json` de cada projeto**, nunca da
@@ -241,6 +241,45 @@ fase nova e a corrente segue funcionando:
 ```
 
 Mudou o nome da fase no config? Rode `--marcar-fase` de novo.
+
+### A pasta como segunda fonte
+
+A estrutura de pastas já carrega projeto, ano e fundo. O app usa isso — com uma
+regra rígida de proveniência:
+
+**A pasta nunca é mostrada ao modelo de visão.** Se ele souber que a pasta se
+chama `TeatroDeSantos-1968`, passa a *confirmar* isso no carimbo em vez de
+transcrever o que está escrito, e a fidelidade da transcrição é exatamente o que
+esta reescrita comprou. A leitura é cega; a pasta entra depois, etiquetada como
+outra fonte. Há teste garantindo que nem o nome do arquivo vaza para o prompt.
+
+Com isso a pasta serve para três coisas:
+
+1. **Conferir.** Carimbo dizendo "EDIFÍCIO COPAN" dentro de
+   `1968/TeatroDeSantos` acende a coluna **Divergência**. Quase sempre é
+   prancha na pasta errada — achado que antes só aparecia meses depois.
+2. **Preencher o que faltou.** Campo ilegível ganha o valor da pasta, com
+   confiança 0.5 e **célula azul** na planilha. Você vê de relance o que foi
+   lido e o que foi deduzido do caminho. Valor do carimbo *sempre* vence.
+3. **Situar.** As colunas `Fundo (pasta)`, `Projeto (pasta)` e `Ano (pasta)`
+   acompanham cada prancha, e o Fundo aparece na aba Projetos do acervo.
+
+O que ele entende do caminho:
+
+| Pasta | Projeto | Ano | Fundo |
+|---|---|---|---|
+| `Fundo OCG/1968/TeatroDeSantos` | Teatro De Santos | 1968 | Fundo OCG |
+| `OCG-TeatroDeSantos-1968` | Teatro De Santos | 1968 | OCG |
+| `SBU_Eletropaulo_CARMONA` | Eletropaulo CARMONA | — | SBU |
+| `DEST3524 CasaDaPraia 1972` | Casa Da Praia | 1972 | — |
+| `Acervo/Projetos/1972/Casa da Praia` | Casa da Praia | 1972 | — |
+
+Ele descarta código de digitalização (`DEST3524`), separa CamelCase, reconhece
+sigla de fundo no prefixo e ignora pasta estrutural (`JPG`, `TIF`, `imagens`,
+`Acervo`, `Projetos`) — inclusive quando ela é a folha do caminho. Ano só entre
+1800 e 2099, para `Casa 0350` não virar ano.
+
+Para desligar: `"usar_pasta_como_pista": false`.
 
 ## Relatórios
 
@@ -303,7 +342,7 @@ sem sobrescrever seu trabalho.
 Assim você desenvolve num Mac, dá push, e os outros pegam a versão nova sozinhos.
 Para desligar: `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 99 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 123 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ## Montar o ambiente
@@ -439,7 +478,7 @@ código já isola a chamada em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-99 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+123 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora. Rodam também no GitHub Actions a cada push.
 
 ## Segurança do lote

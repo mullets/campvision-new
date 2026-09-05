@@ -71,6 +71,13 @@ class Leitura:
     lidos_originais: dict[str, str] = field(default_factory=dict)
     ano_do_projeto: str = ""
     suspeita_grupo: bool = False
+    # Pistas tiradas do caminho da pasta (nucleo/caminho.py) — segunda fonte,
+    # sempre etiquetada: nunca se confunde com o que foi lido do carimbo.
+    pista_projeto: str = ""
+    pista_ano: str = ""
+    pista_fundo: str = ""
+    campos_da_pasta: list[str] = field(default_factory=list)
+    divergencias: list[str] = field(default_factory=list)
 
     @property
     def confianca_media(self) -> float:
@@ -101,6 +108,11 @@ class Leitura:
             "lidos_originais": self.lidos_originais,
             "ano_do_projeto": self.ano_do_projeto,
             "suspeita_grupo": self.suspeita_grupo,
+            "pista_projeto": self.pista_projeto,
+            "pista_ano": self.pista_ano,
+            "pista_fundo": self.pista_fundo,
+            "campos_da_pasta": self.campos_da_pasta,
+            "divergencias": self.divergencias,
         }
 
     @classmethod
@@ -122,6 +134,11 @@ class Leitura:
             lidos_originais=dados.get("lidos_originais", {}),
             ano_do_projeto=dados.get("ano_do_projeto", ""),
             suspeita_grupo=dados.get("suspeita_grupo", False),
+            pista_projeto=dados.get("pista_projeto", ""),
+            pista_ano=dados.get("pista_ano", ""),
+            pista_fundo=dados.get("pista_fundo", ""),
+            campos_da_pasta=dados.get("campos_da_pasta", []),
+            divergencias=dados.get("divergencias", []),
         )
 
 
