@@ -1,0 +1,232 @@
+"""Testes da varredura recursiva, do marcador de fase e da planilha única."""
+
+from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from openpyxl import load_workbook
+
+from nucleo import acervo, vigia
+from nucleo.config import Config
+from tests.test_nucleo import ClienteFalso, prancha_falsa, resposta_padrao
+
+
+def com_imagens(pasta: Path, n: int = 2, subpasta: str | None = "JPG") -> Path:
+    destino = pasta / subpasta if subpasta else pasta
+    destino.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        prancha_falsa(destino / f"{pasta.name}-{i:03d}.jpg", 700, 500)
+    return pasta
+
+
+class TestDescobertaRecursiva(unittest.TestCase):
+    def test_acha_projeto_em_subpasta_de_subpasta(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "Acervo OCG" / "1968" / "TeatroDeSantos")
+            com_imagens(raiz / "Acervo SBU" / "CasaDaPraia")
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual(
+                sorted(p.nome for p in achados), ["CasaDaPraia", "TeatroDeSantos"]
+            )
+
+    def test_nao_trata_jpg_e_tif_como_projetos_irmaos(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = raiz / "TeatroDeSantos"
+            com_imagens(projeto, 2, "JPG")
+            com_imagens(projeto, 2, "TIF")
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual(len(achados), 1)
+            self.assertEqual(achados[0].nome, "TeatroDeSantos")
+            self.assertEqual(achados[0].pasta_imagens.name, "JPG")
+
+    def test_projeto_com_imagem_solta_na_raiz_da_pasta(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "CasaSolta", 2, subpasta=None)
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual([p.nome for p in achados], ["CasaSolta"])
+            self.assertEqual(achados[0].pasta_imagens.name, "CasaSolta")
+
+    def test_ignora_pastas_de_saida_e_ocultas(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "Projeto")
+            com_imagens(raiz / "_catalogacao")
+            com_imagens(raiz / ".oculta")
+            com_imagens(raiz / "Projeto2" / "catalogacao")
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual([p.nome for p in achados], ["Projeto"])
+
+    def test_respeita_a_profundidade_maxima(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "a" / "b" / "c" / "d" / "e" / "f" / "Fundo")
+            self.assertEqual(vigia.descobrir(raiz, Config(profundidade_maxima=2)), [])
+            self.assertEqual(len(vigia.descobrir(raiz, Config(profundidade_maxima=9))), 1)
+
+    def test_pasta_so_de_documentos_nao_vira_projeto(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            (raiz / "Contratos").mkdir()
+            (raiz / "Contratos" / "leia.txt").write_text("nada")
+            self.assertEqual(vigia.descobrir(raiz, Config()), [])
+
+
+class TestMarcadorDeFase(unittest.TestCase):
+    def test_carimba_fase_sem_mexer_no_status(self):
+        with TemporaryDirectory() as tmp:
+            pasta = com_imagens(Path(tmp) / "Projeto")
+            (pasta / "status.json").write_text(
+                json.dumps({"status": "campvision_concluido", "enviado_por": "windows"}),
+                encoding="utf-8",
+            )
+            vigia.marcar_fase(pasta, Config())
+            dados = json.loads((pasta / "status.json").read_text())
+            self.assertEqual(dados["fase"], "organizado_v2")
+            self.assertIn("fase_em", dados)
+            # o semáforo que o QNAP lê continua intocado
+            self.assertEqual(dados["status"], "campvision_concluido")
+            self.assertEqual(dados["enviado_por"], "windows")
+
+    def test_cria_status_se_nao_houver(self):
+        with TemporaryDirectory() as tmp:
+            pasta = com_imagens(Path(tmp) / "Projeto")
+            vigia.marcar_fase(pasta, Config())
+            dados = json.loads((pasta / "status.json").read_text())
+            self.assertEqual(dados["fase"], "organizado_v2")
+            self.assertEqual(dados["status"], "enviado_windows")
+
+    def test_status_corrompido_e_substituido_sem_travar(self):
+        with TemporaryDirectory() as tmp:
+            pasta = com_imagens(Path(tmp) / "Projeto")
+            (pasta / "status.json").write_text("{quebrado")
+            vigia.marcar_fase(pasta, Config())
+            self.assertEqual(json.loads((pasta / "status.json").read_text())["fase"], "organizado_v2")
+
+    def test_processar_carimba_a_fase(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "Projeto", 2)
+            cfg = Config(trabalhadores=1)
+            projeto = vigia.varrer(raiz, cfg)[0]
+            vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
+            dados = json.loads((projeto.pasta / "status.json").read_text())
+            self.assertEqual(dados["fase"], "organizado_v2")
+            self.assertEqual(dados["status"], "campvision_concluido")
+
+
+class TestPlanilhaDoAcervo(unittest.TestCase):
+    def _acervo_processado(self, raiz: Path) -> Config:
+        com_imagens(raiz / "OCG" / "TeatroDeSantos", 3)
+        com_imagens(raiz / "OCG" / "CasaDaPraia", 2)
+        com_imagens(raiz / "Pendente", 2)
+        cfg = Config(trabalhadores=1, consolidar_por_projeto=False, pasta_vigiada=str(raiz))
+        for projeto in vigia.varrer(raiz, cfg):
+            if projeto.nome == "Pendente":
+                continue
+            vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
+        return cfg
+
+    def test_junta_todos_os_projetos_numa_planilha(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cfg = self._acervo_processado(raiz)
+            caminho, projetos, pranchas = acervo.escrever(raiz, cfg)
+            self.assertEqual(projetos, 2)
+            self.assertEqual(pranchas, 5)
+            self.assertTrue(caminho.exists())
+            self.assertEqual(caminho.parent.name, "_catalogacao")
+
+    def test_tem_as_tres_abas(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cfg = self._acervo_processado(raiz)
+            caminho, _, _ = acervo.escrever(raiz, cfg)
+            wb = load_workbook(caminho)
+            self.assertEqual(wb.sheetnames, ["Acervo", "Projetos", "Pendentes"])
+
+    def test_aba_acervo_traz_a_pasta_de_cada_prancha(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cfg = self._acervo_processado(raiz)
+            caminho, _, _ = acervo.escrever(raiz, cfg)
+            ws = load_workbook(caminho)["Acervo"]
+            pastas = {ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)}
+            self.assertIn(str(Path("OCG") / "TeatroDeSantos"), pastas)
+            self.assertEqual(ws.max_row, 6)  # 5 pranchas + cabeçalho
+
+    def test_aba_projetos_totaliza(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cfg = self._acervo_processado(raiz)
+            caminho, _, _ = acervo.escrever(raiz, cfg)
+            ws = load_workbook(caminho)["Projetos"]
+            ultima = [c.value for c in ws[ws.max_row]]
+            self.assertIn("TOTAL: 2 projeto(s)", str(ultima[0]))
+            self.assertEqual(ultima[5], 5)
+
+    def test_aba_pendentes_lista_o_que_falta(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cfg = self._acervo_processado(raiz)
+            caminho, _, _ = acervo.escrever(raiz, cfg)
+            ws = load_workbook(caminho)["Pendentes"]
+            valores = [ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)]
+            self.assertIn("Pendente", valores)
+
+    def test_remonta_sem_gastar_api(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cfg = self._acervo_processado(raiz)
+            acervo.escrever(raiz, cfg)
+            # segunda montagem, com um cliente que explodiria se fosse chamado
+            class ClienteProibido:
+                def chamar(self, *_a, **_k):
+                    raise AssertionError("a planilha do acervo não pode chamar a API")
+
+            _, projetos, pranchas = acervo.escrever(raiz, cfg)
+            self.assertEqual((projetos, pranchas), (2, 5))
+
+    def test_acervo_vazio_nao_quebra(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            caminho, projetos, pranchas = acervo.escrever(raiz, Config(pasta_vigiada=str(raiz)))
+            self.assertEqual((projetos, pranchas), (0, 0))
+            wb = load_workbook(caminho)
+            self.assertIn("nenhuma", str(wb["Pendentes"]["A2"].value).lower())
+
+    def test_planilha_do_acervo_e_ignorada_na_varredura_seguinte(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cfg = self._acervo_processado(raiz)
+            acervo.escrever(raiz, cfg)
+            nomes = {p.nome for p in vigia.descobrir(raiz, cfg)}
+            self.assertNotIn("_catalogacao", nomes)
+
+
+class TestRodadaCompleta(unittest.TestCase):
+    def test_uma_rodada_processa_subpastas_e_monta_o_acervo(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            estado = raiz / "_estado"
+            com_imagens(raiz / "Fundo A" / "Projeto 1", 2)
+            com_imagens(raiz / "Fundo A" / "Projeto 2", 2)
+            com_imagens(raiz / "Fundo B" / "1972" / "Projeto 3", 2)
+            cfg = Config(trabalhadores=2, pasta_vigiada=str(raiz), auto_atualizar=False)
+            v = vigia.Vigia(cfg, ClienteFalso([resposta_padrao()]), estado)
+            self.assertEqual(v.uma_rodada(), 3)
+            planilha_geral = raiz / "_catalogacao" / "acervo.xlsx"
+            self.assertTrue(planilha_geral.exists())
+            ws = load_workbook(planilha_geral)["Acervo"]
+            self.assertEqual(ws.max_row, 7)  # 6 pranchas + cabeçalho
+            # e cada projeto tem a sua planilha própria
+            self.assertTrue((raiz / "Fundo A" / "Projeto 1" / "catalogacao" / "catalogacao.xlsx").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

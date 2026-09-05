@@ -138,6 +138,8 @@ python vigia.py --status                   # o que está pendente agora
 python vigia.py --uma-vez                  # processa e sai (para cron)
 python vigia.py --relatorio 2026-09-03     # regera o relatório de um dia
 python vigia.py --relatorio-geral          # acervo inteiro desde o começo
+python vigia.py --planilha-geral           # planilha única de todo o acervo
+python vigia.py --marcar-fase              # carimba a fase nova em todos
 python vigia.py --identidade               # confere o crédito que vai nas imagens
 ```
 
@@ -171,6 +173,74 @@ tail -f ~/.campvision2/vigia.log       # acompanhar
 ```
 
 Para ver o painel, pare o serviço e rode `python vigia.py` na mão.
+
+### Rodar na raiz do acervo
+
+Aponte o vigia para a **raiz** e ele acha os projetos em qualquer nível abaixo:
+
+```
+/Volumes/acervos/
+├── Fundo OCG/
+│   ├── 1968/TeatroDeSantos/JPG/      ← projeto
+│   └── 1972/CasaDaPraia/JPG/         ← projeto
+├── Fundo SBU/EletropauloCARMONA/     ← projeto (imagens soltas)
+└── _catalogacao/acervo.xlsx          ← planilha única de tudo
+```
+
+A regra de corte: **pasta que tem imagens É um projeto, e a busca não desce
+mais ali dentro.** Sem isso, `Projeto/JPG` e `Projeto/TIF` virariam dois
+projetos irmãos — que é o erro clássico desse tipo de varredura. Pastas de
+saída (`catalogacao`, `_catalogacao`), ocultas e as que começam com `_` ficam
+de fora. Profundidade máxima em `profundidade_maxima` (padrão 5).
+
+Cada projeto ganha sua planilha em `catalogacao/`, e a raiz ganha uma planilha
+única com o acervo inteiro:
+
+```bash
+python vigia.py --status           # a árvore que ele enxerga, com o que falta
+python vigia.py --planilha-geral   # monta a planilha única agora
+```
+
+### A planilha única do acervo
+
+Escrita em `_catalogacao/acervo.xlsx` ao fim de cada rodada, com três abas:
+
+| Aba | O quê |
+|---|---|
+| **Acervo** | uma linha por prancha do acervo inteiro, com a pasta de origem, filtro ligado e as mesmas cores de confiança |
+| **Projetos** | uma linha por projeto: pranchas, cobertura de carimbo, campos a revisar, status e fase — com totais no rodapé |
+| **Pendentes** | o que ainda não passou pela leitura |
+
+Ela é **remontada dos `catalogacao/leituras.json` de cada projeto**, nunca da
+API. Rode quantas vezes quiser, a qualquer hora, sem custo nenhum: ela sempre
+reflete o estado atual do acervo.
+
+### O marcador de fase
+
+Todo projeto que passa por esta versão recebe `"fase": "organizado_v2"` no
+`status.json`, com a data. Para carimbar os que já foram processados antes:
+
+```bash
+python vigia.py --marcar-fase
+```
+
+Isso vai numa **chave própria**, não no `status`. Se o marcador substituísse o
+valor do semáforo, o watcher do QNAP — que procura exatamente por
+`campvision_concluido` — pararia de sincronizar. Assim você tem o marcador da
+fase nova e a corrente segue funcionando:
+
+```json
+{
+  "status": "campvision_concluido",
+  "criado_por": "campvision2",
+  "campvision2_pranchas": 4,
+  "campvision2_com_carimbo": 4,
+  "fase": "organizado_v2",
+  "fase_em": "2026-09-05T12:00:52"
+}
+```
+
+Mudou o nome da fase no config? Rode `--marcar-fase` de novo.
 
 ## Relatórios
 
@@ -233,7 +303,7 @@ sem sobrescrever seu trabalho.
 Assim você desenvolve num Mac, dá push, e os outros pegam a versão nova sozinhos.
 Para desligar: `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 80 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 99 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ## Montar o ambiente
@@ -335,7 +405,8 @@ python cli.py /caminho/da/pasta        # modo automático, para o LaunchAgent
 | `ModuleNotFoundError: anthropic` | ambiente virtual não ativado — falta o `source .venv/bin/activate` |
 | Build na barra de título não é o que você instalou | está rodando de outra pasta (Lixeira, Downloads antigo) |
 | Lote não reprocessa nada | checkpoint da execução anterior — apague `campvision2_checkpoint.jsonl` da pasta |
-| Vigia não acha projeto nenhum | `status.json` não está como `enviado_windows`; confira com `python vigia.py --status` |
+| Vigia não acha projeto nenhum | confira com `python vigia.py --status`, que mostra a árvore inteira e o que está pendente |
+| Projeto fundo demais na árvore | aumente `profundidade_maxima` no config (padrão 5) |
 | Vigia no ar mas parado | pasta SMB caiu — ele avisa no log e segue tentando, sem morrer |
 | "não é um repositório git" | falta `git remote add origin ...` — a auto-atualização fica desligada até lá |
 | "falta preencher identidade.site" | preencha `identidade_site` no config antes de publicar imagens |
@@ -368,7 +439,7 @@ código já isola a chamada em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-80 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+99 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora. Rodam também no GitHub Actions a cada push.
 
 ## Segurança do lote

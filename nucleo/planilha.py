@@ -9,6 +9,7 @@ arquivo depois de você editar.
 from __future__ import annotations
 
 import csv
+import json
 import logging
 from pathlib import Path
 
@@ -126,6 +127,28 @@ def escrever_csv(leituras: list[Leitura], destino: Path) -> Path:
             escritor.writerow(_linha(leitura))
     _log.info("CSV escrito: %s", destino)
     return destino
+
+
+def escrever_json(leituras: list[Leitura], destino: Path) -> Path:
+    """Leituras finais em JSON — a fonte para remontar a planilha do acervo."""
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(
+        json.dumps([l.para_dict() for l in leituras], ensure_ascii=False, indent=1),
+        encoding="utf-8",
+    )
+    return destino
+
+
+def ler_json(caminho: Path) -> list[Leitura]:
+    """Lê o JSON de leituras. Arquivo corrompido devolve lista vazia com aviso."""
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as erro:
+        _log.warning("Não consegui ler %s: %s", caminho, erro)
+        return []
+    if not isinstance(dados, list):
+        return []
+    return [Leitura.de_dict(d) for d in dados if isinstance(d, dict)]
 
 
 def escrever_relatorio(leituras: list[Leitura], destino: Path, custo_usd: float = 0.0) -> Path:

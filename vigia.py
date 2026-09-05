@@ -6,6 +6,8 @@
     python vigia.py --sem-painel             # log corrido, para LaunchAgent
     python vigia.py --relatorio 2026-09-03   # regera o relatório de um dia
     python vigia.py --relatorio-geral         # acervo inteiro desde o começo
+    python vigia.py --planilha-geral          # planilha única de todo o acervo
+    python vigia.py --marcar-fase             # carimba a fase nova em todos
     python vigia.py --identidade              # confere o crédito que vai nas imagens
     python vigia.py --status                 # o que está pendente agora, sem processar
 
@@ -109,11 +111,18 @@ def _comando_status(config: Config) -> int:
     if not raiz.is_dir():
         print(f"Pasta vigiada indisponível: {raiz}", file=sys.stderr)
         return 1
+    todos = mod_vigia.descobrir(raiz, config)
     pendentes = mod_vigia.varrer(raiz, config)
+    nomes_pendentes = {p.pasta for p in pendentes}
     print(f"Pasta: {raiz}")
-    print(f"Pendentes: {len(pendentes)}")
-    for projeto in pendentes:
-        print(f"  {projeto.nome}  ({projeto.pasta_imagens.name}/)")
+    print(f"Projetos encontrados: {len(todos)}   pendentes: {len(pendentes)}")
+    for projeto in todos:
+        try:
+            relativo = projeto.pasta.relative_to(raiz)
+        except ValueError:
+            relativo = projeto.pasta
+        marca = "PENDENTE" if projeto.pasta in nomes_pendentes else "ok"
+        print(f"  [{marca:>8}] {relativo}  ({projeto.pasta_imagens.name}/)")
     if config.auto_atualizar:
         _, mensagem = atualizador.verificar(RAIZ_REPO)
         print(f"Código: {mensagem}")
@@ -135,6 +144,37 @@ def _comando_identidade(config: Config) -> int:
     if faltando:
         print(f"\n  ATENÇÃO: falta preencher {', '.join(faltando)} em {CAMINHO_CONFIG}")
         return 1
+    return 0
+
+
+def _comando_planilha_geral(config: Config) -> int:
+    from nucleo import acervo as mod_acervo
+
+    if not config.pasta_vigiada:
+        print("Nenhuma pasta definida. Rode com --pasta /caminho.", file=sys.stderr)
+        return 1
+    raiz = Path(config.pasta_vigiada)
+    if not raiz.is_dir():
+        print(f"Pasta indisponível: {raiz}", file=sys.stderr)
+        return 1
+    caminho, projetos, pranchas = mod_acervo.escrever(raiz, config)
+    print(f"{projetos} projeto(s), {pranchas} prancha(s)")
+    print(f"Planilha: {caminho}")
+    return 0
+
+
+def _comando_marcar_fase(config: Config) -> int:
+    if not config.pasta_vigiada:
+        print("Nenhuma pasta definida. Rode com --pasta /caminho.", file=sys.stderr)
+        return 1
+    raiz = Path(config.pasta_vigiada)
+    if not raiz.is_dir():
+        print(f"Pasta indisponível: {raiz}", file=sys.stderr)
+        return 1
+    projetos = mod_vigia.descobrir(raiz, config)
+    for projeto in projetos:
+        mod_vigia.marcar_fase(projeto.pasta, config)
+    print(f"Fase '{config.fase_organizacao}' carimbada em {len(projetos)} projeto(s).")
     return 0
 
 
@@ -171,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--status", action="store_true", help="Mostra o pendente e sai")
     p.add_argument("--relatorio", metavar="AAAA-MM-DD", help="Regera o relatório de um dia")
     p.add_argument("--relatorio-geral", action="store_true", help="Acervo inteiro desde o começo")
+    p.add_argument("--planilha-geral", action="store_true", help="Planilha única de todo o acervo")
+    p.add_argument("--marcar-fase", action="store_true", help="Carimba a fase nova em todos os projetos")
     p.add_argument("--identidade", action="store_true", help="Mostra o crédito gravado nas imagens")
     p.add_argument("--sem-auto-atualizar", action="store_true")
     p.add_argument("--intervalo", type=int, help="Segundos entre varreduras")
@@ -190,6 +232,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.identidade:
         return _comando_identidade(config)
+    if args.planilha_geral:
+        return _comando_planilha_geral(config)
+    if args.marcar_fase:
+        return _comando_marcar_fase(config)
     if args.relatorio_geral:
         return _comando_relatorio_geral(config)
     if args.relatorio:

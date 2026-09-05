@@ -81,6 +81,14 @@ class Config:
     criar_status_ausente: bool = True
     status_pronto: str = "enviado_windows"
     status_concluido: str = "campvision_concluido"
+    # Marcador da fase nova de organização. Fica numa chave PRÓPRIA do
+    # status.json (`fase`), não no `status` — assim o watcher do QNAP, que
+    # procura por status_concluido, continua reconhecendo o arquivo.
+    fase_organizacao: str = "organizado_v2"
+    # Busca recursiva: projeto pode estar em subpasta de subpasta.
+    profundidade_maxima: int = 5
+    # Onde a planilha única do acervo é escrita, relativo à raiz vigiada.
+    pasta_acervo: str = "_catalogacao"
     # Aplica a Fase 2 sozinho ao terminar a leitura. Padrão FALSE de propósito:
     # o ponto do redesenho é você revisar a planilha antes de mexer em arquivo.
     aplicar_automaticamente: bool = False

@@ -131,26 +131,79 @@ def garantir_status(pasta: Path, config: Config) -> str:
     return config.status_pronto
 
 
-def varrer(raiz: Path, config: Config) -> list[Projeto]:
-    """Lista os projetos prontos para processar, em ordem de chegada."""
-    if not raiz.is_dir():
+def marcar_fase(pasta: Path, config: Config, extra: dict | None = None) -> None:
+    """Carimba `fase` no status.json — o marcador de que passou por esta versão.
+
+    Fica numa chave própria de propósito: mexer no `status` quebraria o watcher
+    do QNAP, que procura exatamente por `status_concluido`.
+    """
+    caminho = pasta / NOME_STATUS
+    dados: dict = {}
+    if caminho.exists():
+        try:
+            carregado = json.loads(caminho.read_text(encoding="utf-8"))
+            if isinstance(carregado, dict):
+                dados = carregado
+        except (json.JSONDecodeError, OSError):
+            dados = {}
+    dados["fase"] = config.fase_organizacao
+    dados["fase_em"] = datetime.now().isoformat(timespec="seconds")
+    dados.update(extra or {})
+    dados.setdefault("status", config.status_pronto)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _e_ignoravel(pasta: Path, config: Config) -> bool:
+    nome = pasta.name
+    if nome.startswith(".") or nome.startswith("_"):
+        return True
+    return nome in {"catalogacao", config.pasta_acervo.strip("/"), "__MACOSX", "node_modules"}
+
+
+def descobrir(raiz: Path, config: Config, _profundidade: int = 0) -> list[Projeto]:
+    """Acha projetos em qualquer nível abaixo da raiz.
+
+    Regra: uma pasta que tem imagens (direto ou numa subpasta JPG/) É um
+    projeto — e a busca NÃO desce mais ali dentro. Isso evita o erro clássico
+    de tratar `Projeto/JPG` e `Projeto/TIF` como dois projetos irmãos.
+    """
+    if not raiz.is_dir() or _profundidade > config.profundidade_maxima:
         return []
-    achados: list[tuple[float, Projeto]] = []
-    for pasta in raiz.iterdir():
-        if not pasta.is_dir() or pasta.name.startswith("."):
+
+    achados: list[Projeto] = []
+    try:
+        filhos = sorted(raiz.iterdir(), key=lambda p: p.name.lower())
+    except (PermissionError, OSError) as erro:
+        _log.warning("Não consegui listar %s: %s", raiz, erro)
+        return []
+
+    for pasta in filhos:
+        if not pasta.is_dir() or _e_ignoravel(pasta, config):
             continue
         pasta_imagens = _pasta_de_imagens(pasta, config)
-        if pasta_imagens is None:
-            continue  # sem imagem não é projeto: não cria status à toa
-        status = garantir_status(pasta, config)
+        if pasta_imagens is not None:
+            achados.append(Projeto(pasta, pasta_imagens, pasta.name))
+            continue  # é projeto: não desce mais
+        achados.extend(descobrir(pasta, config, _profundidade + 1))
+    return achados
+
+
+def varrer(raiz: Path, config: Config) -> list[Projeto]:
+    """Lista os projetos PRONTOS para processar, em ordem de chegada."""
+    if not raiz.is_dir():
+        return []
+    prontos: list[tuple[float, Projeto]] = []
+    for projeto in descobrir(raiz, config):
+        status = garantir_status(projeto.pasta, config)
         if config.exigir_status_json:
             if status != config.status_pronto:
                 continue
         else:
-            if status == config.status_concluido or (pasta / NOME_PLANILHA).exists():
+            if status == config.status_concluido or (projeto.pasta / NOME_PLANILHA).exists():
                 continue
-        achados.append((pasta.stat().st_mtime, Projeto(pasta, pasta_imagens, pasta.name)))
-    return [p for _, p in sorted(achados, key=lambda item: item[0])]
+        prontos.append((projeto.pasta.stat().st_mtime, projeto))
+    return [p for _, p in sorted(prontos, key=lambda item: item[0])]
 
 
 def processar(
@@ -194,6 +247,9 @@ def processar(
         planilha.escrever_xlsx(resultado.leituras, destino / NOME_PLANILHA)
         planilha.escrever_csv(resultado.leituras, destino / "catalogacao.csv")
         planilha.escrever_relatorio(resultado.leituras, destino / "relatorio.txt", custo)
+        # Leituras finais (já consolidadas) em JSON: é daqui que a planilha
+        # única do acervo é remontada, sem gastar API de novo.
+        planilha.escrever_json(resultado.leituras, destino / "leituras.json")
 
         evento.pranchas = len(resultado.leituras)
         evento.com_carimbo = sum(1 for l in resultado.leituras if l.carimbo_encontrado)
@@ -219,6 +275,7 @@ def processar(
                     "campvision2_a_revisar": evento.campos_a_revisar,
                 },
             )
+            marcar_fase(projeto.pasta, config)
             _log.info(
                 "Projeto %s: %d prancha(s), %d com carimbo, US$ %.2f.",
                 projeto.nome, evento.pranchas, evento.com_carimbo, custo,
@@ -338,9 +395,24 @@ class Vigia:
             self._contabilizar(evento)
             feitos += 1
             self.estado.fila = max(0, self.estado.fila - 1)
+
+        if feitos:
+            self.atualizar_planilha_do_acervo()
         self.estado.situacao = "vigiando"
         self.estado.projeto_atual = ""
         return feitos
+
+    def atualizar_planilha_do_acervo(self) -> None:
+        """Reescreve a planilha única da raiz. Não gasta API: remonta dos JSONs."""
+        from . import acervo as mod_acervo
+
+        try:
+            self.estado.situacao = "montando planilha do acervo"
+            _, projetos, pranchas = mod_acervo.escrever(Path(self.config.pasta_vigiada), self.config)
+            self.estado.anotar(f"planilha do acervo: {projetos} projeto(s), {pranchas} prancha(s)")
+        except Exception as erro:  # noqa: BLE001 - não pode derrubar o vigia
+            _log.error("Falha ao montar a planilha do acervo: %s", erro)
+            self.estado.anotar(f"planilha do acervo falhou: {erro}")
 
     def rodar(self, ao_desenhar=None) -> None:
         """Laço infinito até cancelar. `ao_desenhar` recebe o EstadoVigia."""
