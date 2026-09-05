@@ -1,63 +1,77 @@
 # CAMP Vision 2
 
 Catalogação de pranchas de arquitetura a partir do carimbo, usando um modelo de
-visão. Reescrita enxuta do CAMP Vision.
+visão. Lê o carimbo, monta a planilha, marca o que precisa de revisão humana e
+grava o crédito da CAMP dentro de cada imagem.
 
-## O que mudou, e por quê
+Roda como aplicativo de janela, como comando de terminal ou como serviço que
+vigia uma pasta sozinho.
 
-O app antigo gastou meses em uma pergunta só: **onde está o carimbo?** YOLO,
-busca por contorno, fusão de caixas, quatro rotações, limiar de conteúdo,
-resolução de busca separada da de verificação — cinco causas raiz diferentes
-para o mesmo arquivo de teste. Nada disso existe aqui. O mesmo modelo que lê o
-carimbo é quem o localiza, e ele lê texto girado, manuscrito e tabela
-institucional sem detector nenhum.
+---
 
-**O que morreu:** YOLO/ultralytics, torch, OpenCV, Tesseract, o pré-processamento
-de OCR, o banco SQLite de conhecimento, a quarentena de grafias, `unificar_grafias`,
-a moda de ano por grupo, a correção de orientação por heurística, `imagecodecs`
-e o pin `numpy<2`. Dependências: **anthropic, Pillow, openpyxl**. Só.
+## Índice
 
-**O que sobreviveu, porque provou valor:** log com o nome do arquivo em toda
-linha (`nucleo/registro.py`), cancelamento que cancela de verdade, ordenação da
-planilha por projeto e folha, e a atribuição institucional no Copyright.
+- [Começar](#começar) — ambiente, chave, primeira leitura
+- [Como funciona](#como-funciona) — as duas fases, a leitura, a pasta, os metadados
+- [Modo automático](#modo-automático) — vigia, acervo inteiro, serviço do macOS
+- [Relatórios](#relatórios)
+- [GitHub e auto-atualização](#github-e-auto-atualização)
+- [Referência](#referência) — comandos, configuração, custo
+- [Se der errado](#se-der-errado)
 
-## As duas fases
+---
 
-**Fase 1 — Ler.** Lê os carimbos e escreve `catalogacao.xlsx`, `catalogacao.csv`
-e `relatorio.txt` na própria pasta. **Não move, não renomeia, não apaga nada.**
+## Começar
 
-**Fase 2 — Aplicar.** Você revisa a planilha; ela vira a fonte da verdade. O app
-copia os arquivos para `<pasta>_catalogado/{ano}/{projeto}/` com o nome final e
-grava EXIF. Os originais ficam onde estão.
+### 1. Python 3.10 ou mais novo
 
-Separar as duas é o ponto do redesenho: leitura errada vira célula errada na
-planilha, corrigida em cinco segundos — nunca mais uma prancha em pasta errada.
+O Python que vem com o macOS não serve. Confira:
 
-## Como a leitura funciona
+```bash
+python3 --version
+```
 
-1. **Cache de região.** Pranchas do mesmo projeto têm o carimbo no mesmo lugar.
-   Achou na primeira, as próximas vão direto ao recorte: 1 chamada em vez de 2.
-2. **Página inteira reduzida.** O modelo devolve os campos **e** a região do
-   carimbo em coordenadas normalizadas.
-3. **Segundo passe.** Se a confiança média ficou abaixo de 0.75, recorta aquela
-   região na resolução **original** e relê só ela.
-4. **Consolidação por projeto.** No fim do lote, uma chamada de texto por grupo
-   com todos os carimbos lado a lado decide a grafia canônica. É isto que
-   resolve o caso `HOSWALDO` sem quarentena nem contagem — e a consolidação
-   nunca aplica valor que nenhuma prancha leu.
+Se for menor que 3.10, instale pelo **python.org** (instalador universal2,
+funciona de Monterey em diante). Prefira o python.org ao Homebrew: ele já traz o
+Tcl/Tk, e sem isso a janela não abre. Se usar Homebrew, precisa também de
+`brew install python-tk`.
 
-Cada campo vem com **confiança própria**. Na planilha, célula vermelha é abaixo
-de 0.60, amarela abaixo de 0.85, cinza é campo ausente no carimbo e **azul veio
-da pasta, não do carimbo**. Você revisa o vermelho, não o lote.
+```bash
+python3 -m tkinter    # tem que abrir uma janelinha de teste
+```
 
-## Metadados dentro do arquivo
+### 2. Ambiente virtual
 
-Regra da casa: **toda imagem que sai daqui leva o nome e o site da CAMP dentro
-dela**. Nome de arquivo se perde, pasta se reorganiza, planilha fica para trás —
-o metadado viaja junto com a imagem. Se alguém baixar uma prancha do portal daqui
-a dez anos, o crédito ainda está lá.
+Descompacte num lugar **fixo e fora da Lixeira** — `~/Aplicativos/campvision2`,
+por exemplo. A barra de título mostra o build; confira que bate com o que você
+instalou.
 
-Preencha a identidade em `~/.campvision2/config.json`:
+```bash
+cd ~/Aplicativos/campvision2
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+O ambiente virtual isola isto do Python onde mora o CAMP Vision antigo. Os dois
+convivem na mesma máquina sem conflito de versão.
+
+### 3. Chave da API
+
+```bash
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
+source ~/.zshrc
+echo $ANTHROPIC_API_KEY     # tem que devolver a chave
+```
+
+Para o modo automático, veja a ressalva sobre LaunchAgent em
+[Instalar como serviço](#instalar-como-serviço-do-macos).
+
+### 4. Identidade da CAMP
+
+O que vai gravado dentro de cada imagem. Preencha em
+`~/.campvision2/config.json`:
 
 ```json
 {
@@ -68,16 +82,122 @@ Preencha a identidade em `~/.campvision2/config.json`:
 }
 ```
 
-Confira a qualquer momento o que será gravado:
-
 ```bash
-python vigia.py --identidade
+python vigia.py --identidade   # confere o que será gravado
 ```
 
-O app **avisa alto** se `identidade_site` estiver vazio, em vez de assinar as
-imagens pela metade.
+### 5. exiftool (só para a Fase 2)
 
-### O que é escrito
+```bash
+brew install exiftool
+```
+
+Sem ele o app funciona, mas não grava metadados nas imagens.
+
+### 6. Primeira leitura
+
+```bash
+python -m unittest discover -s tests -t .   # 123 testes, sem rede
+python app.py                                # janela
+```
+
+Comece por uma pasta de 20 pranchas de um acervo difícil. O `relatorio.txt` diz
+em dez segundos se vale seguir.
+
+---
+
+## Como funciona
+
+### As duas fases
+
+**Fase 1 — Ler.** Lê os carimbos e escreve `catalogacao.xlsx`, `.csv`,
+`leituras.json` e `relatorio.txt`. **Não move, não renomeia, não apaga nada.**
+
+**Fase 2 — Aplicar.** Você revisa a planilha; ela vira a fonte da verdade. O app
+copia os arquivos para `<pasta>_catalogado/{ano}/{projeto}/` com o nome final e
+grava os metadados. Os originais ficam onde estão.
+
+Separar as duas é o ponto do redesenho: leitura errada vira célula errada na
+planilha, corrigida em cinco segundos — nunca mais uma prancha em pasta errada.
+
+### O que mudou em relação ao CAMP Vision antigo
+
+O app antigo gastou meses numa pergunta só: **onde está o carimbo?** YOLO, busca
+por contorno, fusão de caixas, quatro rotações, limiar de conteúdo — cinco causas
+raiz diferentes para o mesmo arquivo de teste. Nada disso existe aqui: o mesmo
+modelo que lê o carimbo é quem o localiza, e ele lê texto girado, manuscrito e
+tabela institucional sem detector nenhum.
+
+**Aposentados:** YOLO/ultralytics, torch, OpenCV, Tesseract, o pré-processamento
+de OCR, o banco SQLite de conhecimento, a quarentena de grafias,
+`unificar_grafias`, a moda de ano por grupo, a correção de orientação por
+heurística, `imagecodecs` e o pin `numpy<2`.
+
+**Dependências:** anthropic, Pillow, openpyxl. Só. Nada exige AVX2, GPU ou
+compilação — roda igual no Mac Pro 2013 e no MacBook Pro 2011.
+
+**Sobreviveram, porque provaram valor:** log com o nome do arquivo em toda linha,
+cancelamento que cancela de verdade, ordenação por projeto e folha, e a
+atribuição institucional no Copyright.
+
+### A leitura
+
+1. **Cache de região.** Pranchas do mesmo projeto têm o carimbo no mesmo lugar.
+   Achou na primeira, as próximas vão direto ao recorte: 1 chamada em vez de 2.
+2. **Página inteira reduzida.** O modelo devolve os campos **e** a região do
+   carimbo em coordenadas normalizadas.
+3. **Segundo passe.** Se a confiança média ficou abaixo de 0.75, recorta aquela
+   região na resolução **original** e relê só ela.
+4. **Consolidação por projeto.** No fim do lote, uma chamada de texto por grupo
+   com todos os carimbos lado a lado decide a grafia canônica. É o que resolve o
+   caso `HOSWALDO` sem quarentena nem contagem — e nunca aplica valor que
+   nenhuma prancha leu.
+
+Cada campo vem com **confiança própria**. Na planilha: vermelho abaixo de 0.60,
+amarelo abaixo de 0.85, cinza é campo ausente no carimbo, **azul veio da pasta**.
+Você revisa o vermelho, não o lote.
+
+O que ele procura está escrito em português na constante `INSTRUCOES` de
+`nucleo/visao.py` — ajustar o comportamento do modelo é editar aquele texto, e
+sai mais barato que qualquer linha de código.
+
+### A pasta como segunda fonte
+
+A estrutura de pastas já carrega projeto, ano e fundo. O app usa isso com uma
+regra rígida de proveniência:
+
+**A pasta nunca é mostrada ao modelo.** Se ele souber que a pasta se chama
+`TeatroDeSantos-1968`, passa a *confirmar* isso no carimbo em vez de transcrever
+o que está escrito. A leitura é cega; a pasta entra depois, etiquetada como outra
+fonte. Há teste garantindo que nem o nome do arquivo vaza para o prompt.
+
+Com isso a pasta serve para três coisas:
+
+1. **Conferir.** Carimbo dizendo "EDIFÍCIO COPAN" dentro de
+   `1968/TeatroDeSantos` acende a coluna **Divergência**. Quase sempre é prancha
+   na pasta errada.
+2. **Preencher o que faltou.** Campo ilegível ganha o valor da pasta, com
+   confiança 0.5 e célula azul. Valor do carimbo *sempre* vence.
+3. **Situar.** Colunas `Fundo (pasta)`, `Projeto (pasta)` e `Ano (pasta)`.
+
+| Pasta | Projeto | Ano | Fundo |
+|---|---|---|---|
+| `Fundo OCG/1968/TeatroDeSantos` | Teatro De Santos | 1968 | Fundo OCG |
+| `OCG-TeatroDeSantos-1968` | Teatro De Santos | 1968 | OCG |
+| `SBU_Eletropaulo_CARMONA` | Eletropaulo CARMONA | — | SBU |
+| `DEST3524 CasaDaPraia 1972` | Casa Da Praia | 1972 | — |
+
+Descarta código de digitalização, separa CamelCase, reconhece sigla de fundo no
+prefixo e ignora pasta estrutural (`JPG`, `TIF`, `imagens`, `Acervo`) mesmo
+quando ela é a folha. Ano só entre 1800 e 2099, para `Casa 0350` não virar ano.
+
+Desligar: `"usar_pasta_como_pista": false`.
+
+### Metadados dentro do arquivo
+
+Regra da casa: **toda imagem que sai daqui leva o nome e o site da CAMP dentro
+dela**. Nome de arquivo se perde, pasta se reorganiza, planilha fica para trás —
+o metadado viaja junto com a imagem.
 
 | Onde | O quê |
 |---|---|
@@ -92,91 +212,56 @@ imagens pela metade.
 Distinção que importa para acervo: o **arquiteto** é Creator, a **CAMP** é
 Publisher. Confundir os dois é atribuir a autoria da obra à instituição.
 
-O crédito institucional vai **mesmo quando o carimbo não foi lido**. Prancha
-ilegível continua sendo patrimônio identificado da CAMP.
+O crédito institucional vai **mesmo quando o carimbo não foi lido** — prancha
+ilegível continua sendo patrimônio identificado. `Ano: 1968` vira
+`XMP-dc:Date=1968`, não `1968:01:01`: registrar mês e dia seria inventar precisão
+que o carimbo não tem.
 
-`Ano: 1968` vira `XMP-dc:Date=1968`, não `1968:01:01` — registrar mês e dia
-seria inventar precisão que o carimbo não tem.
+A gravação é em lote, um processo do exiftool para o acervo inteiro. Mil pranchas
+levam segundos. Acentuação vai em UTF-8 e volta íntegra.
 
-A gravação é em **lote**: um processo do exiftool para o acervo inteiro
-(`-@ argfile`), não um por arquivo. Mil pranchas levam segundos, não minutos.
-Acentuação vai em UTF-8 e volta íntegra.
-
-Mudou o site ou a licença? Regrave sem reprocessar nada:
+Mudou o site ou a licença? Regrave sem reprocessar:
 
 ```bash
 python cli.py /caminho/da/pasta --regravar-metadados catalogacao.xlsx
 ```
 
-Nada disso toca o original: a Fase 2 copia, e o metadado vai na cópia.
+---
 
-## Modo automático (vigia)
+## Modo automático
 
-O vigia é o CAMP Vision 2 rodando como serviço: varre a pasta montada, acha
-projetos prontos, lê, escreve a planilha e avança o semáforo que você já
-desenhou para o QNAP:
+O vigia varre a pasta montada, acha projetos prontos, lê, escreve a planilha e
+avança o semáforo:
 
 ```
 enviado_windows  ──vigia──▶  campvision_concluido  ──QNAP──▶  sincronizado
 ```
 
 Quem manda é o `status.json` no disco, nunca estado em memória: reiniciar o Mac
-não perde nem repete nada, e o vigia **preserva os campos que as outras máquinas
-escreveram** no mesmo arquivo, só acrescentando os dele.
-
-**Pasta sem `status.json` ganha um.** Projeto que chegou por fora do fluxo do
-Windows — cópia manual, disco antigo, importação — era ignorado em silêncio.
-Agora o vigia cria o semáforo já marcado como pronto e anota `criado_por:
-campvision2`, para você saber depois quais entraram por essa porta. Pasta sem
-imagem nenhuma não ganha status: não é projeto. E status que já existe nunca é
-mexido. Para desligar: `"criar_status_ausente": false`.
+não perde nem repete nada. O vigia **preserva os campos que as outras máquinas
+escreveram** no mesmo arquivo.
 
 ```bash
 python vigia.py --pasta /Volumes/acervos   # define a pasta (salva no config)
+python vigia.py --status                   # a árvore que ele enxerga, sem processar
 python vigia.py                            # painel ao vivo, até Ctrl+C
-python vigia.py --status                   # o que está pendente agora
 python vigia.py --uma-vez                  # processa e sai (para cron)
-python vigia.py --relatorio 2026-09-03     # regera o relatório de um dia
-python vigia.py --relatorio-geral          # acervo inteiro desde o começo
-python vigia.py --planilha-geral           # planilha única de todo o acervo
-python vigia.py --marcar-fase              # carimba a fase nova em todos
-python vigia.py --identidade               # confere o crédito que vai nas imagens
 ```
 
-O painel mostra situação, fila, barra da prancha atual, contadores do dia,
-custo acumulado e as últimas linhas de atividade. Fora de um terminal (dentro
-do LaunchAgent, por exemplo) ele se desliga sozinho e vira log corrido — sem
+O painel mostra situação, fila, barra da prancha atual, contadores do dia e custo
+acumulado. Fora de um terminal ele se desliga sozinho e vira log corrido, sem
 lixo de escape ANSI no arquivo.
 
 **Ctrl+C encerra com elegância:** termina a prancha em andamento, grava o
-checkpoint e sai. O projeto interrompido não avança de status, então na próxima
-subida ele é retomado do ponto onde parou.
+checkpoint e sai. O projeto interrompido não avança de status e é retomado na
+próxima subida.
 
 A Fase 2 continua **desligada** por padrão mesmo aqui. O vigia automatiza a
 leitura, não a decisão de mexer nos arquivos.
 
-### Instalar como serviço do macOS
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-python vigia.py --pasta /Volumes/acervos
-./launchagent/instalar.sh
-```
-
-Sobe no login, volta sozinho se cair. O script escreve a chave no plist com
-permissão 600, porque um LaunchAgent não lê o seu `~/.zshrc`.
-
-```bash
-launchctl list | grep campvision2      # está rodando?
-tail -f ~/.campvision2/vigia.log       # acompanhar
-./launchagent/instalar.sh --remover    # desinstalar
-```
-
-Para ver o painel, pare o serviço e rode `python vigia.py` na mão.
-
 ### Rodar na raiz do acervo
 
-Aponte o vigia para a **raiz** e ele acha os projetos em qualquer nível abaixo:
+Aponte para a raiz e ele acha os projetos em qualquer nível abaixo:
 
 ```
 /Volumes/acervos/
@@ -187,33 +272,32 @@ Aponte o vigia para a **raiz** e ele acha os projetos em qualquer nível abaixo:
 └── _catalogacao/acervo.xlsx          ← planilha única de tudo
 ```
 
-A regra de corte: **pasta que tem imagens É um projeto, e a busca não desce
-mais ali dentro.** Sem isso, `Projeto/JPG` e `Projeto/TIF` virariam dois
-projetos irmãos — que é o erro clássico desse tipo de varredura. Pastas de
-saída (`catalogacao`, `_catalogacao`), ocultas e as que começam com `_` ficam
-de fora. Profundidade máxima em `profundidade_maxima` (padrão 5).
+A regra de corte: **pasta que tem imagens É um projeto, e a busca não desce mais
+ali dentro.** Sem isso, `Projeto/JPG` e `Projeto/TIF` virariam dois projetos
+irmãos. Pastas de saída, ocultas e as que começam com `_` ficam de fora.
+Profundidade máxima em `profundidade_maxima` (padrão 5).
 
-Cada projeto ganha sua planilha em `catalogacao/`, e a raiz ganha uma planilha
-única com o acervo inteiro:
-
-```bash
-python vigia.py --status           # a árvore que ele enxerga, com o que falta
-python vigia.py --planilha-geral   # monta a planilha única agora
-```
+**Pasta sem `status.json` ganha um**, marcado como pronto e com
+`criado_por: campvision2`. Projeto que chegou por fora do fluxo do Windows era
+ignorado em silêncio; agora entra. Pasta sem imagem não ganha status — não é
+projeto. Status que já existe nunca é mexido.
 
 ### A planilha única do acervo
 
-Escrita em `_catalogacao/acervo.xlsx` ao fim de cada rodada, com três abas:
+Escrita em `_catalogacao/acervo.xlsx` ao fim de cada rodada:
 
 | Aba | O quê |
 |---|---|
-| **Acervo** | uma linha por prancha do acervo inteiro, com a pasta de origem, filtro ligado e as mesmas cores de confiança |
-| **Projetos** | uma linha por projeto: fundo, pranchas, cobertura de carimbo, campos a revisar, divergências, status e fase — com totais no rodapé |
+| **Acervo** | uma linha por prancha do acervo inteiro, com a pasta de origem, filtro ligado e as cores de confiança |
+| **Projetos** | uma linha por projeto: fundo, pranchas, cobertura, campos a revisar, divergências, status e fase — com totais |
 | **Pendentes** | o que ainda não passou pela leitura |
 
-Ela é **remontada dos `catalogacao/leituras.json` de cada projeto**, nunca da
-API. Rode quantas vezes quiser, a qualquer hora, sem custo nenhum: ela sempre
-reflete o estado atual do acervo.
+Remontada dos `catalogacao/leituras.json` de cada projeto, **nunca da API**. Rode
+quantas vezes quiser, a qualquer hora, sem custo:
+
+```bash
+python vigia.py --planilha-geral
+```
 
 ### O marcador de fase
 
@@ -224,10 +308,9 @@ Todo projeto que passa por esta versão recebe `"fase": "organizado_v2"` no
 python vigia.py --marcar-fase
 ```
 
-Isso vai numa **chave própria**, não no `status`. Se o marcador substituísse o
-valor do semáforo, o watcher do QNAP — que procura exatamente por
-`campvision_concluido` — pararia de sincronizar. Assim você tem o marcador da
-fase nova e a corrente segue funcionando:
+Vai numa **chave própria**, não no `status`. Se substituísse o valor do semáforo,
+o watcher do QNAP — que procura exatamente por `campvision_concluido` — pararia
+de sincronizar, e você descobriria dias depois com os arquivos parados no Mac.
 
 ```json
 {
@@ -240,56 +323,36 @@ fase nova e a corrente segue funcionando:
 }
 ```
 
-Mudou o nome da fase no config? Rode `--marcar-fase` de novo.
+### Instalar como serviço do macOS
 
-### A pasta como segunda fonte
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+python vigia.py --pasta /Volumes/acervos
+./launchagent/instalar.sh
+```
 
-A estrutura de pastas já carrega projeto, ano e fundo. O app usa isso — com uma
-regra rígida de proveniência:
+Sobe no login, volta sozinho se cair. O script escreve a chave no plist com
+permissão 600 — **um LaunchAgent não lê o seu `~/.zshrc`**, então exportar no
+shell não basta.
 
-**A pasta nunca é mostrada ao modelo de visão.** Se ele souber que a pasta se
-chama `TeatroDeSantos-1968`, passa a *confirmar* isso no carimbo em vez de
-transcrever o que está escrito, e a fidelidade da transcrição é exatamente o que
-esta reescrita comprou. A leitura é cega; a pasta entra depois, etiquetada como
-outra fonte. Há teste garantindo que nem o nome do arquivo vaza para o prompt.
+```bash
+launchctl list | grep campvision2      # está rodando?
+tail -f ~/.campvision2/vigia.log       # acompanhar
+./launchagent/instalar.sh --remover    # desinstalar
+```
 
-Com isso a pasta serve para três coisas:
+Para ver o painel, pare o serviço e rode `python vigia.py` na mão.
 
-1. **Conferir.** Carimbo dizendo "EDIFÍCIO COPAN" dentro de
-   `1968/TeatroDeSantos` acende a coluna **Divergência**. Quase sempre é
-   prancha na pasta errada — achado que antes só aparecia meses depois.
-2. **Preencher o que faltou.** Campo ilegível ganha o valor da pasta, com
-   confiança 0.5 e **célula azul** na planilha. Você vê de relance o que foi
-   lido e o que foi deduzido do caminho. Valor do carimbo *sempre* vence.
-3. **Situar.** As colunas `Fundo (pasta)`, `Projeto (pasta)` e `Ano (pasta)`
-   acompanham cada prancha, e o Fundo aparece na aba Projetos do acervo.
-
-O que ele entende do caminho:
-
-| Pasta | Projeto | Ano | Fundo |
-|---|---|---|---|
-| `Fundo OCG/1968/TeatroDeSantos` | Teatro De Santos | 1968 | Fundo OCG |
-| `OCG-TeatroDeSantos-1968` | Teatro De Santos | 1968 | OCG |
-| `SBU_Eletropaulo_CARMONA` | Eletropaulo CARMONA | — | SBU |
-| `DEST3524 CasaDaPraia 1972` | Casa Da Praia | 1972 | — |
-| `Acervo/Projetos/1972/Casa da Praia` | Casa da Praia | 1972 | — |
-
-Ele descarta código de digitalização (`DEST3524`), separa CamelCase, reconhece
-sigla de fundo no prefixo e ignora pasta estrutural (`JPG`, `TIF`, `imagens`,
-`Acervo`, `Projetos`) — inclusive quando ela é a folha do caminho. Ano só entre
-1800 e 2099, para `Casa 0350` não virar ano.
-
-Para desligar: `"usar_pasta_como_pista": false`.
+---
 
 ## Relatórios
 
 ### Diário
 
-Todo dia na hora configurada (`hora_relatorio`, padrão 18:00) o vigia fecha o
-dia a partir do diário de eventos e escreve `.txt` e `.html` em
-`~/.campvision2/relatorios/`. Ele traz projetos processados, pranchas lidas,
-percentual com carimbo, erros, **campos esperando revisão**, tempo de máquina e
-custo do dia — mais a linha de cada projeto e um destaque para o que falhou.
+Todo dia na hora configurada (padrão 18:00) o vigia fecha o dia e escreve `.txt`
+e `.html` em `~/.campvision2/relatorios/`: projetos, pranchas, percentual com
+carimbo, erros, **campos esperando revisão**, tempo de máquina e custo — mais a
+linha de cada projeto e destaque para o que falhou.
 
 Para receber por email, no `~/.campvision2/config.json`:
 
@@ -304,188 +367,140 @@ Para receber por email, no `~/.campvision2/config.json`:
 }
 ```
 
-A senha vai na variável `CAMPVISION_SMTP_SENHA`, nunca no config. Falha de
-email não derruba o vigia: o arquivo é escrito de qualquer jeito e o motivo vai
-para o log.
+A senha vai na variável `CAMPVISION_SMTP_SENHA`, nunca no config. Falha de email
+não derruba o vigia: o arquivo é escrito de qualquer jeito.
 
 ### Geral
 
-Reescrito junto com o diário, sempre refletindo o acervo inteiro desde o
-começo: período de trabalho, projetos, pranchas catalogadas, taxa de carimbo
-lido, ritmo por dia, tempo de máquina, **custo total e custo por prancha**, a
-fila atual e a lista de projetos do maior para o menor. É o número que serve
-para prestação de contas e para saber quanto ainda falta.
+Reescrito junto com o diário, sempre refletindo o acervo inteiro: período,
+projetos, pranchas catalogadas, taxa de carimbo lido, ritmo por dia, tempo de
+máquina, **custo total e custo por prancha**, fila atual e projetos do maior para
+o menor.
 
 ```bash
 python vigia.py --relatorio-geral
+python vigia.py --relatorio 2026-09-03   # regera um dia específico
 ```
+
+---
 
 ## GitHub e auto-atualização
 
-O repositório já está inicializado com o primeiro commit. Para publicar:
+```bash
+./publicar.sh SEU-USUARIO          # confere, cria o remoto e sobe
+```
+
+Ou na mão:
 
 ```bash
 git remote add origin git@github.com:SEU-USUARIO/campvision2.git
 git push -u origin main
 ```
 
-O `.gitignore` já barra o que não pode subir: `config.json` (pode conter a
-chave), checkpoints, planilhas e logs.
+O `.gitignore` barra o que não pode subir: `config.json` (pode conter a chave),
+checkpoints, planilhas e logs.
 
-Com um remoto configurado, o vigia verifica atualizações a cada hora
-(`intervalo_atualizacao_minutos`), **só entre projetos, nunca no meio de um
-lote**. Se veio código novo, ele faz `pull --ff-only` e se reinicia sozinho para
-carregar a versão nova — o LaunchAgent não precisa saber de nada. Se você tiver
-alterações locais não commitadas naquele Mac, a atualização é pulada com aviso,
-sem sobrescrever seu trabalho.
+Com um remoto configurado, o vigia verifica atualizações a cada hora, **só entre
+projetos, nunca no meio de um lote**. Se veio código novo, faz `pull --ff-only` e
+se reinicia sozinho. Se aquele Mac tiver alterações locais não commitadas, a
+atualização é pulada com aviso, sem sobrescrever seu trabalho.
 
-Assim você desenvolve num Mac, dá push, e os outros pegam a versão nova sozinhos.
-Para desligar: `--sem-auto-atualizar` ou `"auto_atualizar": false`.
+Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
+`--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
 O `.github/workflows/testes.yml` roda os 123 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
-## Montar o ambiente
+---
 
-Nada aqui exige AVX2, GPU ou compilação — roda igual no Mac Pro 2013 e no
-MacBook Pro 2011.
+## Referência
 
-### 1. Python 3.10 ou mais novo
+### Comandos
 
-O Python que vem com o macOS não serve. Confira o que você tem:
-
-```bash
-python3 --version
-```
-
-Se for menor que 3.10, instale pelo site oficial (python.org, instalador
-universal2, funciona de Monterey em diante). **Prefira o instalador do
-python.org ao Homebrew**: ele já traz o Tcl/Tk, e sem isso a janela do app não
-abre. Se você usa Homebrew mesmo assim, precisa também de `brew install
-python-tk`.
-
-Teste rápido de que a interface vai funcionar:
-
-```bash
-python3 -m tkinter        # tem que abrir uma janelinha de teste
-```
-
-### 2. Pasta do projeto e ambiente virtual
-
-Descompacte o `campvision2.zip` num lugar **fixo e fora da Lixeira** — por
-exemplo `~/Aplicativos/campvision2`. (Sim, isso já aconteceu: builds rodando da
-Lixeira por semanas. A barra de título mostra o build; confira que bate com o
-que você instalou.)
-
-```bash
-cd ~/Aplicativos/campvision2
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-O ambiente virtual isola isto do Python onde mora o CAMP Vision antigo — os
-dois podem conviver na mesma máquina sem conflito de versão, que era metade da
-dor de cabeça com `numpy` e `imagecodecs`.
-
-Toda vez que for usar, ative de novo:
-
-```bash
-cd ~/Aplicativos/campvision2 && source .venv/bin/activate
-```
-
-### 3. Chave da API
-
-Crie a chave no console da Anthropic e coloque no seu perfil do shell, para
-não ter que exportar toda vez:
-
-```bash
-echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
-source ~/.zshrc
-```
-
-Confira: `echo $ANTHROPIC_API_KEY` tem que devolver a chave.
-
-**Atenção para o modo automático:** um LaunchAgent **não lê o seu `~/.zshrc`**.
-Se for rodar o `cli.py` pelo watcher, declare a chave no próprio plist
-(`EnvironmentVariables`) ou preencha `api_key` em
-`~/.campvision2/config.json` — este arquivo só grava a chave se você a escrever
-lá manualmente; o app nunca a persiste sozinho.
-
-### 4. exiftool (opcional, só para a Fase 2)
-
-Sem ele o app funciona normalmente, só pula a gravação de metadados na imagem:
-
-```bash
-brew install exiftool
-```
-
-### 5. Conferir que está tudo de pé
-
-```bash
-python -m unittest discover -s tests -t .   # 27 testes, sem rede
-python app.py                                # abre a janela
-```
-
-### Uso
-
-```bash
-python app.py                          # janela
-python cli.py /caminho/da/pasta        # modo automático, para o LaunchAgent
-```
-
-### Se der errado
-
-| Sintoma | Causa |
+| Comando | O que faz |
 |---|---|
-| `ModuleNotFoundError: tkinter` | Python do Homebrew sem Tcl/Tk — instale pelo python.org ou `brew install python-tk` |
-| "Sem chave de API" | `ANTHROPIC_API_KEY` não chegou ao processo; num LaunchAgent, veja o passo 3 |
-| `ModuleNotFoundError: anthropic` | ambiente virtual não ativado — falta o `source .venv/bin/activate` |
-| Build na barra de título não é o que você instalou | está rodando de outra pasta (Lixeira, Downloads antigo) |
-| Lote não reprocessa nada | checkpoint da execução anterior — apague `campvision2_checkpoint.jsonl` da pasta |
-| Vigia não acha projeto nenhum | confira com `python vigia.py --status`, que mostra a árvore inteira e o que está pendente |
-| Projeto fundo demais na árvore | aumente `profundidade_maxima` no config (padrão 5) |
-| Vigia no ar mas parado | pasta SMB caiu — ele avisa no log e segue tentando, sem morrer |
-| "não é um repositório git" | falta `git remote add origin ...` — a auto-atualização fica desligada até lá |
-| "falta preencher identidade.site" | preencha `identidade_site` no config antes de publicar imagens |
-| Metadados não gravados | `brew install exiftool` — sem ele a cópia acontece, o metadado não |
+| `python app.py` | janela: escolher pasta, ler, aplicar |
+| `python cli.py PASTA` | lê uma pasta e escreve a planilha |
+| `python cli.py PASTA --aplicar catalogacao.xlsx [--valendo]` | Fase 2 (sem `--valendo`, só simula) |
+| `python cli.py PASTA --regravar-metadados catalogacao.xlsx` | regrava metadados sem reprocessar |
+| `python vigia.py` | painel ao vivo |
+| `python vigia.py --status` | árvore do acervo e o que está pendente |
+| `python vigia.py --uma-vez` | processa o pendente e sai |
+| `python vigia.py --planilha-geral` | planilha única do acervo |
+| `python vigia.py --relatorio-geral` | relatório acumulado |
+| `python vigia.py --marcar-fase` | carimba a fase em todos os projetos |
+| `python vigia.py --identidade` | confere o crédito das imagens |
 
-## Custo
+### Configuração
+
+Tudo em `~/.campvision2/config.json`, com os padrões e comentários em
+`nucleo/config.py`. Os que mais importam:
+
+| Chave | Padrão | O que faz |
+|---|---|---|
+| `modelo` | `claude-sonnet-5` | modelo de visão |
+| `trabalhadores` | 4 | pranchas em paralelo |
+| `confianca_minima_para_aceitar` | 0.75 | abaixo disso, faz o 2º passe |
+| `consolidar_por_projeto` | true | normaliza grafias no fim do lote |
+| `usar_pasta_como_pista` | true | pasta preenche campo vazio e confere |
+| `exigir_status_json` | true | só processa pasta marcada como pronta |
+| `criar_status_ausente` | true | cria status em pasta que não tem |
+| `profundidade_maxima` | 5 | até onde desce na árvore |
+| `hora_relatorio` | `18:00` | quando fecha o dia |
+| `auto_atualizar` | true | puxa código novo do GitHub |
+
+### Custo
 
 Sonnet 5 custa US$ 2 por milhão de tokens de entrada e US$ 10 de saída. Uma
 prancha usa ~2.300 tokens de imagem por passe. Na prática, com o cache de região
-funcionando, dá **algo em torno de US$ 10 a 15 por mil pranchas**. A janela
-mostra a estimativa ao vivo durante o lote; a tabela de preços fica em
-`nucleo/config.py` e você atualiza lá se mudar.
+funcionando, **US$ 10 a 15 por mil pranchas**. A janela e o painel mostram a
+estimativa ao vivo; a tabela de preços fica em `nucleo/config.py`.
 
-Para lotes grandes sem pressa, a Batch API tira 50% — vale plugar depois, o
-código já isola a chamada em `ClienteAnthropic.chamar`.
+Para lotes grandes sem pressa, a Batch API tira 50% — o código já isola a chamada
+em `ClienteAnthropic.chamar`.
 
-## Mexer no que importa
+### Onde mexer
 
-- **Acrescentar campo ao carimbo:** só `nucleo/esquema.py`. Ele se propaga
-  sozinho para o schema da API, a planilha e a consolidação.
-- **Mudar a convenção de nome/pasta:** `montar_nome` e `montar_pasta` em
-  `nucleo/aplicar.py`.
-- **Ajustar as instruções de leitura:** a constante `INSTRUCOES` em
-  `nucleo/visao.py`. É onde o comportamento do modelo mora — mais barato de
-  iterar que qualquer código.
+| Quero… | Arquivo |
+|---|---|
+| acrescentar campo ao carimbo | `nucleo/esquema.py` (propaga sozinho) |
+| mudar o que o modelo procura | constante `INSTRUCOES` em `nucleo/visao.py` |
+| mudar convenção de nome/pasta | `montar_nome`, `montar_pasta` em `nucleo/aplicar.py` |
+| mudar os metadados gravados | `montar_argumentos` em `nucleo/metadados.py` |
+| mudar como a pasta é interpretada | `nucleo/caminho.py` |
 
-## Testes
+### Testes
 
 ```bash
 python -m unittest discover -s tests -t .
 ```
 
 123 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
-geradas na hora. Rodam também no GitHub Actions a cada push.
+geradas na hora.
 
-## Segurança do lote
+### Segurança do lote
 
 - **Checkpoint** (`campvision2_checkpoint.jsonl`) a cada prancha terminada: queda
-  de energia, disco cheio ou cancelamento não perdem o que já foi lido nem
-  custam API de novo. Apague o arquivo para reprocessar do zero.
+  de energia, disco cheio ou cancelamento não perdem o que já foi lido nem custam
+  API de novo. Apague o arquivo para reprocessar do zero.
 - **Nada é sobrescrito** na Fase 2: nome que já existe ganha ` (2)`.
 - **Erro de leitura não vira exceção**: vira linha na planilha com a coluna Erro
   preenchida, e o lote segue.
+
+---
+
+## Se der errado
+
+| Sintoma | Causa |
+|---|---|
+| `ModuleNotFoundError: tkinter` | Python do Homebrew sem Tcl/Tk — instale pelo python.org ou `brew install python-tk` |
+| `ModuleNotFoundError: anthropic` | ambiente virtual não ativado — falta `source .venv/bin/activate` |
+| "Sem chave de API" | `ANTHROPIC_API_KEY` não chegou ao processo; num LaunchAgent, veja a seção do serviço |
+| Build na barra de título não é o que você instalou | está rodando de outra pasta (Lixeira, Downloads antigo) |
+| Lote não reprocessa nada | checkpoint anterior — apague `campvision2_checkpoint.jsonl` |
+| Vigia não acha projeto nenhum | `python vigia.py --status` mostra a árvore inteira e o que está pendente |
+| Projeto fundo demais na árvore | aumente `profundidade_maxima` (padrão 5) |
+| "falta preencher identidade.site" | preencha `identidade_site` antes de publicar imagens |
+| Metadados não gravados | `brew install exiftool` — sem ele a cópia acontece, o metadado não |
+| Vigia no ar mas parado | pasta SMB caiu — ele avisa no log e segue tentando |
+| "não é um repositório git" | falta `git remote add origin ...` — auto-atualização desligada até lá |
