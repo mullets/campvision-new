@@ -165,10 +165,13 @@ class TestPlanilhaDoAcervo(unittest.TestCase):
             raiz = Path(tmp)
             cfg = self._acervo_processado(raiz)
             caminho, _, _ = acervo.escrever(raiz, cfg)
-            ws = load_workbook(caminho)["Projetos"]
-            ultima = [c.value for c in ws[ws.max_row]]
+            wb = load_workbook(caminho)["Projetos"]
+            cabecalho = [c.value for c in wb[1]]
+            ultima = [c.value for c in wb[wb.max_row]]
             self.assertIn("TOTAL: 2 projeto(s)", str(ultima[0]))
-            self.assertEqual(ultima[5], 5)
+            # busca a coluna pelo nome: inserir coluna não pode quebrar o teste
+            self.assertEqual(ultima[cabecalho.index("Pranchas")], 5)
+            self.assertEqual(ultima[cabecalho.index("Com carimbo")], 5)
 
     def test_aba_pendentes_lista_o_que_falta(self):
         with TemporaryDirectory() as tmp:
