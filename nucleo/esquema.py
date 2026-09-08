@@ -79,6 +79,8 @@ class Leitura:
     campos_da_pasta: list[str] = field(default_factory=list)
     divergencias: list[str] = field(default_factory=list)
     campos_do_info: dict[str, str] = field(default_factory=dict)
+    # O atalho pelo cache de região foi tentado e não bastou?
+    cache_falhou: bool = False
 
     @property
     def confianca_media(self) -> float:

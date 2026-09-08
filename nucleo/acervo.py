@@ -112,12 +112,12 @@ def estimar(raiz: Path, config: Config, historico: list | None = None) -> dict:
         piso, teto = pranchas * medido * 0.8, pranchas * medido * 1.5
         origem = f"medido no seu acervo (US$ {medido:.3f}/prancha)"
     else:
-        # Calibrado contra lotes reais: ~US$ 0,02 por chamada. O piso supõe 1
-        # chamada por prancha (cache de região funcionando); o teto, 2.
-        entrada, saida = 3500, 1000
-        piso = config.custo_estimado_usd(pranchas * entrada, pranchas * saida)
-        teto = config.custo_estimado_usd(pranchas * entrada * 2, pranchas * saida * 2)
-        origem = "estimativa (sem histórico ainda)"
+        # Medido no acervo CAMP em setembro/2026: ~US$ 0,05 por prancha, com a
+        # maioria precisando de 2 chamadas. A primeira estimativa deste app
+        # ficou 5x abaixo disso — por isso o número agora vem de medição, e o
+        # histórico real substitui esta constante assim que existir.
+        piso, teto = pranchas * 0.035, pranchas * 0.06
+        origem = "referência do acervo CAMP (sem histórico seu ainda)"
 
     # ~4s por chamada, dividido pelos trabalhadores.
     segundos = pranchas * 4 / max(1, config.trabalhadores)

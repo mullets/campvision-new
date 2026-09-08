@@ -413,3 +413,103 @@ class TestConfigExemplo(unittest.TestCase):
             caminho.write_text('{"trabalhadores": 9}', encoding="utf-8")
             self.assertFalse(Config.criar_se_faltar(caminho))
             self.assertEqual(Config.carregar(caminho).trabalhadores, 9)
+
+
+class TestCacheQueSeDesliga(unittest.TestCase):
+    """O cache de região tem que parar de custar quando não está poupando."""
+
+    def test_desliga_apos_as_falhas_toleradas(self):
+        from nucleo.lote import CacheDeRegiao
+
+        cache = CacheDeRegiao(falhas_toleradas=2)
+        cache.guardar((0.7, 0.8, 1.0, 1.0))
+        self.assertIsNotNone(cache.obter())
+        cache.registrar_falha()
+        self.assertIsNotNone(cache.obter(), "uma falha ainda não desliga")
+        cache.registrar_falha()
+        self.assertIsNone(cache.obter())
+        self.assertTrue(cache.desligado)
+
+    def test_desligado_nao_volta_a_guardar(self):
+        from nucleo.lote import CacheDeRegiao
+
+        cache = CacheDeRegiao(falhas_toleradas=1)
+        cache.registrar_falha()
+        cache.guardar((0.1, 0.1, 0.5, 0.5))
+        self.assertIsNone(cache.obter())
+
+    def test_lote_desliga_o_cache_e_para_de_gastar_chamada_extra(self):
+        with TemporaryDirectory() as tmp:
+            pasta = Path(tmp)
+            for i in range(6):
+                prancha_falsa(pasta / f"p{i}.jpg", 3000, 2000)
+
+            # Resposta boa o bastante para guardar a região, mas o recorte
+            # do cache sempre volta fraco: é o caso do acervo real.
+            forte = resposta_padrao()
+            fraca = resposta_padrao(projeto=campo("BORRADO", 0.2), arquiteto=campo("", 0.0))
+
+            class ClienteAlternado:
+                def __init__(self):
+                    self.chamadas = []
+
+                def chamar(self, mensagens, ferramenta, sistema):
+                    self.chamadas.append(mensagens)
+                    # a 1ª chamada de cada prancha via cache manda o recorte:
+                    # devolve fraco para simular o cache que não serve
+                    texto = str(mensagens)
+                    return (fraca if "RECORTE" in texto.upper() else forte), 1000, 100
+
+            cliente = ClienteAlternado()
+            cfg = Config(trabalhadores=1, falhas_de_cache_toleradas=2,
+                         confianca_para_guardar_regiao=0.5)
+            resultado = lote.executar(pasta, cfg, cliente)
+            self.assertEqual(len(resultado.leituras), 6)
+            # Sem o desligamento seriam ~2 chamadas por prancha depois da 1ª.
+            # Com ele, as últimas pranchas gastam 1 chamada só.
+            self.assertLess(len(cliente.chamadas), 11,
+                            f"cache deveria ter se desligado; chamadas={len(cliente.chamadas)}")
+
+
+class TestGanhoDeResolucao(unittest.TestCase):
+    """O 2º passe só se paga quando o recorte fica mesmo mais nítido."""
+
+    def _leitor(self, **extra):
+        return LeitorDeCarimbo(Config(**extra), ClienteFalso([resposta_padrao()]))
+
+    def test_pagina_pequena_nao_ganha_nada(self):
+        img = Image.new("RGB", (1200, 900))
+        ganho = self._leitor()._ganho_de_resolucao(img, (0.7, 0.8, 1.0, 1.0))
+        self.assertAlmostEqual(ganho, 1.0, places=2)
+
+    def test_pagina_grande_ganha_muito(self):
+        img = Image.new("RGB", (9000, 6000))
+        ganho = self._leitor()._ganho_de_resolucao(img, (0.8, 0.85, 1.0, 1.0))
+        self.assertGreater(ganho, 3.0)
+
+    def _resposta_fraca(self) -> dict:
+        """Todos os campos fracos, para a média cair mesmo abaixo do limiar."""
+        return resposta_padrao(
+            projeto=campo("BORRADO", 0.3),
+            arquiteto=campo("ILEGIVEL", 0.3),
+            ano=campo("19??", 0.3),
+            folha=campo("0?", 0.3),
+        )
+
+    def test_nao_faz_segundo_passe_sem_ganho(self):
+        """Página pequena: o recorte já foi enviado na resolução máxima."""
+        with TemporaryDirectory() as tmp:
+            caminho = prancha_falsa(Path(tmp) / "pequena.jpg", 1200, 900)
+            cliente = ClienteFalso([self._resposta_fraca()])
+            leitura = LeitorDeCarimbo(Config(), cliente).ler(caminho)
+            self.assertLess(leitura.confianca_media, 0.75, "a média tem que estar baixa")
+            self.assertEqual(len(cliente.chamadas), 1,
+                             "reler o mesmo pixel não melhora nada")
+            self.assertEqual(leitura.passes, 1)
+
+    def test_faz_segundo_passe_quando_ha_ganho(self):
+        with TemporaryDirectory() as tmp:
+            caminho = prancha_falsa(Path(tmp) / "grande.jpg", 6000, 4000)
+            cliente = ClienteFalso([self._resposta_fraca(), resposta_padrao()])
+            LeitorDeCarimbo(Config(), cliente).ler(caminho)
+            self.assertEqual(len(cliente.chamadas), 2)

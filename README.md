@@ -579,6 +579,8 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 | `modelo` | `claude-sonnet-5` | modelo de visão |
 | `trabalhadores` | 4 | pranchas em paralelo |
 | `confianca_minima_para_aceitar` | 0.75 | abaixo disso, faz o 2º passe |
+| `ganho_minimo_2o_passe` | 1.3 | 2º passe só se o recorte ficar mais nítido |
+| `falhas_de_cache_toleradas` | 2 | depois disso o cache de região se desliga |
 | `consolidar_por_projeto` | true | normaliza grafias no fim do lote |
 | `usar_pasta_como_pista` | true | pasta preenche campo vazio e confere |
 | `exigir_status_json` | true | só processa pasta marcada como pronta |
@@ -590,10 +592,17 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 
 ### Custo
 
-Sonnet 5 custa US$ 2 por milhão de tokens de entrada e US$ 10 de saída. Uma
-prancha usa ~2.300 tokens de imagem por passe. Na prática, com o cache de região
-funcionando, **US$ 10 a 15 por mil pranchas**. A janela e o painel mostram a
-estimativa ao vivo; a tabela de preços fica em `nucleo/config.py`.
+Sonnet 5 custa US$ 2 por milhão de tokens de entrada e US$ 10 de saída.
+
+**Medido no acervo CAMP: ~US$ 0,05 por prancha**, ou seja **US$ 35 a 60 por mil
+pranchas**. A primeira estimativa deste README dizia US$ 10 a 15 e estava cinco
+vezes abaixo: a conta teórica supunha uma chamada por prancha, e na prática a
+maioria precisa de duas — carimbo de acervo antigo raramente sai confiante no
+primeiro passe.
+
+O `--estimativa` usa o custo **medido no seu próprio acervo** assim que houver
+histórico de lotes; até lá, usa a referência acima. A janela e o painel mostram
+o custo ao vivo; a tabela de preços fica em `nucleo/config.py`.
 
 Para lotes grandes sem pressa, a Batch API tira 50% — o código já isola a chamada
 em `ClienteAnthropic.chamar`.

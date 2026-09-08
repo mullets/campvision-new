@@ -58,6 +58,15 @@ class Config:
     confianca_minima_para_aceitar: float = 0.75
     # Reaproveita a região do carimbo achada na prancha anterior da mesma pasta.
     usar_cache_de_regiao: bool = True
+    # Quando o atalho pelo cache falha, ele gastou uma chamada à toa. Depois
+    # deste tanto de falhas seguidas o cache se desliga sozinho no projeto:
+    # em acervo com pranchas de formatos diferentes ele custa em vez de poupar.
+    falhas_de_cache_toleradas: int = 2
+    # Só guarda no cache região vinda de leitura confiável — região ruim
+    # propaga chamada desperdiçada para todas as pranchas seguintes.
+    confianca_para_guardar_regiao: float = 0.85
+    # O 2º passe só vale se o recorte ficar pelo menos este tanto mais nítido.
+    ganho_minimo_2o_passe: float = 1.3
     # Consolida os campos por projeto no fim do lote (1 chamada de texto por grupo).
     consolidar_por_projeto: bool = True
     # A pasta (projeto/ano) preenche campo que o carimbo não deu. A pasta NUNCA

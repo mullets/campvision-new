@@ -203,6 +203,24 @@ class LeitorDeCarimbo:
         entrada, t_in, t_out = self.cliente.chamar(mensagens, self.ferramenta, INSTRUCOES)
         return _para_leitura(entrada, Leitura()), t_in, t_out
 
+    def _ganho_de_resolucao(self, original: Image.Image, regiao: img_mod.Caixa) -> float:
+        """Quantas vezes mais nítido o recorte fica no 2º passe.
+
+        Reler custa uma chamada inteira. Se a região do carimbo já foi enviada
+        praticamente na resolução máxima no 1º passe, o 2º passe não traz pixel
+        novo nenhum — só conta o mesmo texto de novo e cobra por isso.
+        """
+        lado_maximo = self.config.lado_maximo_envio
+        maior_original = max(original.size)
+        fator = min(1.0, lado_maximo / maior_original) if maior_original else 1.0
+        x0, y0, x1, y1 = regiao
+        recorte_px = max(abs(x1 - x0) * original.width, abs(y1 - y0) * original.height)
+        if recorte_px <= 0:
+            return 0.0
+        enviado_no_1o = recorte_px * fator
+        enviado_no_2o = min(lado_maximo, recorte_px)
+        return enviado_no_2o / max(1.0, enviado_no_1o)
+
     def ler(self, caminho: Path, regiao_sugerida: img_mod.Caixa | None = None) -> Leitura:
         """Lê uma prancha. `regiao_sugerida` vem do cache da pasta."""
         resultado = Leitura(arquivo=caminho.name)
@@ -223,6 +241,7 @@ class LeitorDeCarimbo:
                 resultado.passes += 1
                 if leitura.carimbo_encontrado and leitura.confianca_media >= self.config.confianca_minima_para_aceitar:
                     return _fundir(resultado, leitura, regiao_sugerida)
+                resultado.cache_falhou = True
                 _log.info("%s: cache de região não bastou, indo pela página inteira.", caminho.name)
 
             # Passe 1 — página inteira reduzida: localiza e já lê.
@@ -235,14 +254,16 @@ class LeitorDeCarimbo:
                 leitura.carimbo_encontrado
                 and leitura.regiao is not None
                 and leitura.confianca_media < self.config.confianca_minima_para_aceitar
+                and self._ganho_de_resolucao(original, leitura.regiao) >= self.config.ganho_minimo_2o_passe
             )
             if not precisa_segundo_passe:
                 return _fundir(resultado, leitura, leitura.regiao)
 
             # Passe 2 — recorte na resolução ORIGINAL, onde o texto está inteiro.
             _log.info(
-                "%s: confiança %.2f abaixo do limiar, relendo o recorte em alta.",
+                "%s: confiança %.2f abaixo do limiar, relendo o recorte em alta (%.1fx).",
                 caminho.name, leitura.confianca_media,
+                self._ganho_de_resolucao(original, leitura.regiao),
             )
             recorte = img_mod.recortar(original, leitura.regiao, self.config.margem_recorte)
             if leitura.rotacao:
@@ -262,6 +283,7 @@ class LeitorDeCarimbo:
 
 
 def _fundir(base: Leitura, leitura: Leitura, regiao: img_mod.Caixa | None) -> Leitura:
+    """Copia o resultado da leitura para o acumulador, preservando os contadores."""
     base.valores = leitura.valores
     base.confiancas = leitura.confiancas
     base.carimbo_encontrado = leitura.carimbo_encontrado
