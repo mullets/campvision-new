@@ -84,6 +84,46 @@ class ProjetoNoAcervo:
         return max(contagem, key=contagem.get) if contagem else ""
 
 
+def estimar(raiz: Path, config: Config) -> dict:
+    """Conta o que seria processado e estima custo e tempo, sem chamar a API.
+
+    Números aproximados de propósito: servem para decidir se vale soltar o
+    mutirão, não para fechar orçamento. O custo real aparece ao vivo no painel.
+    """
+    from .vigia import varrer
+
+    pendentes = varrer(raiz, config)
+    pranchas = 0
+    por_projeto: list[tuple[str, int]] = []
+    for projeto in pendentes:
+        n = len(projeto.arquivos(config))
+        pranchas += n
+        try:
+            rel = str(projeto.pasta.relative_to(raiz))
+        except ValueError:
+            rel = projeto.pasta.name
+        por_projeto.append((rel, n))
+
+    # Uma prancha típica: ~2.300 tokens de imagem + ~700 de instrução, 300 de
+    # saída. O piso supõe 1 chamada por prancha (cache de região funcionando);
+    # o teto, 2 chamadas (segundo passe em todas), que é o pior caso.
+    entrada, saida = 3000, 300
+    piso = config.custo_estimado_usd(pranchas * entrada, pranchas * saida)
+    teto = config.custo_estimado_usd(pranchas * entrada * 2, pranchas * saida * 2)
+
+    # ~4s por chamada, dividido pelos trabalhadores.
+    segundos = pranchas * 4 / max(1, config.trabalhadores)
+
+    return {
+        "projetos": len(pendentes),
+        "pranchas": pranchas,
+        "custo_min": piso,
+        "custo_max": teto,
+        "horas": segundos / 3600,
+        "por_projeto": sorted(por_projeto, key=lambda kv: -kv[1]),
+    }
+
+
 def _ler_fase(caminho: Path) -> str:
     import json
 

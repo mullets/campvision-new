@@ -255,3 +255,82 @@ class TestInfoProjeto(unittest.TestCase):
                              "carimbo vence tudo")
             self.assertEqual(leitura.valores["ano"], "1979",
                              "sem carimbo, o info vence o 1999 da pasta")
+
+
+class TestMutirao(unittest.TestCase):
+    """Passar uma vez no acervo inteiro, inclusive no que tem status antigo."""
+
+    def _acervo(self, raiz: Path) -> None:
+        montar_acervo(raiz)
+        # status antigos, de outros fluxos
+        marcar(raiz / "BSG-EdificioPiracicaba-AnteProjeto-1979", status="digitalizado")
+        marcar(
+            raiz / "F001 - ARM - Arnaldo Martino" / "P0002 - MICE 80 - 1980",
+            status="sincronizado",
+        )
+
+    def test_fila_normal_ignora_status_desconhecido(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            self._acervo(raiz)
+            nomes = {p.nome for p in vigia.varrer(raiz, CFG)}
+            self.assertNotIn("BSG-EdificioPiracicaba-AnteProjeto-1979", nomes)
+            self.assertNotIn("P0002 - MICE 80 - 1980", nomes)
+
+    def test_mutirao_pega_todos_independente_do_status(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            self._acervo(raiz)
+            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+                         processar_tudo_sem_fase=True)
+            self.assertEqual(len(vigia.varrer(raiz, cfg)), 4)
+
+    def test_mutirao_nao_repete_o_que_ja_tem_a_fase(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            self._acervo(raiz)
+            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+                         processar_tudo_sem_fase=True, pasta_vigiada=str(raiz))
+            v = vigia.Vigia(cfg, ClienteFalso([resposta_padrao()]), raiz / "_estado")
+            self.assertEqual(v.uma_rodada(), 4)
+            self.assertEqual(v.uma_rodada(), 0, "segunda passada não refaz nada")
+            self.assertEqual(vigia.varrer(raiz, cfg), [])
+
+    def test_mutirao_preserva_o_status_antigo_no_arquivo(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            self._acervo(raiz)
+            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+                         processar_tudo_sem_fase=True)
+            projeto = {p.nome: p for p in vigia.varrer(raiz, cfg)}[
+                "BSG-EdificioPiracicaba-AnteProjeto-1979"
+            ]
+            vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
+            dados = json.loads((projeto.pasta / "status.json").read_text())
+            self.assertEqual(dados["fase"], "organizado_v2")
+            self.assertEqual(dados["status"], "campvision_concluido")
+
+    def test_estimativa_nao_chama_a_api(self):
+        from nucleo import acervo as mod_acervo
+
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            self._acervo(raiz)
+            cfg = Config(trabalhadores=4, processar_tudo_sem_fase=True)
+            e = mod_acervo.estimar(raiz, cfg)
+            self.assertEqual(e["projetos"], 4)
+            self.assertEqual(e["pranchas"], 11)  # 3 + 4 + 2 + 2
+            self.assertGreater(e["custo_max"], e["custo_min"])
+            self.assertGreater(e["horas"], 0)
+
+    def test_estimativa_zerada_quando_tudo_ja_tem_fase(self):
+        from nucleo import acervo as mod_acervo
+
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            self._acervo(raiz)
+            cfg = Config(trabalhadores=1, processar_tudo_sem_fase=True)
+            for projeto in vigia.descobrir(raiz, cfg):
+                vigia.marcar_fase(projeto.pasta, cfg)
+            e = mod_acervo.estimar(raiz, cfg)
+            self.assertEqual((e["projetos"], e["pranchas"]), (0, 0))

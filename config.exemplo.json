@@ -29,6 +29,7 @@
   "status_pronto": "enviado_windows",
   "status_concluido": "campvision_concluido",
   "fase_organizacao": "organizado_v2",
+  "processar_tudo_sem_fase": false,
   "profundidade_maxima": 5,
   "pasta_acervo": "_catalogacao",
   "aplicar_automaticamente": false,

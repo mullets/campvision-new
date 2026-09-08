@@ -343,6 +343,17 @@ def descobrir(
     return achados
 
 
+def ler_fase(caminho: Path) -> str:
+    """A fase carimbada no status.json, ou vazio."""
+    if not caminho.exists():
+        return ""
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return ""
+    return str(dados.get("fase", "")) if isinstance(dados, dict) else ""
+
+
 def varrer(raiz: Path, config: Config) -> list[Projeto]:
     """Lista os projetos PRONTOS para processar, em ordem de chegada."""
     if not raiz.is_dir():
@@ -350,12 +361,19 @@ def varrer(raiz: Path, config: Config) -> list[Projeto]:
     prontos: list[tuple[float, Projeto]] = []
     for projeto in descobrir(raiz, config):
         status = garantir_status(projeto.pasta, config)
-        if config.exigir_status_json:
+
+        if config.processar_tudo_sem_fase:
+            # Mutirão: o único portão é a fase. Status antigo, seja qual for,
+            # não impede — é justamente o que se quer normalizar.
+            if ler_fase(projeto.caminho_status) == config.fase_organizacao:
+                continue
+        elif config.exigir_status_json:
             if status != config.status_pronto:
                 continue
         else:
             if status == config.status_concluido or (projeto.pasta / NOME_PLANILHA).exists():
                 continue
+
         prontos.append((projeto.pasta.stat().st_mtime, projeto))
     return [p for _, p in sorted(prontos, key=lambda item: item[0])]
 

@@ -11,6 +11,8 @@
     python vigia.py --identidade              # confere o crédito que vai nas imagens
     python vigia.py --criar-config            # cria o config.json com os padrões
     python vigia.py --info                    # esquema real dos info_projeto.json
+    python vigia.py --todos --estimativa      # quanto custaria passar em tudo
+    python vigia.py --todos --uma-vez         # mutirão: passa em tudo, uma vez
     python vigia.py --status                 # o que está pendente agora, sem processar
 
 Ctrl+C encerra com elegância: termina a prancha em andamento, grava o
@@ -117,7 +119,8 @@ def _comando_status(config: Config) -> int:
     pendentes = mod_vigia.varrer(raiz, config)
     nomes_pendentes = {p.pasta for p in pendentes}
     print(f"Pasta: {raiz}")
-    print(f"Projetos encontrados: {len(todos)}   pendentes: {len(pendentes)}")
+    modo = "mutirão" if config.processar_tudo_sem_fase else "fila normal"
+    print(f"Projetos encontrados: {len(todos)}   pendentes: {len(pendentes)}   ({modo})")
     for projeto in todos:
         try:
             relativo = projeto.pasta.relative_to(raiz)
@@ -146,6 +149,31 @@ def _comando_identidade(config: Config) -> int:
     if faltando:
         print(f"\n  ATENÇÃO: falta preencher {', '.join(faltando)} em {CAMINHO_CONFIG}")
         return 1
+    return 0
+
+
+def _comando_estimativa(config: Config) -> int:
+    from nucleo import acervo as mod_acervo
+
+    if not config.pasta_vigiada or not Path(config.pasta_vigiada).is_dir():
+        print("Defina a pasta primeiro: --pasta /caminho", file=sys.stderr)
+        return 1
+    e = mod_acervo.estimar(Path(config.pasta_vigiada), config)
+    modo = "mutirão (tudo sem a fase)" if config.processar_tudo_sem_fase else "fila normal"
+    print(f"Modo: {modo}")
+    print(f"Projetos a processar: {e['projetos']}")
+    print(f"Pranchas:             {e['pranchas']}")
+    if not e["pranchas"]:
+        print("\nNada a fazer.")
+        return 0
+    print(f"Custo estimado:       US$ {e['custo_min']:.2f} a US$ {e['custo_max']:.2f}")
+    print(f"Tempo aproximado:     {e['horas']:.1f} h com {config.trabalhadores} em paralelo")
+    print("\nMaiores projetos:")
+    for nome, n in e["por_projeto"][:12]:
+        print(f"  {n:>5}  {nome[:64]}")
+    if len(e["por_projeto"]) > 12:
+        print(f"  ... e mais {len(e['por_projeto']) - 12} projeto(s)")
+    print("\nNúmeros aproximados. O custo real aparece ao vivo no painel.")
     return 0
 
 
@@ -243,6 +271,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--identidade", action="store_true", help="Mostra o crédito gravado nas imagens")
     p.add_argument("--criar-config", action="store_true", help="Cria o config.json com os padrões")
     p.add_argument("--info", action="store_true", help="Mostra o esquema dos info_projeto.json")
+    p.add_argument("--todos", action="store_true",
+                   help="Mutirão: ignora o status antigo, processa tudo que não tem a fase")
+    p.add_argument("--estimativa", action="store_true",
+                   help="Conta pranchas e estima custo e tempo, sem chamar a API")
     p.add_argument("--sem-auto-atualizar", action="store_true")
     p.add_argument("--intervalo", type=int, help="Segundos entre varreduras")
     args = p.parse_args(argv)
@@ -270,12 +302,16 @@ def main(argv: list[str] | None = None) -> int:
         config.intervalo_varredura_segundos = args.intervalo
     if args.sem_auto_atualizar:
         config.auto_atualizar = False
+    if args.todos:
+        config.processar_tudo_sem_fase = True
 
     registro.configurar(PASTA_ESTADO / "vigia.log")
     logging.getLogger("cv2").info("CAMP Vision 2 build %s", VERSAO_BUILD)
 
     if args.identidade:
         return _comando_identidade(config)
+    if args.estimativa:
+        return _comando_estimativa(config)
     if args.info:
         return _comando_info(config)
     if args.planilha_geral:

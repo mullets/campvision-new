@@ -385,6 +385,32 @@ quantas vezes quiser, a qualquer hora, sem custo:
 python vigia.py --planilha-geral
 ```
 
+### Mutirão: passar uma vez em tudo
+
+Acervo com `status.json` e `info_projeto.json` de fluxos antigos não entra na
+fila normal, porque o status deles não é `enviado_windows`. Para passar uma vez
+no acervo inteiro e normalizar tudo:
+
+```bash
+python vigia.py --todos --estimativa   # quanto custa e quanto demora
+python vigia.py --todos --uma-vez      # roda o mutirão
+```
+
+No modo `--todos` o único portão é a **fase**, não o status. Ou seja: processa
+todo projeto que ainda não passou por esta versão, seja qual for o status antigo
+dele — e o status antigo é preservado no arquivo, só ganha a fase carimbada.
+
+É **idempotente**: rodar de novo não refaz nada, porque quem já tem
+`fase: organizado_v2` sai da fila. Se o mutirão for interrompido no meio, é só
+rodar de novo — ele continua de onde parou, projeto a projeto, e dentro de cada
+projeto o checkpoint cuida das pranchas já lidas.
+
+A estimativa conta as pranchas de verdade e devolve uma faixa de custo (piso com
+o cache de região funcionando, teto se toda prancha precisar do segundo passe) e
+o tempo aproximado. Para dimensionar: **mil pranchas ficam entre US$ 9 e US$ 18,
+em menos de meia hora com 4 em paralelo**. Números aproximados; o custo real
+aparece ao vivo no painel.
+
 ### O marcador de fase
 
 Todo projeto que passa por esta versão recebe `"fase": "organizado_v2"` no
@@ -494,7 +520,7 @@ atualização é pulada com aviso, sem sobrescrever seu trabalho.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 160 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 166 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -518,6 +544,8 @@ O `.github/workflows/testes.yml` roda os 160 testes a cada push, em Python 3.10 
 | `python vigia.py --identidade` | confere o crédito das imagens |
 | `python vigia.py --criar-config` | cria o `config.json` com os padrões |
 | `python vigia.py --info` | esquema real dos `info_projeto.json` do acervo |
+| `python vigia.py --todos --estimativa` | conta pranchas e estima custo, sem chamar a API |
+| `python vigia.py --todos --uma-vez` | mutirão: passa em tudo que não tem a fase |
 
 ### Configuração
 
@@ -534,6 +562,7 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 | `usar_pasta_como_pista` | true | pasta preenche campo vazio e confere |
 | `exigir_status_json` | true | só processa pasta marcada como pronta |
 | `criar_status_ausente` | true | cria status em pasta que não tem |
+| `processar_tudo_sem_fase` | false | mutirão: portão é a fase, não o status (`--todos`) |
 | `profundidade_maxima` | 5 | até onde desce na árvore |
 | `hora_relatorio` | `18:00` | quando fecha o dia |
 | `auto_atualizar` | true | puxa código novo do GitHub |
@@ -566,7 +595,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-160 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+166 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote

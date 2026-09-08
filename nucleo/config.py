@@ -91,6 +91,11 @@ class Config:
     # status.json (`fase`), não no `status` — assim o watcher do QNAP, que
     # procura por status_concluido, continua reconhecendo o arquivo.
     fase_organizacao: str = "organizado_v2"
+    # Mutirão: ignora o semáforo `status` e processa todo projeto que ainda não
+    # tem a fase carimbada. Serve para passar uma vez no acervo inteiro,
+    # inclusive no que já tinha status e info_projeto antigos. É idempotente:
+    # rodar de novo não refaz o que já foi.
+    processar_tudo_sem_fase: bool = False
     # Busca recursiva: projeto pode estar em subpasta de subpasta.
     profundidade_maxima: int = 5
     # Onde a planilha única do acervo é escrita, relativo à raiz vigiada.
