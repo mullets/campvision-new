@@ -535,16 +535,42 @@ python vigia.py --relatorio 2026-09-03   # regera um dia específico
 
 ## GitHub e auto-atualização
 
-```bash
-./publicar.sh SEU-USUARIO          # confere, cria o remoto e sobe
-```
-
-Ou na mão:
+O remoto já vem configurado (`git@github.com:mullets/campvision2.git`). Crie o
+repositório **vazio** em https://github.com/new — sem README e sem .gitignore,
+senão o push conflita — e envie:
 
 ```bash
-git remote add origin git@github.com:SEU-USUARIO/campvision2.git
 git push -u origin main
 ```
+
+Ou `./publicar.sh mullets`, que antes de enviar confere se há segredo
+versionado, roda os testes e commita o que estiver pendente.
+
+## Na máquina dedicada
+
+```bash
+git clone git@github.com:mullets/campvision2.git
+cd campvision2
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python vigia.py --criar-config          # cria ~/.campvision2/config.json
+# preencha identidade_site no config
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+python vigia.py --pasta "smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD"
+python vigia.py --status                # confira a árvore antes de soltar
+./launchagent/instalar.sh               # deixa rodando de vez
+```
+
+O `config.json` não é versionado, então cada máquina tem o seu e a chave da API
+nunca sobe para o GitHub.
+
+**Uma máquina de cada vez no mesmo share.** O `status.json` evita refazer
+projeto já concluído, mas duas máquinas varrendo a mesma pasta podem pegar o
+mesmo projeto no mesmo minuto e pagar duas vezes pelas mesmas pranchas. Ao
+passar o vigia para a máquina dedicada, tire o serviço do outro Mac:
+`./launchagent/instalar.sh --remover`.
 
 O `.gitignore` barra o que não pode subir: `config.json` (pode conter a chave),
 checkpoints, planilhas e logs.
