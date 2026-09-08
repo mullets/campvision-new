@@ -557,7 +557,7 @@ atualização é pulada com aviso, sem sobrescrever seu trabalho.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 178 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 200 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -653,7 +653,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-178 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+200 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote
