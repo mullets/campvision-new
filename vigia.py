@@ -261,12 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         alvo = de_url_smb(str(args.pasta))
         if not alvo.is_dir():
             print(f"Pasta não encontrada: {alvo}", file=sys.stderr)
-            if str(args.pasta).lower().startswith("smb://"):
-                print(
-                    "O share parece não estar montado. No Finder: Cmd+K, cole a URL "
-                    "smb://, conecte, e rode este comando de novo.",
-                    file=sys.stderr,
-                )
+            print(mod_vigia.diagnosticar_pasta(alvo), file=sys.stderr)
             return 1
         config.pasta_vigiada = str(alvo)
         config.salvar(CAMINHO_CONFIG)
@@ -277,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         config.auto_atualizar = False
 
     registro.configurar(PASTA_ESTADO / "vigia.log")
+    logging.getLogger("cv2").info("CAMP Vision 2 build %s", VERSAO_BUILD)
 
     if args.identidade:
         return _comando_identidade(config)

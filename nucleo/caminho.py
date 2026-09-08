@@ -131,10 +131,21 @@ def de_url_smb(texto: str) -> Path:
     from urllib.parse import unquote
 
     bruto = (texto or "").strip()
-    if not bruto.lower().startswith(("smb://", "cifs://", "afp://")):
+    baixo = bruto.lower()
+
+    # Caminho já estragado por uma versão antiga, que tratou a URL como
+    # relativa: /Users/fulano/app/smb:/Server/Share/... — recupera do "smb:".
+    for esquema in ("smb:", "cifs:", "afp:"):
+        pos = baixo.find(esquema)
+        if pos > 0:
+            bruto = bruto[pos:]
+            baixo = bruto.lower()
+            break
+
+    if not baixo.startswith(("smb:", "cifs:", "afp:")):
         return Path(bruto).expanduser()
 
-    resto = bruto.split("://", 1)[1]
+    resto = bruto.split(":", 1)[1].lstrip("/")
     partes = [unquote(p) for p in resto.split("/") if p]
     if len(partes) < 2:  # só o host, sem share
         return Path("/Volumes")

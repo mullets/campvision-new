@@ -305,7 +305,11 @@ python vigia.py --pasta "smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/
 ```
 
 O share precisa estar montado antes (Finder, Cmd+K). Se não estiver, ele diz
-isso em vez de gravar um caminho que não existe. Se o share cair durante o
+exatamente qual share falta em vez de gravar um caminho que não existe.
+
+Caminho gravado por uma versão antiga, com `smb:` colado no diretório do app, é
+corrigido sozinho ao carregar o config — com aviso no log dizendo o antes e o
+depois. Se o share cair durante o
 trabalho, o vigia avisa no log e segue tentando, sem morrer.
 
 Em rede, use menos `trabalhadores` (2 ou 3): o gargalo passa a ser o SMB, não a
@@ -490,7 +494,7 @@ atualização é pulada com aviso, sem sobrescrever seu trabalho.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 152 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 160 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -562,7 +566,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-152 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+160 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote
@@ -589,6 +593,7 @@ geradas na hora.
 | Projeto fundo demais na árvore | aumente `profundidade_maxima` (padrão 5) |
 | "falta preencher identidade.site" | preencha `identidade_site` antes de publicar imagens |
 | Metadados não gravados | `brew install exiftool` — sem ele a cópia acontece, o metadado não |
-| Vigia no ar mas parado | pasta SMB caiu — ele avisa no log e segue tentando |
+| Vigia no ar mas parado | ele diz o motivo no painel: share não montado, caminho malformado ou pasta inexistente |
+| "caminho malformado (contém 'smb:')" | config gravado por versão antiga; rode `--pasta` de novo com a URL entre aspas |
 | "não é um repositório git" | falta `git remote add origin ...` — auto-atualização desligada até lá |
 | Não acho o `config.json` | ele só nasce com `python vigia.py --criar-config` ou no primeiro uso da janela |

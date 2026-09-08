@@ -229,6 +229,26 @@ def classificar(pasta: Path, config: Config, nivel: int = 0) -> str:
     return NADA
 
 
+def diagnosticar_pasta(raiz: Path) -> str:
+    """Diz POR QUE a pasta não está acessível, em vez de chutar 'SMB caiu'."""
+    texto = str(raiz)
+    if "smb:" in texto or "cifs:" in texto:
+        return (
+            "caminho malformado (contém 'smb:') — rode: "
+            'python vigia.py --pasta "smb://servidor/share/pasta"'
+        )
+    if texto.startswith("/Volumes/"):
+        partes = Path(texto).parts
+        montagem = Path("/Volumes") / partes[2] if len(partes) > 2 else Path("/Volumes")
+        if not montagem.exists():
+            return (
+                f"share '{montagem.name}' não está montado — conecte no Finder "
+                "(Cmd+K) e ele segue sozinho"
+            )
+        return f"share montado, mas '{raiz.name}' não existe dentro dele — confira o caminho"
+    return f"pasta {raiz} não existe ou está inacessível — seguindo tentando"
+
+
 def garantir_status(pasta: Path, config: Config) -> str:
     """Cria o status.json quando a pasta não tem um.
 
@@ -576,7 +596,7 @@ class Vigia:
                 self._recarregar_contadores_do_dia()
             if not raiz.is_dir():
                 self.estado.situacao = "pasta indisponível"
-                self.estado.anotar(f"pasta {raiz} fora do ar (SMB caiu?) — seguindo tentando")
+                self.estado.anotar(diagnosticar_pasta(raiz))
             else:
                 self.uma_rodada()
             self._talvez_relatorio()

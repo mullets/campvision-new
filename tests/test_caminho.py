@@ -247,3 +247,66 @@ class TestUrlSmb(unittest.TestCase):
         from nucleo.caminho import de_url_smb
 
         self.assertEqual(de_url_smb("smb://so-o-host"), Path("/Volumes"))
+
+
+class TestURLSMB(unittest.TestCase):
+    def test_traduz_url_do_finder(self):
+        alvo = caminho.de_url_smb(
+            "smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/Arquivos/99 - Saida"
+        )
+        self.assertEqual(str(alvo), "/Volumes/Backup Servidor CAMP/Arquivos/99 - Saida")
+
+    def test_repara_caminho_estragado_por_versao_antiga(self):
+        """O bug real: smb:// virou caminho relativo colado no cwd."""
+        estragado = (
+            "/Users/mulletsp/Downloads/campvision2/smb:/Server-Camp._smb._tcp.local/"
+            "Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD"
+        )
+        self.assertEqual(
+            str(caminho.de_url_smb(estragado)),
+            "/Volumes/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD",
+        )
+
+    def test_percent_encoding(self):
+        alvo = caminho.de_url_smb("smb://host/Backup%20Servidor%20CAMP/Arquivos")
+        self.assertEqual(str(alvo), "/Volumes/Backup Servidor CAMP/Arquivos")
+
+    def test_caminho_comum_passa_direto(self):
+        self.assertEqual(str(caminho.de_url_smb("/Volumes/acervos")), "/Volumes/acervos")
+
+    def test_config_conserta_caminho_guardado(self):
+        import json as _json
+
+        with TemporaryDirectory() as tmp:
+            arquivo = Path(tmp) / "config.json"
+            arquivo.write_text(_json.dumps({
+                "pasta_vigiada": "/Users/x/app/smb:/Server/Backup Servidor CAMP/Arquivos"
+            }), encoding="utf-8")
+            cfg = Config.carregar(arquivo)
+            self.assertEqual(
+                cfg.pasta_vigiada, "/Volumes/Backup Servidor CAMP/Arquivos"
+            )
+
+    def test_config_bom_nao_e_mexido(self):
+        import json as _json
+
+        with TemporaryDirectory() as tmp:
+            arquivo = Path(tmp) / "config.json"
+            arquivo.write_text(_json.dumps({"pasta_vigiada": "/Volumes/acervos"}), encoding="utf-8")
+            self.assertEqual(Config.carregar(arquivo).pasta_vigiada, "/Volumes/acervos")
+
+
+class TestDiagnostico(unittest.TestCase):
+    def test_aponta_caminho_malformado(self):
+        from nucleo.vigia import diagnosticar_pasta
+
+        mensagem = diagnosticar_pasta(Path("/Users/x/app/smb:/Server/Share"))
+        self.assertIn("malformado", mensagem)
+        self.assertIn("--pasta", mensagem)
+
+    def test_aponta_share_nao_montado(self):
+        from nucleo.vigia import diagnosticar_pasta
+
+        mensagem = diagnosticar_pasta(Path("/Volumes/Nao Montado XYZ/Arquivos"))
+        self.assertIn("não está montado", mensagem)
+        self.assertIn("Cmd+K", mensagem)

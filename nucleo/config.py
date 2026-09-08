@@ -12,7 +12,10 @@ from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
 from typing import Any
 
-VERSAO_BUILD = "2026-09-04-01"
+# Suba o número a cada release. Sem isso não dá para saber qual versão está
+# rodando numa máquina — foi assim que um caminho errado sobreviveu a três
+# atualizações do código.
+VERSAO_BUILD = "2026-09-08-05"
 
 _log = logging.getLogger("cv2.config")
 
@@ -132,6 +135,18 @@ class Config:
                 setattr(cfg, chave, tuple(valor) if chave == "extensoes" else valor)
             else:
                 _log.warning("config.json: chave desconhecida ignorada: %s", chave)
+
+        # Conserta caminho gravado por versão antiga, que colava a URL smb://
+        # no diretório atual em vez de traduzir para /Volumes.
+        if "smb:" in cfg.pasta_vigiada or "cifs:" in cfg.pasta_vigiada:
+            from .caminho import de_url_smb
+
+            corrigido = str(de_url_smb(cfg.pasta_vigiada))
+            _log.warning(
+                "pasta_vigiada estava malformada e foi corrigida:\n  antes: %s\n  agora: %s",
+                cfg.pasta_vigiada, corrigido,
+            )
+            cfg.pasta_vigiada = corrigido
         return cfg
 
     def salvar(self, caminho: Path, incluir_chave: bool = False) -> None:
