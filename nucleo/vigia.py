@@ -119,45 +119,54 @@ def escrever_status(caminho: Path, status: str, extra: dict | None = None) -> No
 
 MARCADORES_DE_PROJETO = ("status.json", "info_projeto.json")
 # Quanto maior, melhor a pasta de imagens. Preview/JPG ganha do arquivo
-# matriz em TIFF: para ler carimbo, JPG basta e é muito mais rápido em rede.
-PESOS = (
-    (("preview", "jpg", "jpeg"), 3),
-    (("imagens", "imagem", "fotos"), 2),
-    (("tiff", "tif", "arquivistico", "arquivístico", "matriz", "master"), 1),
-)
+
+# Palavras que denunciam a MATRIZ arquivística — a mesma prancha em TIFF, que
+# não precisa ser lida porque existe um preview.
+PALAVRAS_MATRIZ = ("tiff", "arquivistico", "arquivístico", "matriz", "master", "raw")
 PASTAS_IGNORADAS = ("catalogacao", "__macosx", "node_modules")
-
-
-def _pontuar_pasta(pasta: Path) -> int:
-    nome = pasta.name.lower()
-    for palavras, peso in PESOS:
-        if any(palavra in nome for palavra in palavras):
-            return peso
-    return 2  # pasta sem pista no nome: melhor que TIFF, pior que preview
 
 
 def _imagens_direto(pasta: Path, config: Config) -> bool:
     return bool(imagem.listar_imagens(pasta, config.extensoes))
 
 
+def _e_matriz(pasta: Path, config: Config) -> bool:
+    """A pasta é a versão matriz (TIFF) da mesma prancha?
+
+    Decide pelo nome E pela extensão dos arquivos: pasta chamada
+    `IGREJA PARÓQUIA MÃE DO SALVADOR` cheia de .tif é matriz do mesmo jeito, e
+    pasta de nome estranho cheia de .jpg é conteúdo e tem que ser lida.
+    """
+    nome = pasta.name.lower()
+    if nome in ("tif", "tiff") or any(p in nome for p in PALAVRAS_MATRIZ):
+        return True
+    arquivos = imagem.listar_imagens(pasta, config.extensoes)
+    if not arquivos:
+        return False
+    tifs = sum(1 for a in arquivos if a.suffix.lower() in (".tif", ".tiff"))
+    return tifs > len(arquivos) / 2
+
+
 def achar_pastas_de_imagens(
     projeto: Path, config: Config, _profundidade: int = 0
 ) -> list[Path]:
-    """Acha, dentro de um projeto, TODAS as pastas de imagem que interessam.
+    """Acha, dentro de um projeto, todas as pastas de imagem que interessam.
 
-    Cada acervo veio de um fluxo diferente — imagem solta na raiz, dentro de
-    JPG/, ou em `01 - Desenhos e Pranchas/03 - Preview (JPG)`. Então a busca
-    desce a árvore inteira do projeto, pontua o que acha e fica só com o melhor
-    tipo disponível: se há preview em JPG, o TIFF é ignorado; se só há TIFF,
-    lê o TIFF.
+    Regra: lê TUDO que não for matriz arquivística. A matriz só é lida quando
+    não existe nenhuma outra versão — aí ela é a única cópia que há.
+
+    Isto já foi feito por pontuação, ficando só com a pasta de maior nota, e
+    descartava em silêncio pastas de conteúdo com nome fora do padrão
+    (`IGREJA PARÓQUIA MÃE DO SALVADOR`, `Sem titulo`). Perder prancha calado é
+    pior que ler demais.
     """
-    candidatas: list[tuple[int, Path]] = []
+    candidatas: list[Path] = []
 
     def caminhar(pasta: Path, nivel: int) -> None:
         if nivel > config.profundidade_maxima:
             return
         if _imagens_direto(pasta, config):
-            candidatas.append((_pontuar_pasta(pasta), pasta))
+            candidatas.append(pasta)
             return  # achou imagem aqui: não desce mais neste ramo
         try:
             filhos = sorted(pasta.iterdir(), key=lambda p: p.name.lower())
@@ -175,17 +184,22 @@ def achar_pastas_de_imagens(
     if not candidatas:
         return []
 
-    melhor = max(peso for peso, _ in candidatas)
-    escolhidas = [pasta for peso, pasta in candidatas if peso == melhor]
-    descartadas = [pasta.name for peso, pasta in candidatas if peso != melhor]
-    if descartadas:
+    conteudo = [p for p in candidatas if not _e_matriz(p, config)]
+    matrizes = [p for p in candidatas if _e_matriz(p, config)]
+
+    if not conteudo:  # só há matriz: ela é a única cópia, então lê
+        _log.info("Projeto %s: só há matriz — lendo %s.",
+                  projeto.name, ", ".join(p.name for p in matrizes))
+        return sorted(matrizes)
+
+    if matrizes:
         _log.info(
-            "Projeto %s: usando %s; ignorando %s (versão de menor prioridade).",
+            "Projeto %s: lendo %s; ignorando a matriz em %s.",
             projeto.name,
-            ", ".join(p.name for p in escolhidas),
-            ", ".join(descartadas),
+            ", ".join(p.name for p in conteudo),
+            ", ".join(p.name for p in matrizes),
         )
-    return sorted(escolhidas)
+    return sorted(conteudo)
 
 
 PROJETO, CONTAINER, FOLHA, NADA = "projeto", "container", "folha", "nada"
@@ -292,6 +306,27 @@ def marcar_fase(pasta: Path, config: Config, extra: dict | None = None) -> None:
     dados.setdefault("status", config.status_pronto)
     caminho.parent.mkdir(parents=True, exist_ok=True)
     caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def limpar_fase(pasta: Path) -> bool:
+    """Tira a marca de fase, devolvendo o projeto à fila do mutirão.
+
+    O checkpoint continua lá: as pranchas já lidas não são relidas nem pagas de
+    novo. Só o que faltou entra na conta.
+    """
+    caminho = pasta / NOME_STATUS
+    if not caminho.exists():
+        return False
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    if not isinstance(dados, dict) or "fase" not in dados:
+        return False
+    dados.pop("fase", None)
+    dados.pop("fase_em", None)
+    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+    return True
 
 
 def _e_ignoravel(pasta: Path, config: Config) -> bool:

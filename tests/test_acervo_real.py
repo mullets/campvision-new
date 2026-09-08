@@ -334,3 +334,154 @@ class TestMutirao(unittest.TestCase):
                 vigia.marcar_fase(projeto.pasta, cfg)
             e = mod_acervo.estimar(raiz, cfg)
             self.assertEqual((e["projetos"], e["pranchas"]), (0, 0))
+
+
+class TestNaoPerderPrancha(unittest.TestCase):
+    """Caso real: pastas de conteúdo com nome fora do padrão eram descartadas."""
+
+    def test_pasta_de_conteudo_com_nome_estranho_e_lida(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0002 - paroquia Mae Salvador - 1973")
+            base = projeto / "01 - Desenhos e Pranchas"
+            imagens(base / "03 - Preview (JPG)", 2, "prev")
+            imagens(base / "IGREJA PARÓQUIA MÃE DO SALVADOR", 3, "igr")
+            imagens(base / "Sem titulo", 2, "sem")
+            achado = vigia.descobrir(raiz, CFG)[0]
+            nomes = {p.name for p in achado.pastas_imagens}
+            self.assertIn("IGREJA PARÓQUIA MÃE DO SALVADOR", nomes)
+            self.assertIn("Sem titulo", nomes)
+            self.assertEqual(len(achado.arquivos(CFG)), 7, "nenhuma prancha some")
+
+    def test_matriz_tiff_continua_ignorada(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0001 - Com Matriz - 1979")
+            base = projeto / "01 - Desenhos e Pranchas"
+            imagens(base / "03 - Preview (JPG)", 3, "prev")
+            imagens(base / "01 - Arquivo Arquivístico (TIFF)", 3, "tif")
+            achado = vigia.descobrir(raiz, CFG)[0]
+            self.assertEqual([p.name for p in achado.pastas_imagens], ["03 - Preview (JPG)"])
+
+    def test_pasta_de_nome_neutro_cheia_de_tif_e_tratada_como_matriz(self):
+        """O nome não diz nada, mas o conteúdo diz: são .tif, é matriz."""
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0003 - Neutro - 1980")
+            imagens(projeto / "Originais", 2, "jpg_")
+            pasta_tif = projeto / "Digitalizacao"
+            pasta_tif.mkdir(parents=True)
+            for i in range(3):
+                prancha_falsa(pasta_tif / f"m{i}.jpg", 400, 300).rename(
+                    pasta_tif / f"m{i}.tif"
+                )
+            achado = vigia.descobrir(raiz, CFG)[0]
+            self.assertEqual([p.name for p in achado.pastas_imagens], ["Originais"])
+
+    def test_so_matriz_disponivel_ainda_e_lida(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0004 - So Matriz - 1985")
+            imagens(projeto / "01 - Arquivo Arquivístico (TIFF)", 3, "t")
+            achado = vigia.descobrir(raiz, CFG)[0]
+            self.assertEqual(len(achado.arquivos(CFG)), 3)
+
+    def test_jpg_e_tif_lado_a_lado_no_formato_antigo(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "OCG-ForumDuartina-1961")
+            imagens(projeto / "JPG", 4)
+            imagens(projeto / "TIF", 4, "t")
+            achado = vigia.descobrir(raiz, CFG)[0]
+            self.assertEqual([p.name for p in achado.pastas_imagens], ["JPG"])
+
+
+class TestRefazer(unittest.TestCase):
+    def test_limpar_fase_devolve_a_fila_sem_perder_o_status(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0001 - Teste - 1970", status="digitalizado")
+            imagens(projeto / "JPG", 2)
+            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+                         processar_tudo_sem_fase=True)
+            achado = vigia.varrer(raiz, cfg)[0]
+            vigia.processar(achado, cfg, ClienteFalso([resposta_padrao()]))
+            self.assertEqual(vigia.varrer(raiz, cfg), [])
+
+            self.assertTrue(vigia.limpar_fase(projeto))
+            self.assertEqual(len(vigia.varrer(raiz, cfg)), 1, "voltou para a fila")
+            dados = json.loads((projeto / "status.json").read_text())
+            self.assertNotIn("fase", dados)
+            self.assertEqual(dados["status"], "campvision_concluido", "status preservado")
+
+    def test_refazer_nao_repaga_prancha_ja_lida(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0002 - Teste - 1971")
+            imagens(projeto / "JPG", 3)
+            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+                         processar_tudo_sem_fase=True)
+            cliente = ClienteFalso([resposta_padrao()])
+            vigia.processar(vigia.varrer(raiz, cfg)[0], cfg, cliente)
+            chamadas_primeira = len(cliente.chamadas)
+
+            vigia.limpar_fase(projeto)
+            imagens(projeto / "Sem titulo", 2, "novo")  # pasta que faltava
+            cliente2 = ClienteFalso([resposta_padrao()])
+            evento = vigia.processar(vigia.varrer(raiz, cfg)[0], cfg, cliente2)
+            self.assertEqual(len(cliente2.chamadas), 2, "só as 2 novas foram à API")
+            self.assertEqual(evento.pranchas, 5, "mas a planilha traz as 5")
+            self.assertGreaterEqual(chamadas_primeira, 3)
+
+    def test_limpar_fase_em_projeto_sem_fase_nao_faz_nada(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0003 - Sem Fase - 1972")
+            self.assertFalse(vigia.limpar_fase(projeto))
+
+
+class TestEstimativaCalibrada(unittest.TestCase):
+    def test_usa_o_custo_medido_quando_ha_historico(self):
+        from nucleo.acervo import _custo_medio_por_prancha
+        from nucleo.eventos import Evento
+
+        historico = [
+            Evento(projeto="A", pranchas=40, custo_usd=0.80),
+            Evento(projeto="B", pranchas=60, custo_usd=1.20),
+        ]
+        self.assertAlmostEqual(_custo_medio_por_prancha(historico), 0.02)
+
+    def test_amostra_pequena_nao_e_usada(self):
+        from nucleo.acervo import _custo_medio_por_prancha
+        from nucleo.eventos import Evento
+
+        self.assertEqual(
+            _custo_medio_por_prancha([Evento(projeto="A", pranchas=3, custo_usd=0.06)]), 0.0
+        )
+
+    def test_projeto_que_falhou_nao_entra_na_media(self):
+        from nucleo.acervo import _custo_medio_por_prancha
+        from nucleo.eventos import Evento
+
+        historico = [
+            Evento(projeto="A", pranchas=40, custo_usd=0.80),
+            Evento(projeto="B", pranchas=99, custo_usd=0.0, falha="SMB caiu"),
+        ]
+        self.assertAlmostEqual(_custo_medio_por_prancha(historico), 0.02)
+
+    def test_estimativa_diz_de_onde_veio_o_numero(self):
+        from nucleo import acervo as mod_acervo
+        from nucleo.eventos import Evento
+
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0001 - Novo - 1970")
+            imagens(projeto / "JPG", 10)
+            cfg = Config(processar_tudo_sem_fase=True)
+            sem = mod_acervo.estimar(raiz, cfg)
+            self.assertIn("sem histórico", sem["origem"])
+            com = mod_acervo.estimar(
+                raiz, cfg, [Evento(projeto="X", pranchas=50, custo_usd=1.00)]
+            )
+            self.assertIn("medido", com["origem"])
+            self.assertAlmostEqual(com["custo_min"], 10 * 0.02 * 0.8, places=3)

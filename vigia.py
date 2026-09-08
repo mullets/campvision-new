@@ -13,6 +13,7 @@
     python vigia.py --info                    # esquema real dos info_projeto.json
     python vigia.py --todos --estimativa      # quanto custaria passar em tudo
     python vigia.py --todos --uma-vez         # mutirão: passa em tudo, uma vez
+    python vigia.py --refazer TEXTO           # devolve projetos à fila (TEXTO=tudo p/ todos)
     python vigia.py --status                 # o que está pendente agora, sem processar
 
 Ctrl+C encerra com elegância: termina a prancha em andamento, grava o
@@ -152,13 +153,37 @@ def _comando_identidade(config: Config) -> int:
     return 0
 
 
+def _comando_refazer(config: Config, alvo: str) -> int:
+    if not config.pasta_vigiada or not Path(config.pasta_vigiada).is_dir():
+        print("Defina a pasta primeiro: --pasta /caminho", file=sys.stderr)
+        return 1
+    raiz = Path(config.pasta_vigiada)
+    todos = mod_vigia.descobrir(raiz, config)
+    alvo_baixo = alvo.lower()
+    limpos = 0
+    for projeto in todos:
+        if alvo_baixo != "tudo" and alvo_baixo not in str(projeto.pasta).lower():
+            continue
+        if mod_vigia.limpar_fase(projeto.pasta):
+            limpos += 1
+            print(f"  devolvido à fila: {projeto.nome}")
+    if not limpos:
+        print("Nenhum projeto correspondia (ou nenhum tinha a fase marcada).")
+        return 0
+    print(f"\n{limpos} projeto(s) voltaram para a fila.")
+    print("As pranchas já lidas ficam no checkpoint e não serão pagas de novo.")
+    print("Rode: python vigia.py --todos --uma-vez")
+    return 0
+
+
 def _comando_estimativa(config: Config) -> int:
     from nucleo import acervo as mod_acervo
 
     if not config.pasta_vigiada or not Path(config.pasta_vigiada).is_dir():
         print("Defina a pasta primeiro: --pasta /caminho", file=sys.stderr)
         return 1
-    e = mod_acervo.estimar(Path(config.pasta_vigiada), config)
+    historico = mod_eventos.ler(PASTA_ESTADO / "eventos.jsonl")
+    e = mod_acervo.estimar(Path(config.pasta_vigiada), config, historico)
     modo = "mutirão (tudo sem a fase)" if config.processar_tudo_sem_fase else "fila normal"
     print(f"Modo: {modo}")
     print(f"Projetos a processar: {e['projetos']}")
@@ -167,6 +192,7 @@ def _comando_estimativa(config: Config) -> int:
         print("\nNada a fazer.")
         return 0
     print(f"Custo estimado:       US$ {e['custo_min']:.2f} a US$ {e['custo_max']:.2f}")
+    print(f"                      ({e['origem']})")
     print(f"Tempo aproximado:     {e['horas']:.1f} h com {config.trabalhadores} em paralelo")
     print("\nMaiores projetos:")
     for nome, n in e["por_projeto"][:12]:
@@ -273,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--info", action="store_true", help="Mostra o esquema dos info_projeto.json")
     p.add_argument("--todos", action="store_true",
                    help="Mutirão: ignora o status antigo, processa tudo que não tem a fase")
+    p.add_argument("--refazer", metavar="TEXTO",
+                   help="Tira a fase dos projetos cujo caminho contém TEXTO "
+                        "(use 'tudo' para todos), devolvendo-os à fila")
     p.add_argument("--estimativa", action="store_true",
                    help="Conta pranchas e estima custo e tempo, sem chamar a API")
     p.add_argument("--sem-auto-atualizar", action="store_true")
@@ -310,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.identidade:
         return _comando_identidade(config)
+    if args.refazer:
+        return _comando_refazer(config, args.refazer)
     if args.estimativa:
         return _comando_estimativa(config)
     if args.info:

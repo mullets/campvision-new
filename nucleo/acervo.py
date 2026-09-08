@@ -84,7 +84,7 @@ class ProjetoNoAcervo:
         return max(contagem, key=contagem.get) if contagem else ""
 
 
-def estimar(raiz: Path, config: Config) -> dict:
+def estimar(raiz: Path, config: Config, historico: list | None = None) -> dict:
     """Conta o que seria processado e estima custo e tempo, sem chamar a API.
 
     Números aproximados de propósito: servem para decidir se vale soltar o
@@ -104,12 +104,20 @@ def estimar(raiz: Path, config: Config) -> dict:
             rel = projeto.pasta.name
         por_projeto.append((rel, n))
 
-    # Uma prancha típica: ~2.300 tokens de imagem + ~700 de instrução, 300 de
-    # saída. O piso supõe 1 chamada por prancha (cache de região funcionando);
-    # o teto, 2 chamadas (segundo passe em todas), que é o pior caso.
-    entrada, saida = 3000, 300
-    piso = config.custo_estimado_usd(pranchas * entrada, pranchas * saida)
-    teto = config.custo_estimado_usd(pranchas * entrada * 2, pranchas * saida * 2)
+    # Se já há histórico de lotes reais, o custo médio por prancha medido vale
+    # muito mais que qualquer conta minha — o primeiro palpite estava pela
+    # metade do observado. Sem histórico, cai no valor calibrado abaixo.
+    medido = _custo_medio_por_prancha(historico or [])
+    if medido:
+        piso, teto = pranchas * medido * 0.8, pranchas * medido * 1.5
+        origem = f"medido no seu acervo (US$ {medido:.3f}/prancha)"
+    else:
+        # Calibrado contra lotes reais: ~US$ 0,02 por chamada. O piso supõe 1
+        # chamada por prancha (cache de região funcionando); o teto, 2.
+        entrada, saida = 3500, 1000
+        piso = config.custo_estimado_usd(pranchas * entrada, pranchas * saida)
+        teto = config.custo_estimado_usd(pranchas * entrada * 2, pranchas * saida * 2)
+        origem = "estimativa (sem histórico ainda)"
 
     # ~4s por chamada, dividido pelos trabalhadores.
     segundos = pranchas * 4 / max(1, config.trabalhadores)
@@ -117,11 +125,21 @@ def estimar(raiz: Path, config: Config) -> dict:
     return {
         "projetos": len(pendentes),
         "pranchas": pranchas,
+        "origem": origem,
         "custo_min": piso,
         "custo_max": teto,
         "horas": segundos / 3600,
         "por_projeto": sorted(por_projeto, key=lambda kv: -kv[1]),
     }
+
+
+def _custo_medio_por_prancha(eventos: list) -> float:
+    """Custo por prancha observado nos lotes já rodados. 0 se não há amostra."""
+    pranchas = sum(e.pranchas for e in eventos if not e.falha)
+    custo = sum(e.custo_usd for e in eventos if not e.falha)
+    if pranchas < 20 or custo <= 0:  # amostra pequena demais para confiar
+        return 0.0
+    return custo / pranchas
 
 
 def _ler_fase(caminho: Path) -> str:

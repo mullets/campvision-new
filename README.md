@@ -354,11 +354,19 @@ F001 - ARM - Arnaldo Martino/                 ← agrupador
         └── 03 - Preview (JPG)/               ← lê daqui
 ```
 
-**Qual pasta de imagem ele lê.** Desce a árvore inteira do projeto, pontua o
-que acha pelo nome (`preview`/`jpg` > pasta neutra > `tiff`/`arquivístico`/
-`matriz`) e fica **só com o melhor tipo disponível**. Havendo preview em JPG, o
-TIFF é ignorado — para ler carimbo o JPG basta e é muito mais rápido em rede. Só
-TIFF? Lê o TIFF. Preview em dois ramos diferentes? Lê os dois e soma.
+**Qual pasta de imagem ele lê.** Desce a árvore inteira do projeto e lê **tudo
+que não for matriz arquivística**. A matriz só é lida quando é a única cópia que
+existe.
+
+Uma pasta é matriz se o nome disser (`TIFF`, `Arquivo Arquivístico`, `matriz`)
+**ou** se a maioria dos arquivos dentro dela for `.tif`. Os dois critérios
+importam: pasta chamada `IGREJA PARÓQUIA MÃE DO SALVADOR` cheia de TIFF é matriz
+do mesmo jeito, e pasta de nome esquisito cheia de JPG é conteúdo e tem que ser
+lida.
+
+Isto já foi feito por pontuação, ficando só com a pasta de maior nota — e
+descartava em silêncio pastas de conteúdo com nome fora do padrão. Perder
+prancha calado é pior que ler demais.
 
 Checkpoint e `catalogacao/` ficam sempre na **raiz do projeto**, nunca dentro da
 subpasta de imagem. Profundidade máxima em `profundidade_maxima` (padrão 5).
@@ -405,11 +413,23 @@ dele — e o status antigo é preservado no arquivo, só ganha a fase carimbada.
 rodar de novo — ele continua de onde parou, projeto a projeto, e dentro de cada
 projeto o checkpoint cuida das pranchas já lidas.
 
-A estimativa conta as pranchas de verdade e devolve uma faixa de custo (piso com
-o cache de região funcionando, teto se toda prancha precisar do segundo passe) e
-o tempo aproximado. Para dimensionar: **mil pranchas ficam entre US$ 9 e US$ 18,
-em menos de meia hora com 4 em paralelo**. Números aproximados; o custo real
-aparece ao vivo no painel.
+A estimativa conta as pranchas de verdade e devolve uma faixa de custo. Assim
+que houver histórico de lotes reais, ela passa a usar o **custo médio por
+prancha medido no seu próprio acervo** em vez de conta teórica, e diz de onde
+veio o número. Para dimensionar antes disso: **mil pranchas ficam por volta de
+US$ 20 a US$ 40**, em menos de meia hora com 4 em paralelo.
+
+### Refazer projetos já processados
+
+```bash
+python vigia.py --refazer "F002"    # ou 'tudo' para o acervo inteiro
+python vigia.py --todos --uma-vez
+```
+
+Tira a marca de fase dos projetos que casarem com o texto, devolvendo-os à fila.
+**O checkpoint continua lá**: prancha já lida não é relida nem paga de novo — só
+o que faltou entra na conta. É o jeito de reprocessar quando uma versão nova
+passa a enxergar pastas que a anterior deixava de fora.
 
 ### O marcador de fase
 
@@ -520,7 +540,7 @@ atualização é pulada com aviso, sem sobrescrever seu trabalho.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 166 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 178 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -546,6 +566,7 @@ O `.github/workflows/testes.yml` roda os 166 testes a cada push, em Python 3.10 
 | `python vigia.py --info` | esquema real dos `info_projeto.json` do acervo |
 | `python vigia.py --todos --estimativa` | conta pranchas e estima custo, sem chamar a API |
 | `python vigia.py --todos --uma-vez` | mutirão: passa em tudo que não tem a fase |
+| `python vigia.py --refazer TEXTO` | devolve projetos à fila (`tudo` = todos) |
 
 ### Configuração
 
@@ -587,7 +608,7 @@ em `ClienteAnthropic.chamar`.
 | mudar os metadados gravados | `montar_argumentos` em `nucleo/metadados.py` |
 | mudar como a pasta é interpretada | `nucleo/caminho.py` |
 | mapear chave nova do `info_projeto.json` | `PALAVRAS` em `nucleo/info_projeto.py` |
-| mudar qual versão das imagens é lida | `PESOS` em `nucleo/vigia.py` |
+| mudar qual versão das imagens é lida | `PALAVRAS_MATRIZ` e `_e_matriz` em `nucleo/vigia.py` |
 
 ### Testes
 
@@ -595,7 +616,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-166 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+178 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote
