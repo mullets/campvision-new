@@ -157,3 +157,69 @@ class TestSaidaSoCSV(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAutoAtualizacao(unittest.TestCase):
+    """O notebook fica ocioso a maior parte do tempo: é aí que ele tem que puxar."""
+
+    def _vigia(self, raiz: Path, cfg: Config):
+        v = vigia.Vigia(cfg, ClienteFalso([resposta_padrao()]), raiz / "_estado",
+                        repo=raiz / "_repo")
+        v.chamadas_de_atualizacao = 0
+
+        def contar():
+            v.chamadas_de_atualizacao += 1
+
+        v._talvez_atualizar = contar
+        return v
+
+    def test_atualiza_mesmo_com_a_fila_vazia(self):
+        import threading
+
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            (raiz / "vazio").mkdir()
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1,
+                         pasta_vigiada=str(raiz), intervalo_varredura_segundos=1)
+            v = self._vigia(raiz, cfg)
+
+            def parar(_estado):
+                v.cancelar.set()
+
+            v.rodar(ao_desenhar=parar)
+            self.assertGreaterEqual(
+                v.chamadas_de_atualizacao, 1,
+                "vigia ocioso nunca puxaria código novo",
+            )
+
+    def test_nao_atualiza_no_meio_de_um_lote(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = marcar(raiz / "P0001 - Longo - 1970")
+            imagens(projeto / "JPG", 3)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1,
+                         consolidar_por_projeto=False, pasta_vigiada=str(raiz))
+            v = self._vigia(raiz, cfg)
+            v.uma_rodada()
+            # uma chamada antes do único projeto, nenhuma durante a leitura
+            self.assertEqual(v.chamadas_de_atualizacao, 1)
+
+
+class TestDiagnosticoDeFetch(unittest.TestCase):
+    def test_explica_falta_de_chave_ssh(self):
+        from nucleo.atualizador import _explicar_falha_de_fetch
+
+        msg = _explicar_falha_de_fetch("git@github.com: Permission denied (publickey).")
+        self.assertIn("ssh-agent", msg)
+        self.assertIn("HTTPS", msg)
+
+    def test_explica_falta_de_rede(self):
+        from nucleo.atualizador import _explicar_falha_de_fetch
+
+        msg = _explicar_falha_de_fetch("ssh: Could not resolve host github.com")
+        self.assertIn("sem rede", msg)
+
+    def test_erro_desconhecido_vem_cru(self):
+        from nucleo.atualizador import _explicar_falha_de_fetch
+
+        self.assertIn("coisa estranha", _explicar_falha_de_fetch("coisa estranha"))

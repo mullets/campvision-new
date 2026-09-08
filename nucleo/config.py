@@ -15,7 +15,7 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-09-08-07"
+VERSAO_BUILD = "2026-09-08-08"
 
 _log = logging.getLogger("cv2.config")
 

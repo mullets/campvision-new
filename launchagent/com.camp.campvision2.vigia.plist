@@ -25,6 +25,12 @@
     <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
+    <!-- Como servico o processo nao herda o ssh-agent do login, entao o
+         git fetch da auto-atualizacao precisa da chave apontada aqui. -->
+    <key>GIT_SSH_COMMAND</key>
+    <string>__GIT_SSH__</string>
+    <key>HOME</key>
+    <string>__CASA__</string>
   </dict>
 
   <key>RunAtLoad</key>

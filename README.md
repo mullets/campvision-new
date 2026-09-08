@@ -575,15 +575,31 @@ passar o vigia para a máquina dedicada, tire o serviço do outro Mac:
 O `.gitignore` barra o que não pode subir: `config.json` (pode conter a chave),
 checkpoints, planilhas e logs.
 
-Com um remoto configurado, o vigia verifica atualizações a cada hora, **só entre
-projetos, nunca no meio de um lote**. Se veio código novo, faz `pull --ff-only` e
-se reinicia sozinho. Se aquele Mac tiver alterações locais não commitadas, a
-atualização é pulada com aviso, sem sobrescrever seu trabalho.
+Com um remoto configurado, o vigia verifica atualizações a cada hora, **fora de
+qualquer lote** — entre um projeto e outro, e também quando está ocioso, que é o
+estado normal dele. Se veio código novo, faz `pull --ff-only` e se reinicia
+sozinho para carregar a versão nova. Se aquela máquina tiver alterações locais
+não commitadas, a atualização é pulada com aviso, sem sobrescrever seu trabalho.
+
+**A chave SSH precisa estar disponível ao serviço.** Rodando pelo LaunchAgent, o
+processo não herda o `ssh-agent` do seu login, então o `git fetch` falharia toda
+hora em silêncio. O `instalar.sh` detecta a chave em `~/.ssh` e a aponta no plist
+via `GIT_SSH_COMMAND`. Duas ressalvas:
+
+- **Chave com senha não serve** — não há quem a digite num serviço. O instalador
+  avisa. Gere uma chave sem senha só para isso, ou use remoto HTTPS com token:
+  `git remote set-url origin https://TOKEN@github.com/mullets/campvision2.git`
+- Quando o fetch falha, o log diz **por quê** (sem chave, sem rede, ssh ausente)
+  em vez de errar calado. Conferir: `grep -i atualiz ~/.campvision2/vigia.log`
+
+Fluxo do dia a dia: você mexe no código aqui, dá push, e em até uma hora o
+notebook puxa e reinicia sozinho. Para forçar na hora, `git pull` lá e reinicie
+o serviço.
 
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 200 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 205 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -679,7 +695,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-200 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+205 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote

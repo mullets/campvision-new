@@ -604,6 +604,8 @@ class Vigia:
         self.estado.ultima_atualizacao_codigo = (
             f"{datetime.now():%d/%m %H:%M} — {mensagem}"
         )
+        if not atualizou and ("falhou" in mensagem or "sem acesso" in mensagem):
+            _log.warning("Auto-atualização: %s", mensagem)
         if atualizou:
             self.estado.anotar(f"código atualizado ({mensagem}), reiniciando")
             atualizador.reiniciar_processo()
@@ -703,6 +705,10 @@ class Vigia:
                 self.estado.anotar(diagnosticar_pasta(raiz))
             else:
                 self.uma_rodada()
+            # Fora de qualquer lote: é a hora segura de puxar código novo.
+            # Sem isto, um vigia ocioso — que é o estado normal dele — nunca
+            # se atualizaria, porque uma_rodada() volta cedo com a fila vazia.
+            self._talvez_atualizar()
             self._talvez_relatorio()
             if ao_desenhar:
                 ao_desenhar(self.estado)

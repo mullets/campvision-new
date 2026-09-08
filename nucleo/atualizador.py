@@ -33,6 +33,27 @@ def _git(repo: Path, *argumentos: str) -> tuple[int, str]:
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
+def _explicar_falha_de_fetch(saida: str) -> str:
+    """Traduz o erro do git para algo acionável.
+
+    O caso que mais morde: rodando como serviço, o processo não herda o
+    ssh-agent do seu login, então a chave SSH não está disponível e o fetch
+    falha calado a cada hora.
+    """
+    baixo = saida.lower()
+    if "permission denied" in baixo or "publickey" in baixo:
+        return (
+            "fetch sem acesso SSH — como serviço o processo não herda o "
+            "ssh-agent do login. Use remoto HTTPS com token, ou uma chave sem "
+            "senha em ~/.ssh e GIT_SSH_COMMAND no plist"
+        )
+    if "could not resolve host" in baixo or "network is unreachable" in baixo:
+        return "fetch sem rede — tentarei de novo no próximo ciclo"
+    if "cannot run ssh" in baixo:
+        return "fetch falhou: cliente ssh não encontrado no PATH do serviço"
+    return f"fetch falhou: {saida[:160]}"
+
+
 def e_repositorio(repo: Path) -> bool:
     return (repo / ".git").exists()
 
@@ -48,7 +69,7 @@ def verificar(repo: Path) -> tuple[bool, str]:
         return False, "não é um repositório git"
     codigo, saida = _git(repo, "fetch", "--quiet")
     if codigo != 0:
-        return False, f"fetch falhou: {saida[:160]}"
+        return False, _explicar_falha_de_fetch(saida)
     codigo, local = _git(repo, "rev-parse", "HEAD")
     _, remoto = _git(repo, "rev-parse", "@{u}")
     if codigo != 0 or not remoto or remoto.startswith("fatal"):
