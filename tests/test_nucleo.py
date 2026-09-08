@@ -513,3 +513,65 @@ class TestGanhoDeResolucao(unittest.TestCase):
             cliente = ClienteFalso([self._resposta_fraca(), resposta_padrao()])
             LeitorDeCarimbo(Config(), cliente).ler(caminho)
             self.assertEqual(len(cliente.chamadas), 2)
+
+
+class TestMedicaoDoSegundoPasse(unittest.TestCase):
+    """O 2º passe dobra o custo da prancha; o relatório tem que medir o retorno."""
+
+    def _fraca(self, conf=0.3) -> dict:
+        return resposta_padrao(
+            projeto=campo("BORRADO", conf), arquiteto=campo("ILEGIVEL", conf),
+            ano=campo("19??", conf), folha=campo("0?", conf),
+        )
+
+    def test_registra_confianca_antes_e_ganho(self):
+        with TemporaryDirectory() as tmp:
+            caminho = prancha_falsa(Path(tmp) / "g.jpg", 6000, 4000)
+            cliente = ClienteFalso([self._fraca(), resposta_padrao()])
+            leitura = LeitorDeCarimbo(Config(), cliente).ler(caminho)
+            self.assertTrue(leitura.fez_segundo_passe)
+            self.assertAlmostEqual(leitura.confianca_antes_do_2o, 0.3, places=2)
+            self.assertGreater(leitura.ganho_de_resolucao, 1.3)
+            self.assertGreater(leitura.confianca_media, leitura.confianca_antes_do_2o)
+
+    def test_sem_segundo_passe_nao_marca_nada(self):
+        with TemporaryDirectory() as tmp:
+            caminho = prancha_falsa(Path(tmp) / "g.jpg", 6000, 4000)
+            leitura = LeitorDeCarimbo(Config(), ClienteFalso([resposta_padrao()])).ler(caminho)
+            self.assertFalse(leitura.fez_segundo_passe)
+
+    def test_relatorio_mostra_o_rendimento(self):
+        boa = Leitura(arquivo="a.jpg", valores={"projeto": "X"}, confiancas={"projeto": 0.95},
+                      carimbo_encontrado=True, fez_segundo_passe=True,
+                      confianca_antes_do_2o=0.40, ganho_de_resolucao=2.4)
+        inutil = Leitura(arquivo="b.jpg", valores={"projeto": "Y"}, confiancas={"projeto": 0.42},
+                         carimbo_encontrado=True, fez_segundo_passe=True,
+                         confianca_antes_do_2o=0.41, ganho_de_resolucao=1.5)
+        with TemporaryDirectory() as tmp:
+            texto = planilha.escrever_relatorio(
+                [boa, inutil], Path(tmp) / "r.txt", 0.10
+            ).read_text()
+            self.assertIn("Segundo passe", texto)
+            self.assertIn("Pranchas que releram   2/2", texto)
+            self.assertIn("Melhoraram de fato     1", texto)
+            self.assertIn("1.9x", texto)  # (2.4 + 1.5) / 2
+
+    def test_relatorio_sugere_baixar_o_limiar_quando_rende_pouco(self):
+        inuteis = [
+            Leitura(arquivo=f"{i}.jpg", valores={"projeto": "Y"},
+                    confiancas={"projeto": 0.42}, carimbo_encontrado=True,
+                    fez_segundo_passe=True, confianca_antes_do_2o=0.41,
+                    ganho_de_resolucao=2.0)
+            for i in range(5)
+        ]
+        with TemporaryDirectory() as tmp:
+            texto = planilha.escrever_relatorio(inuteis, Path(tmp) / "r.txt").read_text()
+            self.assertIn("rendendo pouco", texto)
+            self.assertIn("confianca_minima_para_aceitar", texto)
+
+    def test_sem_segundo_passe_o_relatorio_nao_fala_disso(self):
+        leitura = Leitura(arquivo="a.jpg", valores={"projeto": "X"},
+                          confiancas={"projeto": 0.9}, carimbo_encontrado=True)
+        with TemporaryDirectory() as tmp:
+            texto = planilha.escrever_relatorio([leitura], Path(tmp) / "r.txt").read_text()
+            self.assertNotIn("Segundo passe", texto)

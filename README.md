@@ -580,6 +580,7 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 | `trabalhadores` | 4 | pranchas em paralelo |
 | `confianca_minima_para_aceitar` | 0.75 | abaixo disso, faz o 2º passe |
 | `ganho_minimo_2o_passe` | 1.3 | 2º passe só se o recorte ficar mais nítido |
+| `confianca_para_guardar_regiao` | 0.85 | região só entra no cache se a leitura foi confiante |
 | `falhas_de_cache_toleradas` | 2 | depois disso o cache de região se desliga |
 | `consolidar_por_projeto` | true | normaliza grafias no fim do lote |
 | `usar_pasta_como_pista` | true | pasta preenche campo vazio e confere |
@@ -594,11 +595,16 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 
 Sonnet 5 custa US$ 2 por milhão de tokens de entrada e US$ 10 de saída.
 
-**Medido no acervo CAMP: ~US$ 0,05 por prancha**, ou seja **US$ 35 a 60 por mil
+**Medido no acervo CAMP: ~US$ 0,04 por prancha**, ou seja **US$ 35 a 50 por mil
 pranchas**. A primeira estimativa deste README dizia US$ 10 a 15 e estava cinco
 vezes abaixo: a conta teórica supunha uma chamada por prancha, e na prática a
 maioria precisa de duas — carimbo de acervo antigo raramente sai confiante no
 primeiro passe.
+
+O `relatorio.txt` de cada lote mede o **retorno do segundo passe**: quantas
+pranchas releram, quantas de fato melhoraram e quanto subiu a confiança. Se
+menos de 40% melhorarem, ele sugere baixar `confianca_minima_para_aceitar` — é
+como se decide o limiar com dado em vez de palpite.
 
 O `--estimativa` usa o custo **medido no seu próprio acervo** assim que houver
 histórico de lotes; até lá, usa a referência acima. A janela e o painel mostram

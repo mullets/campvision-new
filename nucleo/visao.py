@@ -260,11 +260,14 @@ class LeitorDeCarimbo:
                 return _fundir(resultado, leitura, leitura.regiao)
 
             # Passe 2 — recorte na resolução ORIGINAL, onde o texto está inteiro.
+            ganho = self._ganho_de_resolucao(original, leitura.regiao)
             _log.info(
                 "%s: confiança %.2f abaixo do limiar, relendo o recorte em alta (%.1fx).",
-                caminho.name, leitura.confianca_media,
-                self._ganho_de_resolucao(original, leitura.regiao),
+                caminho.name, leitura.confianca_media, ganho,
             )
+            resultado.fez_segundo_passe = True
+            resultado.confianca_antes_do_2o = leitura.confianca_media
+            resultado.ganho_de_resolucao = ganho
             recorte = img_mod.recortar(original, leitura.regiao, self.config.margem_recorte)
             if leitura.rotacao:
                 recorte = img_mod.girar(recorte, leitura.rotacao)
@@ -283,7 +286,11 @@ class LeitorDeCarimbo:
 
 
 def _fundir(base: Leitura, leitura: Leitura, regiao: img_mod.Caixa | None) -> Leitura:
-    """Copia o resultado da leitura para o acumulador, preservando os contadores."""
+    """Copia o resultado da leitura para o acumulador, preservando os contadores.
+
+    Os campos de medição (passes, tokens, 2º passe) já vivem em `base` e não
+    podem ser sobrescritos pelo objeto que veio de uma chamada isolada.
+    """
     base.valores = leitura.valores
     base.confiancas = leitura.confiancas
     base.carimbo_encontrado = leitura.carimbo_encontrado

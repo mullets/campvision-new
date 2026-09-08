@@ -81,6 +81,11 @@ class Leitura:
     campos_do_info: dict[str, str] = field(default_factory=dict)
     # O atalho pelo cache de região foi tentado e não bastou?
     cache_falhou: bool = False
+    # Medição do 2º passe: ele dobra o custo da prancha, então precisa provar
+    # que serve. Guarda a confiança antes e depois para o relatório contar.
+    fez_segundo_passe: bool = False
+    confianca_antes_do_2o: float = 0.0
+    ganho_de_resolucao: float = 0.0
 
     @property
     def confianca_media(self) -> float:
@@ -117,6 +122,10 @@ class Leitura:
             "campos_da_pasta": self.campos_da_pasta,
             "divergencias": self.divergencias,
             "campos_do_info": self.campos_do_info,
+            "cache_falhou": self.cache_falhou,
+            "fez_segundo_passe": self.fez_segundo_passe,
+            "confianca_antes_do_2o": self.confianca_antes_do_2o,
+            "ganho_de_resolucao": self.ganho_de_resolucao,
         }
 
     @classmethod
@@ -144,6 +153,10 @@ class Leitura:
             campos_da_pasta=dados.get("campos_da_pasta", []),
             divergencias=dados.get("divergencias", []),
             campos_do_info=dados.get("campos_do_info", {}),
+            cache_falhou=dados.get("cache_falhou", False),
+            fez_segundo_passe=dados.get("fez_segundo_passe", False),
+            confianca_antes_do_2o=dados.get("confianca_antes_do_2o", 0.0),
+            ganho_de_resolucao=dados.get("ganho_de_resolucao", 0.0),
         )
 
 

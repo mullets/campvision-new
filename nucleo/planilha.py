@@ -196,6 +196,27 @@ def escrever_relatorio(leituras: list[Leitura], destino: Path, custo_usd: float 
         pct = (n / total * 100) if total else 0
         linhas.append(f"  {campo.rotulo:<20} {n:>4}/{total} ({pct:>3.0f}%)  a revisar: {fracos}")
 
+    com_2o = [l for l in leituras if l.fez_segundo_passe]
+    if com_2o:
+        melhorou = [l for l in com_2o if l.confianca_media > l.confianca_antes_do_2o + 0.05]
+        delta = sum(l.confianca_media - l.confianca_antes_do_2o for l in com_2o) / len(com_2o)
+        ganho = sum(l.ganho_de_resolucao for l in com_2o) / len(com_2o)
+        linhas += [
+            "",
+            "Segundo passe (dobra o custo da prancha — este é o retorno dele):",
+            f"  Pranchas que releram   {len(com_2o)}/{total}"
+            + (f" ({len(com_2o) / total * 100:.0f}%)" if total else ""),
+            f"  Melhoraram de fato     {len(melhorou)}"
+            + (f" ({len(melhorou) / len(com_2o) * 100:.0f}%)" if com_2o else ""),
+            f"  Confiança média        {delta:+.2f}",
+            f"  Ganho de resolução     {ganho:.1f}x",
+        ]
+        if len(melhorou) < len(com_2o) * 0.4:
+            linhas.append(
+                "  → o 2º passe está rendendo pouco: considere baixar "
+                "confianca_minima_para_aceitar no config."
+            )
+
     grupos: dict[str, int] = {}
     for leitura in leituras:
         chave = leitura.grupo or leitura.valores.get("projeto") or "(sem projeto)"
