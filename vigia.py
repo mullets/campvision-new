@@ -9,6 +9,7 @@
     python vigia.py --planilha-geral          # planilha única de todo o acervo
     python vigia.py --marcar-fase             # carimba a fase nova em todos
     python vigia.py --identidade              # confere o crédito que vai nas imagens
+    python vigia.py --criar-config            # cria o config.json com os padrões
     python vigia.py --status                 # o que está pendente agora, sem processar
 
 Ctrl+C encerra com elegância: termina a prancha em andamento, grava o
@@ -214,11 +215,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--planilha-geral", action="store_true", help="Planilha única de todo o acervo")
     p.add_argument("--marcar-fase", action="store_true", help="Carimba a fase nova em todos os projetos")
     p.add_argument("--identidade", action="store_true", help="Mostra o crédito gravado nas imagens")
+    p.add_argument("--criar-config", action="store_true", help="Cria o config.json com os padrões")
     p.add_argument("--sem-auto-atualizar", action="store_true")
     p.add_argument("--intervalo", type=int, help="Segundos entre varreduras")
     args = p.parse_args(argv)
 
     PASTA_ESTADO.mkdir(parents=True, exist_ok=True)
+    if args.criar_config:
+        criado = Config.criar_se_faltar(CAMINHO_CONFIG)
+        print(("Criado: " if criado else "Já existia (não mexi): ") + str(CAMINHO_CONFIG))
+        if not criado:
+            print("Para começar do zero, apague o arquivo e rode de novo.")
+        return 0
     config = Config.carregar(CAMINHO_CONFIG)
     if args.pasta:
         config.pasta_vigiada = str(args.pasta.expanduser().resolve())

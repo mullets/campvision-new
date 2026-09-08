@@ -68,10 +68,19 @@ echo $ANTHROPIC_API_KEY     # tem que devolver a chave
 Para o modo automático, veja a ressalva sobre LaunchAgent em
 [Instalar como serviço](#instalar-como-serviço-do-macos).
 
-### 4. Identidade da CAMP
+### 4. Config e identidade da CAMP
 
-O que vai gravado dentro de cada imagem. Preencha em
-`~/.campvision2/config.json`:
+Crie o arquivo de configuração com os padrões:
+
+```bash
+python vigia.py --criar-config    # escreve ~/.campvision2/config.json
+```
+
+Ele nunca sobrescreve um config existente. O `config.exemplo.json` no
+repositório mostra todas as opções com os valores padrão — o `config.json` real
+não é versionado, porque pode conter a chave.
+
+Agora preencha a identidade, que é o que vai gravado dentro de cada imagem:
 
 ```json
 {
@@ -408,7 +417,7 @@ atualização é pulada com aviso, sem sobrescrever seu trabalho.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 123 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 127 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -430,11 +439,13 @@ O `.github/workflows/testes.yml` roda os 123 testes a cada push, em Python 3.10 
 | `python vigia.py --relatorio-geral` | relatório acumulado |
 | `python vigia.py --marcar-fase` | carimba a fase em todos os projetos |
 | `python vigia.py --identidade` | confere o crédito das imagens |
+| `python vigia.py --criar-config` | cria o `config.json` com os padrões |
 
 ### Configuração
 
-Tudo em `~/.campvision2/config.json`, com os padrões e comentários em
-`nucleo/config.py`. Os que mais importam:
+Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
+`config.exemplo.json` lista todas as opções; os comentários de cada uma estão em
+`nucleo/config.py`. As que mais importam:
 
 | Chave | Padrão | O que faz |
 |---|---|---|
@@ -475,7 +486,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-123 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+127 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote
@@ -504,3 +515,4 @@ geradas na hora.
 | Metadados não gravados | `brew install exiftool` — sem ele a cópia acontece, o metadado não |
 | Vigia no ar mas parado | pasta SMB caiu — ele avisa no log e segue tentando |
 | "não é um repositório git" | falta `git remote add origin ...` — auto-atualização desligada até lá |
+| Não acho o `config.json` | ele só nasce com `python vigia.py --criar-config` ou no primeiro uso da janela |

@@ -38,7 +38,7 @@ for PADRAO in 'sk-ant-[A-Za-z0-9_-]{20,}' 'CAMPVISION_SMTP_SENHA=[^"$ ]{6,}'; do
     VAZANDO=1
   fi
 done
-if git ls-files --error-unmatch config.json >/dev/null 2>&1; then
+if git ls-files --error-unmatch config.json >/dev/null 2>&1; then  # o real, não o exemplo
   echo "  PERIGO: config.json está versionado e pode conter a chave." >&2
   VAZANDO=1
 fi

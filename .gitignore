@@ -5,6 +5,7 @@ venv/
 .DS_Store
 # Nunca versionar: chave de API, estado local, saídas de lote
 config.json
+!config.exemplo.json
 *.jsonl
 catalogacao.xlsx
 catalogacao.csv

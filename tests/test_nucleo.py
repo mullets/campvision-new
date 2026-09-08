@@ -370,3 +370,46 @@ class TestEsquema(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfigExemplo(unittest.TestCase):
+    """O config.exemplo.json não pode envelhecer em relação ao código."""
+
+    def _exemplo(self) -> dict:
+        caminho = Path(__file__).resolve().parent.parent / "config.exemplo.json"
+        self.assertTrue(caminho.exists(), "config.exemplo.json sumiu do repositório")
+        return json.loads(caminho.read_text(encoding="utf-8"))
+
+    def test_tem_todas_as_opcoes_do_config(self):
+        from dataclasses import fields as campos_de
+
+        exemplo = self._exemplo()
+        faltando = [
+            c.name for c in campos_de(Config)
+            if c.name != "api_key" and c.name not in exemplo
+        ]
+        self.assertEqual(
+            faltando, [],
+            f"opções novas em Config sem entrar no exemplo: {faltando}. "
+            "Rode: python -c \"from nucleo.config import Config; "
+            "open('config.exemplo.json','w').write(Config.modelo_json()+chr(10))\"",
+        )
+
+    def test_nao_traz_a_chave_de_api(self):
+        self.assertNotIn("api_key", self._exemplo())
+
+    def test_e_carregavel_pelo_config(self):
+        with TemporaryDirectory() as tmp:
+            caminho = Path(tmp) / "config.json"
+            caminho.write_text(Config.modelo_json(), encoding="utf-8")
+            cfg = Config.carregar(caminho)
+            self.assertEqual(cfg.modelo, Config().modelo)
+            self.assertEqual(cfg.extensoes, Config().extensoes)
+
+    def test_criar_se_faltar_nao_sobrescreve(self):
+        with TemporaryDirectory() as tmp:
+            caminho = Path(tmp) / "config.json"
+            self.assertTrue(Config.criar_se_faltar(caminho))
+            caminho.write_text('{"trabalhadores": 9}', encoding="utf-8")
+            self.assertFalse(Config.criar_se_faltar(caminho))
+            self.assertEqual(Config.carregar(caminho).trabalhadores, 9)

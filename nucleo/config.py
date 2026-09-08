@@ -143,6 +143,33 @@ class Config:
             json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
+    @classmethod
+    def modelo_json(cls) -> str:
+        """Config completo com os padrões, para servir de ponto de partida.
+
+        Gerado dos campos da dataclass, nunca escrito à mão: assim o
+        config.exemplo.json não envelhece quando alguém acrescenta uma opção.
+        A chave de API fica de fora de propósito — ela mora no ambiente.
+        """
+        padroes = cls()
+        dados: dict[str, Any] = {}
+        for campo in fields(cls):
+            if campo.name == "api_key":
+                continue
+            valor = getattr(padroes, campo.name)
+            dados[campo.name] = list(valor) if isinstance(valor, tuple) else valor
+        return json.dumps(dados, indent=2, ensure_ascii=False)
+
+    @classmethod
+    def criar_se_faltar(cls, caminho: Path) -> bool:
+        """Escreve o config padrão se não houver um. Nunca sobrescreve."""
+        if caminho.exists():
+            return False
+        caminho.parent.mkdir(parents=True, exist_ok=True)
+        caminho.write_text(cls.modelo_json() + "\n", encoding="utf-8")
+        _log.info("Config criado em %s", caminho)
+        return True
+
     def identidade(self):
         """Identidade institucional para os metadados."""
         from .metadados import Identidade
