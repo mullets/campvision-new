@@ -233,3 +233,40 @@ class TestRodadaCompleta(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestImagensSoltasNaRaiz(unittest.TestCase):
+    """Saída de scanner: pranchas caem soltas, sem subpasta de projeto."""
+
+    def test_raiz_com_imagens_soltas_e_um_projeto(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp) / "99 - Saida Scanner Contex HD"
+            com_imagens(raiz, 3, subpasta=None)
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual(len(achados), 1)
+            self.assertEqual(achados[0].pasta, raiz)
+
+    def test_raiz_solta_e_subpastas_convivem(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp) / "Saida"
+            com_imagens(raiz, 2, subpasta=None)
+            com_imagens(raiz / "TeatroDeSantos", 2)
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual(
+                sorted(p.pasta.name for p in achados), ["Saida", "TeatroDeSantos"]
+            )
+
+    def test_raiz_sem_imagem_nao_vira_projeto(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            com_imagens(raiz / "Projeto", 2)
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual([p.pasta.name for p in achados], ["Projeto"])
+
+    def test_subpasta_com_imagens_soltas_nao_duplica(self):
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            projeto = com_imagens(raiz / "Projeto", 2, subpasta=None)
+            com_imagens(projeto / "TIF", 2, subpasta=None)
+            achados = vigia.descobrir(raiz, Config())
+            self.assertEqual(len(achados), 1)

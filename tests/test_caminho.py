@@ -212,3 +212,38 @@ class TestProveniencia(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUrlSmb(unittest.TestCase):
+    def test_traduz_a_url_do_servidor_da_camp(self):
+        from nucleo.caminho import de_url_smb
+
+        url = ("smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/"
+               "Arquivos/99 - Saida Scanner Contex HD")
+        self.assertEqual(
+            de_url_smb(url),
+            Path("/Volumes/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD"),
+        )
+
+    def test_descarta_o_host_e_mantem_o_share(self):
+        from nucleo.caminho import de_url_smb
+
+        self.assertEqual(de_url_smb("smb://qualquer-host/Share/sub"), Path("/Volumes/Share/sub"))
+
+    def test_desfaz_percent_encoding(self):
+        from nucleo.caminho import de_url_smb
+
+        self.assertEqual(
+            de_url_smb("smb://h/Backup%20Servidor%20CAMP/Arquivos"),
+            Path("/Volumes/Backup Servidor CAMP/Arquivos"),
+        )
+
+    def test_caminho_normal_passa_direto(self):
+        from nucleo.caminho import de_url_smb
+
+        self.assertEqual(de_url_smb("/Volumes/acervos"), Path("/Volumes/acervos"))
+
+    def test_url_sem_share_nao_quebra(self):
+        from nucleo.caminho import de_url_smb
+
+        self.assertEqual(de_url_smb("smb://so-o-host"), Path("/Volumes"))

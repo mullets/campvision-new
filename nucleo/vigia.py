@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import atualizador, caminho as mod_caminho, eventos as mod_eventos, grupos, imagem, lote, planilha
+from . import atualizador, caminho as mod_caminho, eventos as mod_eventos, grupos, imagem
+from . import info_projeto as mod_info, lote, planilha
 from . import relatorio_diario
 from .config import Config
 from .planilha import LIMIAR_ATENCAO
@@ -38,9 +39,24 @@ SUBPASTAS_IMAGEM = ("JPG", "jpg", "JPEG", "IMAGENS")
 @dataclass
 class Projeto:
     pasta: Path
-    pasta_imagens: Path
+    pastas_imagens: list[Path]
     nome: str
     raiz: Path | None = None
+
+    @property
+    def pasta_imagens(self) -> Path:
+        """A principal, para exibição. O lote lê todas."""
+        return self.pastas_imagens[0] if self.pastas_imagens else self.pasta
+
+    def arquivos(self, config: Config) -> list[Path]:
+        vistos: set[Path] = set()
+        todos: list[Path] = []
+        for pasta in self.pastas_imagens:
+            for arquivo in imagem.listar_imagens(pasta, config.extensoes):
+                if arquivo not in vistos:
+                    vistos.add(arquivo)
+                    todos.append(arquivo)
+        return todos
 
     @property
     def caminho_status(self) -> Path:
@@ -101,13 +117,116 @@ def escrever_status(caminho: Path, status: str, extra: dict | None = None) -> No
     caminho.write_text(json.dumps(atual, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _pasta_de_imagens(pasta: Path, config: Config) -> Path | None:
-    """Prefere a subpasta JPG/ (é o que o F10 do Windows gera); senão, a raiz."""
-    for nome in SUBPASTAS_IMAGEM:
-        candidata = pasta / nome
-        if candidata.is_dir() and imagem.listar_imagens(candidata, config.extensoes):
-            return candidata
-    return pasta if imagem.listar_imagens(pasta, config.extensoes) else None
+MARCADORES_DE_PROJETO = ("status.json", "info_projeto.json")
+# Quanto maior, melhor a pasta de imagens. Preview/JPG ganha do arquivo
+# matriz em TIFF: para ler carimbo, JPG basta e é muito mais rápido em rede.
+PESOS = (
+    (("preview", "jpg", "jpeg"), 3),
+    (("imagens", "imagem", "fotos"), 2),
+    (("tiff", "tif", "arquivistico", "arquivístico", "matriz", "master"), 1),
+)
+PASTAS_IGNORADAS = ("catalogacao", "__macosx", "node_modules")
+
+
+def _pontuar_pasta(pasta: Path) -> int:
+    nome = pasta.name.lower()
+    for palavras, peso in PESOS:
+        if any(palavra in nome for palavra in palavras):
+            return peso
+    return 2  # pasta sem pista no nome: melhor que TIFF, pior que preview
+
+
+def _imagens_direto(pasta: Path, config: Config) -> bool:
+    return bool(imagem.listar_imagens(pasta, config.extensoes))
+
+
+def achar_pastas_de_imagens(
+    projeto: Path, config: Config, _profundidade: int = 0
+) -> list[Path]:
+    """Acha, dentro de um projeto, TODAS as pastas de imagem que interessam.
+
+    Cada acervo veio de um fluxo diferente — imagem solta na raiz, dentro de
+    JPG/, ou em `01 - Desenhos e Pranchas/03 - Preview (JPG)`. Então a busca
+    desce a árvore inteira do projeto, pontua o que acha e fica só com o melhor
+    tipo disponível: se há preview em JPG, o TIFF é ignorado; se só há TIFF,
+    lê o TIFF.
+    """
+    candidatas: list[tuple[int, Path]] = []
+
+    def caminhar(pasta: Path, nivel: int) -> None:
+        if nivel > config.profundidade_maxima:
+            return
+        if _imagens_direto(pasta, config):
+            candidatas.append((_pontuar_pasta(pasta), pasta))
+            return  # achou imagem aqui: não desce mais neste ramo
+        try:
+            filhos = sorted(pasta.iterdir(), key=lambda p: p.name.lower())
+        except (PermissionError, OSError) as erro:
+            _log.warning("Não consegui listar %s: %s", pasta, erro)
+            return
+        for filho in filhos:
+            if not filho.is_dir():
+                continue
+            if filho.name.startswith(".") or filho.name.lower() in PASTAS_IGNORADAS:
+                continue
+            caminhar(filho, nivel + 1)
+
+    caminhar(projeto, _profundidade)
+    if not candidatas:
+        return []
+
+    melhor = max(peso for peso, _ in candidatas)
+    escolhidas = [pasta for peso, pasta in candidatas if peso == melhor]
+    descartadas = [pasta.name for peso, pasta in candidatas if peso != melhor]
+    if descartadas:
+        _log.info(
+            "Projeto %s: usando %s; ignorando %s (versão de menor prioridade).",
+            projeto.name,
+            ", ".join(p.name for p in escolhidas),
+            ", ".join(descartadas),
+        )
+    return sorted(escolhidas)
+
+
+PROJETO, CONTAINER, FOLHA, NADA = "projeto", "container", "folha", "nada"
+
+
+def classificar(pasta: Path, config: Config, nivel: int = 0) -> str:
+    """Diz o que uma pasta é dentro do acervo.
+
+    - PROJETO   — tem marcador (status.json/info_projeto.json), OU seus filhos
+                  são todos pastas de imagem (o caso `Projeto/{JPG,TIF}`)
+    - FOLHA     — tem imagens direto (é uma pasta de imagem)
+    - CONTAINER — tem projetos abaixo (fundo, ano, agrupador)
+    - NADA      — nem imagem nem projeto abaixo
+
+    A classificação é de baixo para cima. É isso que distingue
+    `Fundo OCG/1968/Teatro/JPG` (container/container/projeto/folha) de
+    `Projeto/{JPG,TIF}` (projeto/folha,folha) sem depender do nome das pastas.
+    """
+    if any((pasta / marcador).exists() for marcador in MARCADORES_DE_PROJETO):
+        return PROJETO
+    if _imagens_direto(pasta, config):
+        return FOLHA
+    if nivel > config.profundidade_maxima:
+        return NADA
+
+    try:
+        filhos = [
+            f for f in pasta.iterdir()
+            if f.is_dir() and not f.name.startswith(".")
+            and f.name.lower() not in PASTAS_IGNORADAS
+        ]
+    except (PermissionError, OSError) as erro:
+        _log.warning("Não consegui listar %s: %s", pasta, erro)
+        return NADA
+
+    tipos = [classificar(f, config, nivel + 1) for f in filhos]
+    if PROJETO in tipos or CONTAINER in tipos:
+        return CONTAINER
+    if FOLHA in tipos:
+        return PROJETO  # só pastas de imagem abaixo: a pasta É o projeto
+    return NADA
 
 
 def garantir_status(pasta: Path, config: Config) -> str:
@@ -167,28 +286,40 @@ def descobrir(
 ) -> list[Projeto]:
     """Acha projetos em qualquer nível abaixo da raiz.
 
-    Regra: uma pasta que tem imagens (direto ou numa subpasta JPG/) É um
-    projeto — e a busca NÃO desce mais ali dentro. Isso evita o erro clássico
-    de tratar `Projeto/JPG` e `Projeto/TIF` como dois projetos irmãos.
+    Usa `classificar` para decidir o que é projeto e o que é agrupador, de
+    baixo para cima. Em acervo organizado o projeto (`P0001 - ...`) não tem
+    imagem na raiz dele — elas estão duas camadas abaixo, separadas em TIFF e
+    preview —, e sem isso cada subpasta de imagem viraria um projeto irmão.
     """
     if not raiz.is_dir() or _profundidade > config.profundidade_maxima:
         return []
 
+    raiz_real = _raiz or raiz
     achados: list[Projeto] = []
+
+    # A própria raiz pode ter imagens soltas (saída de scanner).
+    if _profundidade == 0 and _imagens_direto(raiz, config):
+        achados.append(Projeto(raiz, [raiz], raiz.name, raiz_real))
+
     try:
         filhos = sorted(raiz.iterdir(), key=lambda p: p.name.lower())
     except (PermissionError, OSError) as erro:
         _log.warning("Não consegui listar %s: %s", raiz, erro)
-        return []
+        return achados
 
     for pasta in filhos:
         if not pasta.is_dir() or _e_ignoravel(pasta, config):
             continue
-        pasta_imagens = _pasta_de_imagens(pasta, config)
-        if pasta_imagens is not None:
-            achados.append(Projeto(pasta, pasta_imagens, pasta.name, _raiz or raiz))
+        tipo = classificar(pasta, config)
+        if tipo in (PROJETO, FOLHA):
+            pastas = achar_pastas_de_imagens(pasta, config)
+            if pastas:
+                achados.append(Projeto(pasta, pastas, pasta.name, raiz_real))
+            else:
+                _log.info("Projeto %s marcado, mas sem imagem — pulado.", pasta.name)
             continue  # é projeto: não desce mais
-        achados.extend(descobrir(pasta, config, _profundidade + 1, _raiz or raiz))
+        if tipo == CONTAINER:
+            achados.extend(descobrir(pasta, config, _profundidade + 1, raiz_real))
     return achados
 
 
@@ -234,6 +365,8 @@ def processar(
         resultado = lote.executar(
             projeto.pasta_imagens, config, cliente,
             ao_progredir=progresso, cancelar=cancelar,
+            arquivos=projeto.arquivos(config),
+            pasta_checkpoint=projeto.pasta,
         )
         t_in = resultado.progresso.tokens_entrada
         t_out = resultado.progresso.tokens_saida
@@ -248,7 +381,10 @@ def processar(
         # A pasta entra AQUI: depois da leitura e da consolidação, nunca antes.
         if config.usar_pasta_como_pista and resultado.leituras:
             pista = mod_caminho.extrair(projeto.pasta, projeto.raiz)
-            preenchidos, divergentes = mod_caminho.aplicar(resultado.leituras, pista)
+            do_info = mod_info.ler(projeto.pasta)
+            preenchidos, divergentes = mod_caminho.aplicar(
+                resultado.leituras, pista, do_info=do_info
+            )
             if preenchidos or divergentes:
                 _log.info(
                     "Pasta %s: %d campo(s) preenchidos pela pasta, %d divergência(s).",

@@ -10,6 +10,7 @@
     python vigia.py --marcar-fase             # carimba a fase nova em todos
     python vigia.py --identidade              # confere o crédito que vai nas imagens
     python vigia.py --criar-config            # cria o config.json com os padrões
+    python vigia.py --info                    # esquema real dos info_projeto.json
     python vigia.py --status                 # o que está pendente agora, sem processar
 
 Ctrl+C encerra com elegância: termina a prancha em andamento, grava o
@@ -148,6 +149,31 @@ def _comando_identidade(config: Config) -> int:
     return 0
 
 
+def _comando_info(config: Config) -> int:
+    """Levanta o esquema real dos info_projeto.json do acervo."""
+    from nucleo import info_projeto as mod_info
+
+    if not config.pasta_vigiada or not Path(config.pasta_vigiada).is_dir():
+        print("Defina a pasta primeiro: --pasta /caminho", file=sys.stderr)
+        return 1
+    projetos = mod_vigia.descobrir(Path(config.pasta_vigiada), config)
+    esquema = mod_info.levantar_esquema(projetos)
+    if not esquema:
+        print(f"Nenhum info_projeto.json encontrado em {len(projetos)} projeto(s).")
+        return 0
+
+    print(f"{len(projetos)} projeto(s). Chaves nos info_projeto.json:\n")
+    print(f"  {'chave':<28} {'ocorrências':>11}  {'campo':<12} exemplo")
+    for chave, n in esquema.items():
+        alvo = mod_info.mapear(chave.split(".")[-1]) or "—"
+        print(f"  {chave:<28} {n:>11}  {alvo:<12} {mod_info.exemplo_de(projetos, chave)}")
+    nao_mapeadas = [c for c in esquema if not mod_info.mapear(c.split(".")[-1])]
+    if nao_mapeadas:
+        print(f"\n{len(nao_mapeadas)} chave(s) sem campo correspondente (marcadas com —).")
+        print("Se alguma delas importa, dá para mapear em nucleo/info_projeto.py.")
+    return 0
+
+
 def _comando_planilha_geral(config: Config) -> int:
     from nucleo import acervo as mod_acervo
 
@@ -206,7 +232,7 @@ def _comando_relatorio(config: Config, texto_data: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=f"CAMP Vision 2 — vigia (build {VERSAO_BUILD})")
-    p.add_argument("--pasta", type=Path, help="Pasta a vigiar (salva no config)")
+    p.add_argument("--pasta", type=str, help="Pasta a vigiar; aceita smb:// (salva no config)")
     p.add_argument("--uma-vez", action="store_true", help="Processa o pendente e sai")
     p.add_argument("--sem-painel", action="store_true", help="Log corrido, sem redesenho")
     p.add_argument("--status", action="store_true", help="Mostra o pendente e sai")
@@ -216,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--marcar-fase", action="store_true", help="Carimba a fase nova em todos os projetos")
     p.add_argument("--identidade", action="store_true", help="Mostra o crédito gravado nas imagens")
     p.add_argument("--criar-config", action="store_true", help="Cria o config.json com os padrões")
+    p.add_argument("--info", action="store_true", help="Mostra o esquema dos info_projeto.json")
     p.add_argument("--sem-auto-atualizar", action="store_true")
     p.add_argument("--intervalo", type=int, help="Segundos entre varreduras")
     args = p.parse_args(argv)
@@ -229,8 +256,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     config = Config.carregar(CAMINHO_CONFIG)
     if args.pasta:
-        config.pasta_vigiada = str(args.pasta.expanduser().resolve())
+        from nucleo.caminho import de_url_smb
+
+        alvo = de_url_smb(str(args.pasta))
+        if not alvo.is_dir():
+            print(f"Pasta não encontrada: {alvo}", file=sys.stderr)
+            if str(args.pasta).lower().startswith("smb://"):
+                print(
+                    "O share parece não estar montado. No Finder: Cmd+K, cole a URL "
+                    "smb://, conecte, e rode este comando de novo.",
+                    file=sys.stderr,
+                )
+            return 1
+        config.pasta_vigiada = str(alvo)
         config.salvar(CAMINHO_CONFIG)
+        print(f"Pasta vigiada: {alvo}")
     if args.intervalo:
         config.intervalo_varredura_segundos = args.intervalo
     if args.sem_auto_atualizar:
@@ -240,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.identidade:
         return _comando_identidade(config)
+    if args.info:
+        return _comando_info(config)
     if args.planilha_geral:
         return _comando_planilha_geral(config)
     if args.marcar_fase:

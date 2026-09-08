@@ -170,10 +170,37 @@ O que ele procura está escrito em português na constante `INSTRUCOES` de
 `nucleo/visao.py` — ajustar o comportamento do modelo é editar aquele texto, e
 sai mais barato que qualquer linha de código.
 
-### A pasta como segunda fonte
+### As fontes secundárias
 
-A estrutura de pastas já carrega projeto, ano e fundo. O app usa isso com uma
-regra rígida de proveniência:
+Além do carimbo, o acervo já carrega informação em dois lugares: o
+`info_projeto.json` de cada projeto e a própria estrutura de pastas. A ordem de
+prioridade é:
+
+```
+carimbo lido  >  info_projeto.json  >  nome da pasta
+```
+
+O carimbo é o documento. O `info_projeto.json` é curadoria humana anterior, então
+vale mais que convenção de nome de pasta. **Nenhum dos dois sobrescreve o que o
+carimbo disse.**
+
+O leitor do `info_projeto.json` é deliberadamente tolerante: casa chave por
+palavra, então `nome_do_projeto`, `nomeDoProjeto` e `titulo` caem todos em
+Projeto, e `data_projeto: "1979-04-03"` vira Ano 1979. Casa por palavra, e não
+por pedaço de texto, justamente para `plano_diretor` não virar "ano". Chave que
+ele não reconhece é ignorada, e arquivo corrompido não quebra o lote.
+
+Para ver o esquema real dos seus arquivos, sem eu adivinhar:
+
+```bash
+python vigia.py --info
+```
+
+Ele lista cada chave encontrada no acervo, quantas vezes aparece, em que campo
+caiu e um exemplo do valor. As que aparecem com `—` não têm campo
+correspondente; se alguma importar, dá para mapear em `nucleo/info_projeto.py`.
+
+A estrutura de pastas entra por último, com uma regra rígida de proveniência:
 
 **A pasta nunca é mostrada ao modelo.** Se ele souber que a pasta se chama
 `TeatroDeSantos-1968`, passa a *confirmar* isso no carimbo em vez de transcrever
@@ -251,7 +278,7 @@ não perde nem repete nada. O vigia **preserva os campos que as outras máquinas
 escreveram** no mesmo arquivo.
 
 ```bash
-python vigia.py --pasta /Volumes/acervos   # define a pasta (salva no config)
+python vigia.py --pasta /Volumes/acervos    # define a pasta (aceita URL smb://)
 python vigia.py --status                   # a árvore que ele enxerga, sem processar
 python vigia.py                            # painel ao vivo, até Ctrl+C
 python vigia.py --uma-vez                  # processa e sai (para cron)
@@ -268,6 +295,22 @@ próxima subida.
 A Fase 2 continua **desligada** por padrão mesmo aqui. O vigia automatiza a
 leitura, não a decisão de mexer nos arquivos.
 
+### Apontar para um share SMB
+
+`--pasta` aceita a URL do Finder e traduz para o ponto de montagem:
+
+```bash
+python vigia.py --pasta "smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD"
+# vira /Volumes/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD
+```
+
+O share precisa estar montado antes (Finder, Cmd+K). Se não estiver, ele diz
+isso em vez de gravar um caminho que não existe. Se o share cair durante o
+trabalho, o vigia avisa no log e segue tentando, sem morrer.
+
+Em rede, use menos `trabalhadores` (2 ou 3): o gargalo passa a ser o SMB, não a
+API.
+
 ### Rodar na raiz do acervo
 
 Aponte para a raiz e ele acha os projetos em qualquer nível abaixo:
@@ -281,10 +324,40 @@ Aponte para a raiz e ele acha os projetos em qualquer nível abaixo:
 └── _catalogacao/acervo.xlsx          ← planilha única de tudo
 ```
 
-A regra de corte: **pasta que tem imagens É um projeto, e a busca não desce mais
-ali dentro.** Sem isso, `Projeto/JPG` e `Projeto/TIF` virariam dois projetos
-irmãos. Pastas de saída, ocultas e as que começam com `_` ficam de fora.
-Profundidade máxima em `profundidade_maxima` (padrão 5).
+**Como ele decide o que é projeto.** Cada acervo veio de um fluxo diferente, e
+o nome das pastas não é confiável para isso. A classificação é de baixo para
+cima:
+
+- tem `status.json` ou `info_projeto.json` → **projeto**
+- tem imagens direto → **pasta de imagem**
+- só tem pastas de imagem abaixo → **projeto** (`Projeto/{JPG,TIF}` é um só)
+- tem projetos abaixo → **agrupador** (fundo, ano), e a busca continua descendo
+
+Isso resolve os dois formatos do acervo ao mesmo tempo:
+
+```
+BSG-EdificioPiracicaba-AnteProjeto-1979/      ← projeto
+├── status.json  info_projeto.json
+├── JPG/                                      ← lê daqui
+└── TIF/                                      ← ignorado (matriz)
+
+F001 - ARM - Arnaldo Martino/                 ← agrupador
+└── P0001 - I Simpósio ... - 1979/            ← projeto (marcador)
+    ├── status.json  info_projeto.json
+    ├── catalogacao/                          ← saída, nunca relida
+    └── 01 - Desenhos e Pranchas/
+        ├── 01 - Arquivo Arquivístico (TIFF)/ ← ignorado
+        └── 03 - Preview (JPG)/               ← lê daqui
+```
+
+**Qual pasta de imagem ele lê.** Desce a árvore inteira do projeto, pontua o
+que acha pelo nome (`preview`/`jpg` > pasta neutra > `tiff`/`arquivístico`/
+`matriz`) e fica **só com o melhor tipo disponível**. Havendo preview em JPG, o
+TIFF é ignorado — para ler carimbo o JPG basta e é muito mais rápido em rede. Só
+TIFF? Lê o TIFF. Preview em dois ramos diferentes? Lê os dois e soma.
+
+Checkpoint e `catalogacao/` ficam sempre na **raiz do projeto**, nunca dentro da
+subpasta de imagem. Profundidade máxima em `profundidade_maxima` (padrão 5).
 
 **Pasta sem `status.json` ganha um**, marcado como pronto e com
 `criado_por: campvision2`. Projeto que chegou por fora do fluxo do Windows era
@@ -417,7 +490,7 @@ atualização é pulada com aviso, sem sobrescrever seu trabalho.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 127 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 152 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -440,6 +513,7 @@ O `.github/workflows/testes.yml` roda os 127 testes a cada push, em Python 3.10 
 | `python vigia.py --marcar-fase` | carimba a fase em todos os projetos |
 | `python vigia.py --identidade` | confere o crédito das imagens |
 | `python vigia.py --criar-config` | cria o `config.json` com os padrões |
+| `python vigia.py --info` | esquema real dos `info_projeto.json` do acervo |
 
 ### Configuração
 
@@ -479,6 +553,8 @@ em `ClienteAnthropic.chamar`.
 | mudar convenção de nome/pasta | `montar_nome`, `montar_pasta` em `nucleo/aplicar.py` |
 | mudar os metadados gravados | `montar_argumentos` em `nucleo/metadados.py` |
 | mudar como a pasta é interpretada | `nucleo/caminho.py` |
+| mapear chave nova do `info_projeto.json` | `PALAVRAS` em `nucleo/info_projeto.py` |
+| mudar qual versão das imagens é lida | `PESOS` em `nucleo/vigia.py` |
 
 ### Testes
 
@@ -486,7 +562,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-127 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+152 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote

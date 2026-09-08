@@ -122,6 +122,26 @@ def extrair(pasta: Path, raiz: Path | None = None) -> PistaDePasta:
     return pista
 
 
+def de_url_smb(texto: str) -> Path:
+    """Converte smb://host/share/resto no caminho POSIX onde o macOS monta.
+
+    O Finder monta em /Volumes/<share>, então o host e o `._smb._tcp.local`
+    do Bonjour são descartados. Texto que já é caminho passa direto.
+    """
+    from urllib.parse import unquote
+
+    bruto = (texto or "").strip()
+    if not bruto.lower().startswith(("smb://", "cifs://", "afp://")):
+        return Path(bruto).expanduser()
+
+    resto = bruto.split("://", 1)[1]
+    partes = [unquote(p) for p in resto.split("/") if p]
+    if len(partes) < 2:  # só o host, sem share
+        return Path("/Volumes")
+    # partes[0] é o host (Server-Camp._smb._tcp.local); o share vem depois.
+    return Path("/Volumes").joinpath(*partes[1:])
+
+
 def _normalizar(texto: str) -> str:
     import unicodedata
 
@@ -147,20 +167,30 @@ def combinam(a: str, b: str, limiar: float = 0.62) -> bool:
 
 
 def aplicar(
-    leituras: list, pista: PistaDePasta, preencher_faltantes: bool = True
+    leituras: list,
+    pista: PistaDePasta,
+    preencher_faltantes: bool = True,
+    do_info: dict[str, str] | None = None,
 ) -> tuple[int, int]:
-    """Cruza as leituras com a pista da pasta.
+    """Cruza as leituras com as fontes secundárias.
 
-    Devolve (quantos_campos_preenchidos, quantas_divergencias). Não sobrescreve
-    nada que o carimbo tenha dito: valor lido sempre vence valor de pasta.
+    Prioridade: carimbo lido > info_projeto.json > nome da pasta. Nada
+    sobrescreve o que o carimbo disse; e o info, sendo curadoria humana
+    anterior, vence a convenção de nome de pasta.
+
+    Devolve (quantos_campos_preenchidos, quantas_divergencias).
     """
     preenchidos = divergencias = 0
-    campos_da_pasta = pista.como_campos()
+    # O info entra primeiro no dicionário, então prevalece sobre a pasta.
+    campos_da_pasta = {**pista.como_campos()}
+    campos_da_pasta.update({k: v for k, v in (do_info or {}).items() if v})
 
     for leitura in leituras:
         leitura.pista_projeto = pista.projeto
         leitura.pista_ano = pista.ano
         leitura.pista_fundo = pista.fundo
+
+        leitura.campos_do_info = dict(do_info or {})
 
         for campo, valor_pasta in campos_da_pasta.items():
             lido = (leitura.valores.get(campo) or "").strip()

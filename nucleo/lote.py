@@ -92,11 +92,20 @@ def executar(
     cliente: ClienteAPI,
     ao_progredir: Callable[[Progresso], None] | None = None,
     cancelar: threading.Event | None = None,
+    arquivos: list[Path] | None = None,
+    pasta_checkpoint: Path | None = None,
 ) -> ResultadoLote:
-    """Lê todas as imagens da pasta e devolve as leituras."""
+    """Lê as imagens e devolve as leituras.
+
+    Por padrão lê `pasta`. Um projeto cujas imagens estão espalhadas em várias
+    subpastas passa a lista pronta em `arquivos` e diz onde gravar o checkpoint
+    em `pasta_checkpoint` — assim o checkpoint fica na raiz do projeto, não
+    numa das subpastas.
+    """
     cancelar = cancelar or threading.Event()
-    arquivos = img_mod.listar_imagens(pasta, config.extensoes)
-    checkpoint = pasta / NOME_CHECKPOINT
+    if arquivos is None:
+        arquivos = img_mod.listar_imagens(pasta, config.extensoes)
+    checkpoint = (pasta_checkpoint or pasta) / NOME_CHECKPOINT
     feitos = _carregar_checkpoint(checkpoint) if config.retomar_checkpoint else {}
     if feitos:
         _log.info("Checkpoint encontrado: %d prancha(s) já lidas serão puladas.", len(feitos))

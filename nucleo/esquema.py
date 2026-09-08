@@ -78,6 +78,7 @@ class Leitura:
     pista_fundo: str = ""
     campos_da_pasta: list[str] = field(default_factory=list)
     divergencias: list[str] = field(default_factory=list)
+    campos_do_info: dict[str, str] = field(default_factory=dict)
 
     @property
     def confianca_media(self) -> float:
@@ -113,6 +114,7 @@ class Leitura:
             "pista_fundo": self.pista_fundo,
             "campos_da_pasta": self.campos_da_pasta,
             "divergencias": self.divergencias,
+            "campos_do_info": self.campos_do_info,
         }
 
     @classmethod
@@ -139,6 +141,7 @@ class Leitura:
             pista_fundo=dados.get("pista_fundo", ""),
             campos_da_pasta=dados.get("campos_da_pasta", []),
             divergencias=dados.get("divergencias", []),
+            campos_do_info=dados.get("campos_do_info", {}),
         )
 
 
