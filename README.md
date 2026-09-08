@@ -472,6 +472,53 @@ de sincronizar, e você descobriria dias depois com os arquivos parados no Mac.
 }
 ```
 
+### No Ubuntu
+
+Roda igual — o que muda é o serviço e onde o share monta.
+
+```bash
+sudo apt install -y python3-venv python3-tk libimage-exiftool-perl
+git clone git@github.com:mullets/campvision2.git
+cd campvision2
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python vigia.py --criar-config
+# preencha identidade_site no ~/.campvision2/config.json
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+python vigia.py --pasta /mnt/qnap/acervos
+python vigia.py --status
+./systemd/instalar.sh
+```
+
+Com o share já montado (fstab, `mount -t cifs`), passe o caminho direto — não
+precisa de `smb://`. Se usar a URL, ele traduz para `/mnt` no Linux e `/Volumes`
+no macOS; para outra raiz, preencha `raiz_de_montagem` no config.
+
+`python3-tk` só é necessário para a janela (`app.py`). Numa máquina headless, o
+`vigia.py` e o `cli.py` funcionam sem ele.
+
+Gerenciar o serviço:
+
+```bash
+systemctl --user status campvision2
+journalctl --user -u campvision2 -f     # acompanhar
+./systemd/instalar.sh --remover
+```
+
+**Numa máquina dedicada, habilite o lingering**, senão o serviço morre quando
+você sai da sessão SSH:
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
+A chave da API vai para `~/.campvision2/ambiente` com permissão 600, nunca para
+o unit file — unit é legível por qualquer usuário da máquina. A chave SSH da
+auto-atualização é apontada ali também, pelo mesmo motivo do macOS: serviço não
+tem `ssh-agent`.
+
 ### Instalar como serviço do macOS
 
 ```bash
@@ -599,7 +646,7 @@ o serviço.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 205 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 207 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -652,6 +699,7 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 | `espera_estabilidade_segundos` | 45 | arquivo mexido agora espera a próxima rodada |
 | `reprocessar_se_houver_novas` | true | projeto que cresce volta para a fila |
 | `intervalo_varredura_segundos` | 30 | de quanto em quanto tempo varre |
+| `raiz_de_montagem` | `""` | onde os shares montam; vazio = `/Volumes` (macOS) ou `/mnt` (Linux) |
 | `hora_relatorio` | `18:00` | quando fecha o dia |
 | `auto_atualizar` | true | puxa código novo do GitHub |
 
@@ -695,7 +743,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-205 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+207 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote

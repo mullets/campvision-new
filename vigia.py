@@ -319,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.pasta:
         from nucleo.caminho import de_url_smb
 
-        alvo = de_url_smb(str(args.pasta))
+        alvo = de_url_smb(str(args.pasta), config.raiz_de_montagem or None)
         if not alvo.is_dir():
             print(f"Pasta não encontrada: {alvo}", file=sys.stderr)
             print(mod_vigia.diagnosticar_pasta(alvo), file=sys.stderr)

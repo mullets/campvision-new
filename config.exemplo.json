@@ -30,6 +30,7 @@
   "identidade_licenca": "Todos os direitos reservados",
   "identidade_contato": "",
   "pasta_vigiada": "",
+  "raiz_de_montagem": "",
   "intervalo_varredura_segundos": 30,
   "espera_estabilidade_segundos": 45,
   "reprocessar_se_houver_novas": true,

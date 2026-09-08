@@ -223,20 +223,26 @@ class TestUrlSmb(unittest.TestCase):
         url = ("smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/"
                "Arquivos/99 - Saida Scanner Contex HD")
         self.assertEqual(
-            de_url_smb(url),
+            de_url_smb(url, "/Volumes"),
             Path("/Volumes/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD"),
         )
 
     def test_descarta_o_host_e_mantem_o_share(self):
         from nucleo.caminho import de_url_smb
 
-        self.assertEqual(de_url_smb("smb://qualquer-host/Share/sub"), Path("/Volumes/Share/sub"))
+        self.assertEqual(
+            de_url_smb("smb://qualquer-host/Share/sub", "/Volumes"), Path("/Volumes/Share/sub")
+        )
+        # no Linux, com o share montado por fstab, a raiz é outra
+        self.assertEqual(
+            de_url_smb("smb://qualquer-host/Share/sub", "/mnt"), Path("/mnt/Share/sub")
+        )
 
     def test_desfaz_percent_encoding(self):
         from nucleo.caminho import de_url_smb
 
         self.assertEqual(
-            de_url_smb("smb://h/Backup%20Servidor%20CAMP/Arquivos"),
+            de_url_smb("smb://h/Backup%20Servidor%20CAMP/Arquivos", "/Volumes"),
             Path("/Volumes/Backup Servidor CAMP/Arquivos"),
         )
 
@@ -248,13 +254,15 @@ class TestUrlSmb(unittest.TestCase):
     def test_url_sem_share_nao_quebra(self):
         from nucleo.caminho import de_url_smb
 
-        self.assertEqual(de_url_smb("smb://so-o-host"), Path("/Volumes"))
+        self.assertEqual(de_url_smb("smb://so-o-host", "/Volumes"), Path("/Volumes"))
+        self.assertEqual(de_url_smb("smb://so-o-host", "/mnt"), Path("/mnt"))
 
 
 class TestURLSMB(unittest.TestCase):
     def test_traduz_url_do_finder(self):
         alvo = caminho.de_url_smb(
-            "smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/Arquivos/99 - Saida"
+            "smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/Arquivos/99 - Saida",
+            "/Volumes",
         )
         self.assertEqual(str(alvo), "/Volumes/Backup Servidor CAMP/Arquivos/99 - Saida")
 
@@ -265,12 +273,12 @@ class TestURLSMB(unittest.TestCase):
             "Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD"
         )
         self.assertEqual(
-            str(caminho.de_url_smb(estragado)),
+            str(caminho.de_url_smb(estragado, "/Volumes")),
             "/Volumes/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD",
         )
 
     def test_percent_encoding(self):
-        alvo = caminho.de_url_smb("smb://host/Backup%20Servidor%20CAMP/Arquivos")
+        alvo = caminho.de_url_smb("smb://host/Backup%20Servidor%20CAMP/Arquivos", "/Volumes")
         self.assertEqual(str(alvo), "/Volumes/Backup Servidor CAMP/Arquivos")
 
     def test_caminho_comum_passa_direto(self):
@@ -282,7 +290,8 @@ class TestURLSMB(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             arquivo = Path(tmp) / "config.json"
             arquivo.write_text(_json.dumps({
-                "pasta_vigiada": "/Users/x/app/smb:/Server/Backup Servidor CAMP/Arquivos"
+                "pasta_vigiada": "/Users/x/app/smb:/Server/Backup Servidor CAMP/Arquivos",
+                "raiz_de_montagem": "/Volumes",
             }), encoding="utf-8")
             cfg = Config.carregar(arquivo)
             self.assertEqual(
@@ -309,6 +318,16 @@ class TestDiagnostico(unittest.TestCase):
     def test_aponta_share_nao_montado(self):
         from nucleo.vigia import diagnosticar_pasta
 
-        mensagem = diagnosticar_pasta(Path("/Volumes/Nao Montado XYZ/Arquivos"))
+        mensagem = diagnosticar_pasta(
+            Path("/Volumes/Nao Montado XYZ/Arquivos"), Path("/Volumes")
+        )
         self.assertIn("não está montado", mensagem)
-        self.assertIn("Cmd+K", mensagem)
+
+    def test_diagnostico_no_linux_fala_de_mount(self):
+        from nucleo.vigia import diagnosticar_pasta
+
+        mensagem = diagnosticar_pasta(Path("/mnt/qnap-inexistente/acervos"), Path("/mnt"))
+        self.assertIn("não está montado", mensagem)
+
+    def test_caminho_ja_montado_passa_direto(self):
+        self.assertEqual(str(caminho.de_url_smb("/mnt/qnap/acervos")), "/mnt/qnap/acervos")

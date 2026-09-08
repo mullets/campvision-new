@@ -15,7 +15,7 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-09-08-08"
+VERSAO_BUILD = "2026-09-08-09"
 
 _log = logging.getLogger("cv2.config")
 
@@ -95,6 +95,9 @@ class Config:
     # --- Vigia (modo automático) ---
     # Raiz montada por SMB onde os projetos chegam do Windows/QNAP.
     pasta_vigiada: str = ""
+    # Onde os shares aparecem montados. Vazio = descobre pela plataforma
+    # (/Volumes no macOS, /mnt no Linux). Preencha se o seu monta em outro lugar.
+    raiz_de_montagem: str = ""
     intervalo_varredura_segundos: int = 30
     # Arquivo mexido há menos que isto ainda pode estar sendo copiado pelo
     # scanner. Ler JPG pela metade gera leitura errada e gasta chamada à toa.
@@ -170,7 +173,7 @@ class Config:
         if "smb:" in cfg.pasta_vigiada or "cifs:" in cfg.pasta_vigiada:
             from .caminho import de_url_smb
 
-            corrigido = str(de_url_smb(cfg.pasta_vigiada))
+            corrigido = str(de_url_smb(cfg.pasta_vigiada, cfg.raiz_de_montagem or None))
             _log.warning(
                 "pasta_vigiada estava malformada e foi corrigida:\n  antes: %s\n  agora: %s",
                 cfg.pasta_vigiada, corrigido,

@@ -1,0 +1,26 @@
+[Unit]
+Description=CAMP Vision 2 — vigia de catalogacao de acervo
+Documentation=https://github.com/mullets/campvision2
+# Espera a rede e a montagem do share; sem isso ele sobe antes da pasta existir.
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO__
+ExecStart=__PYTHON__ __REPO__/vigia.py --sem-painel
+
+# A chave da API vem de um arquivo com permissao 600, nunca do unit file:
+# o unit e legivel por qualquer usuario da maquina.
+EnvironmentFile=__CASA__/.campvision2/ambiente
+Environment=PYTHONUNBUFFERED=1
+
+# Reinicia sozinho se cair, e depois da auto-atualizacao (os.execv tambem cobre).
+Restart=always
+RestartSec=15
+
+StandardOutput=append:__CASA__/.campvision2/vigia.out.log
+StandardError=append:__CASA__/.campvision2/vigia.err.log
+
+[Install]
+WantedBy=default.target

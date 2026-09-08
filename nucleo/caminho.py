@@ -122,11 +122,28 @@ def extrair(pasta: Path, raiz: Path | None = None) -> PistaDePasta:
     return pista
 
 
-def de_url_smb(texto: str) -> Path:
-    """Converte smb://host/share/resto no caminho POSIX onde o macOS monta.
+def raiz_de_montagem_padrao() -> Path:
+    """Onde os shares aparecem montados nesta máquina.
 
-    O Finder monta em /Volumes/<share>, então o host e o `._smb._tcp.local`
-    do Bonjour são descartados. Texto que já é caminho passa direto.
+    macOS monta em /Volumes. No Linux depende de como foi montado: /mnt é a
+    convenção de montagem manual e fstab, /media é o automount de desktop.
+    """
+    import sys
+
+    if sys.platform == "darwin":
+        return Path("/Volumes")
+    for candidata in (Path("/mnt"), Path("/media"), Path("/Volumes")):
+        if candidata.is_dir():
+            return candidata
+    return Path("/mnt")
+
+
+def de_url_smb(texto: str, raiz_montagem: Path | str | None = None) -> Path:
+    """Converte smb://host/share/resto no caminho onde o share está montado.
+
+    O host e o sufixo `._smb._tcp.local` do Bonjour são descartados: o que
+    importa é o nome do share. Texto que já é caminho passa direto — no Linux,
+    com o share montado por fstab, esse é o caso normal.
     """
     from urllib.parse import unquote
 
@@ -145,12 +162,13 @@ def de_url_smb(texto: str) -> Path:
     if not baixo.startswith(("smb:", "cifs:", "afp:")):
         return Path(bruto).expanduser()
 
+    raiz = Path(raiz_montagem) if raiz_montagem else raiz_de_montagem_padrao()
     resto = bruto.split(":", 1)[1].lstrip("/")
     partes = [unquote(p) for p in resto.split("/") if p]
     if len(partes) < 2:  # só o host, sem share
-        return Path("/Volumes")
+        return raiz
     # partes[0] é o host (Server-Camp._smb._tcp.local); o share vem depois.
-    return Path("/Volumes").joinpath(*partes[1:])
+    return raiz.joinpath(*partes[1:])
 
 
 def _normalizar(texto: str) -> str:

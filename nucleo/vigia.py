@@ -284,7 +284,7 @@ def classificar(pasta: Path, config: Config, nivel: int = 0) -> str:
     return NADA
 
 
-def diagnosticar_pasta(raiz: Path) -> str:
+def diagnosticar_pasta(raiz: Path, raiz_montagem: Path | None = None) -> str:
     """Diz POR QUE a pasta não está acessível, em vez de chutar 'SMB caiu'."""
     texto = str(raiz)
     if "smb:" in texto or "cifs:" in texto:
@@ -292,14 +292,18 @@ def diagnosticar_pasta(raiz: Path) -> str:
             "caminho malformado (contém 'smb:') — rode: "
             'python vigia.py --pasta "smb://servidor/share/pasta"'
         )
-    if texto.startswith("/Volumes/"):
+    from .caminho import raiz_de_montagem_padrao
+
+    base = raiz_montagem or raiz_de_montagem_padrao()
+    if texto.startswith(f"{base}/"):
         partes = Path(texto).parts
-        montagem = Path("/Volumes") / partes[2] if len(partes) > 2 else Path("/Volumes")
+        montagem = base / partes[len(base.parts)] if len(partes) > len(base.parts) else base
         if not montagem.exists():
-            return (
-                f"share '{montagem.name}' não está montado — conecte no Finder "
-                "(Cmd+K) e ele segue sozinho"
-            )
+            import sys
+
+            como = ("conecte no Finder (Cmd+K)" if sys.platform == "darwin"
+                    else f"monte o share em {montagem} (mount -t cifs / fstab)")
+            return f"share '{montagem.name}' não está montado — {como} e ele segue sozinho"
         return f"share montado, mas '{raiz.name}' não existe dentro dele — confira o caminho"
     return f"pasta {raiz} não existe ou está inacessível — seguindo tentando"
 
