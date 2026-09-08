@@ -75,20 +75,48 @@ fi
 echo "== 4. Remoto =="
 if git remote get-url origin >/dev/null 2>&1; then
   echo "  origin já existe: $(git remote get-url origin)"
+elif command -v gh >/dev/null 2>&1; then
+  echo "  criando o repositório no GitHub com o gh..."
+  gh repo create "$USUARIO/$NOME" --private --source=. --remote=origin
 else
-  if command -v gh >/dev/null 2>&1; then
-    echo "  criando o repositório no GitHub com o gh..."
-    gh repo create "$USUARIO/$NOME" --private --source=. --remote=origin
-  else
-    git remote add origin "$URL"
-    echo "  origin definido como $URL"
-    echo "  ATENÇÃO: crie o repositório vazio em https://github.com/new (nome: $NOME)"
-    echo "           antes de continuar, ou instale o gh: brew install gh"
-  fi
+  # Sem o gh não dá para criar o repositório daqui. Definir o remoto e tentar
+  # o push resultaria num erro de SSH sem explicação, então paramos aqui com a
+  # instrução exata.
+  git remote add origin "$URL"
+  echo "  origin definido como $URL"
+  echo
+  echo "Falta criar o repositório no GitHub. Duas opções:"
+  echo
+  echo "  a) instale o gh e rode este script de novo:"
+  echo "       brew install gh && gh auth login"
+  echo "       ./publicar.sh $USUARIO"
+  echo
+  echo "  b) crie na mão em https://github.com/new"
+  echo "       nome: $NOME   |   vazio, SEM README nem .gitignore"
+  echo "       depois rode: ./publicar.sh $USUARIO"
+  exit 0
 fi
 
 echo "== 5. Enviando =="
-git push -u origin main
+if ! git push -u origin main; then
+  echo
+  echo "O push falhou. Causas comuns:" >&2
+  echo "  - o repositório ainda não existe: crie em https://github.com/new" >&2
+  echo "  - sem chave SSH configurada: use ./publicar.sh $USUARIO --https" >&2
+  echo "  - repositório criado com README: rode 'git pull --rebase origin main'" >&2
+  exit 1
+fi
+
 echo
 echo "Pronto: $(git remote get-url origin)"
+echo
+echo "Na máquina dedicada:"
+echo "  git clone $URL"
+echo "  cd $NOME && python3 -m venv .venv && source .venv/bin/activate"
+echo "  pip install -r requirements.txt"
+echo "  export ANTHROPIC_API_KEY=\"sk-ant-...\""
+echo "  python vigia.py --criar-config"
+echo "  python vigia.py --pasta \"smb://servidor/share/pasta\""
+echo "  ./launchagent/instalar.sh"
+echo
 echo "A auto-atualização do vigia já funciona a partir deste remoto."
