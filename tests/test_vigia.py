@@ -31,7 +31,7 @@ class TestVarredura(unittest.TestCase):
             montar_projeto(raiz, "OCG-Teatro-1968", "enviado_windows")
             montar_projeto(raiz, "SBU-Casa-1972", "campvision_concluido")
             montar_projeto(raiz, "PMR-Museu-1988", None)
-            achados = vigia.varrer(raiz, Config())
+            achados = vigia.varrer(raiz, Config(espera_estabilidade_segundos=0))
             # PMR não tinha status.json: o vigia cria um e ela entra na fila.
             self.assertEqual(
                 sorted(p.nome for p in achados), ["OCG-Teatro-1968", "PMR-Museu-1988"]
@@ -41,14 +41,14 @@ class TestVarredura(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             montar_projeto(raiz, "PMR-Museu-1988", None)
-            cfg = Config(exigir_status_json=False)
+            cfg = Config(espera_estabilidade_segundos=0, exigir_status_json=False)
             self.assertEqual(len(vigia.varrer(raiz, cfg)), 1)
 
     def test_usa_a_subpasta_jpg(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             montar_projeto(raiz, "OCG-Teatro-1968", "enviado_windows")
-            achado = vigia.varrer(raiz, Config())[0]
+            achado = vigia.varrer(raiz, Config(espera_estabilidade_segundos=0))[0]
             self.assertEqual(achado.pasta_imagens.name, "JPG")
 
     def test_pasta_sem_imagem_e_ignorada(self):
@@ -57,14 +57,14 @@ class TestVarredura(unittest.TestCase):
             pasta = raiz / "vazio"
             pasta.mkdir()
             (pasta / "status.json").write_text('{"status": "enviado_windows"}')
-            self.assertEqual(vigia.varrer(raiz, Config()), [])
+            self.assertEqual(vigia.varrer(raiz, Config(espera_estabilidade_segundos=0)), [])
 
     def test_status_corrompido_nao_derruba_a_varredura(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             pasta = montar_projeto(raiz, "OCG-Teatro-1968", "enviado_windows")
             (pasta / "status.json").write_text("{isso nao e json")
-            self.assertEqual(vigia.varrer(raiz, Config()), [])
+            self.assertEqual(vigia.varrer(raiz, Config(espera_estabilidade_segundos=0)), [])
 
 
 class TestStatus(unittest.TestCase):
@@ -89,19 +89,19 @@ class TestProcessamento(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             montar_projeto(raiz, "OCG-Teatro-1968", "enviado_windows", 3)
-            projeto = vigia.varrer(raiz, Config())[0]
-            evento = vigia.processar(projeto, Config(trabalhadores=2), ClienteFalso([resposta_padrao()]))
+            projeto = vigia.varrer(raiz, Config(espera_estabilidade_segundos=0))[0]
+            evento = vigia.processar(projeto, Config(espera_estabilidade_segundos=0, trabalhadores=2), ClienteFalso([resposta_padrao()]))
             self.assertEqual(evento.pranchas, 3)
             self.assertEqual(evento.com_carimbo, 3)
             self.assertFalse(evento.falha)
             self.assertEqual(vigia.ler_status(projeto.caminho_status), "campvision_concluido")
-            self.assertTrue((projeto.pasta / "catalogacao" / "catalogacao.xlsx").exists())
+            self.assertTrue((projeto.pasta / "catalogacao" / "catalogacao.csv").exists())
 
     def test_projeto_processado_sai_da_fila(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             montar_projeto(raiz, "OCG-Teatro-1968", "enviado_windows", 2)
-            cfg = Config(trabalhadores=1)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1)
             projeto = vigia.varrer(raiz, cfg)[0]
             vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
             self.assertEqual(vigia.varrer(raiz, cfg), [], "não pode reprocessar")
@@ -110,7 +110,7 @@ class TestProcessamento(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             montar_projeto(raiz, "PMR-Museu-1988", None, 2)
-            cfg = Config(trabalhadores=1)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1)
             projeto = vigia.varrer(raiz, cfg)[0]
             vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
             self.assertEqual(vigia.varrer(raiz, cfg), [])
@@ -123,8 +123,8 @@ class TestProcessamento(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             montar_projeto(raiz, "OCG-Teatro-1968", "enviado_windows", 2)
-            projeto = vigia.varrer(raiz, Config())[0]
-            evento = vigia.processar(projeto, Config(trabalhadores=1), ClienteQuebrado())
+            projeto = vigia.varrer(raiz, Config(espera_estabilidade_segundos=0))[0]
+            evento = vigia.processar(projeto, Config(espera_estabilidade_segundos=0, trabalhadores=1), ClienteQuebrado())
             # A leitura falha por prancha, o lote termina, mas nada é perdido.
             self.assertEqual(evento.erros, 2)
             self.assertEqual(vigia.ler_status(projeto.caminho_status), "campvision_concluido")
@@ -133,9 +133,9 @@ class TestProcessamento(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             montar_projeto(raiz, "OCG-Teatro-1968", "enviado_windows", 1)
-            projeto = vigia.varrer(raiz, Config())[0]
+            projeto = vigia.varrer(raiz, Config(espera_estabilidade_segundos=0))[0]
             fraca = resposta_padrao(folha={"valor": "03", "confianca": 0.2})
-            cfg = Config(trabalhadores=1, consolidar_por_projeto=False)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1, consolidar_por_projeto=False)
             evento = vigia.processar(projeto, cfg, ClienteFalso([fraca]))
             self.assertGreaterEqual(evento.campos_a_revisar, 1)
 
@@ -147,7 +147,7 @@ class TestLacoDoVigia(unittest.TestCase):
             estado = Path(tmp) / "estado"
             for nome in ("A-1968", "B-1972", "C-1980"):
                 montar_projeto(raiz, nome, "enviado_windows", 2)
-            cfg = Config(trabalhadores=2, pasta_vigiada=str(raiz), auto_atualizar=False)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=2, pasta_vigiada=str(raiz), auto_atualizar=False)
             v = vigia.Vigia(cfg, ClienteFalso([resposta_padrao()]), estado)
             self.assertEqual(v.uma_rodada(), 3)
             self.assertEqual(v.uma_rodada(), 0, "segunda passada não acha nada")
@@ -205,11 +205,11 @@ class TestRelatorioDiario(unittest.TestCase):
             self.assertTrue((Path(tmp) / "relatorio-2026-09-04.html").exists())
 
     def test_email_desligado_nao_tenta_enviar(self):
-        erro = relatorio_diario.enviar_email(Config(), "texto", date(2026, 9, 4))
+        erro = relatorio_diario.enviar_email(Config(espera_estabilidade_segundos=0), "texto", date(2026, 9, 4))
         self.assertIn("desligado", erro)
 
     def test_email_incompleto_avisa_o_que_falta(self):
-        cfg = Config(email_ativo=True, email_para="a@b.c")
+        cfg = Config(espera_estabilidade_segundos=0, email_ativo=True, email_para="a@b.c")
         erro = relatorio_diario.enviar_email(cfg, "texto", date(2026, 9, 4))
         self.assertIn("incompleta", erro)
 

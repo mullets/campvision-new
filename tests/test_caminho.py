@@ -155,7 +155,9 @@ class TestIntegracaoComOVigia(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             com_imagens(raiz / "Fundo OCG" / "1968" / "TeatroDeSantos", 2)
-            cfg = Config(trabalhadores=1, consolidar_por_projeto=False, pasta_vigiada=str(raiz))
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1,
+                         consolidar_por_projeto=False, pasta_vigiada=str(raiz),
+                         formatos_saida=("csv", "xlsx"))
             projeto = vigia.varrer(raiz, cfg)[0]
             # a resposta falsa diz CASA DA PRAIA: diverge da pasta TeatroDeSantos
             vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
@@ -176,7 +178,7 @@ class TestIntegracaoComOVigia(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             com_imagens(raiz / "Fundo OCG" / "1968" / "TeatroDeSantos", 1)
-            cfg = Config(
+            cfg = Config(espera_estabilidade_segundos=0, 
                 trabalhadores=1, consolidar_por_projeto=False,
                 usar_pasta_como_pista=False, pasta_vigiada=str(raiz),
             )
@@ -204,7 +206,7 @@ class TestProveniencia(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             alvo = prancha_falsa(Path(tmp) / "TeatroDeSantos-1968-003.jpg", 800, 600)
             cliente = ClienteFalso([resposta_padrao()])
-            LeitorDeCarimbo(Config(), cliente).ler(alvo)
+            LeitorDeCarimbo(Config(espera_estabilidade_segundos=0), cliente).ler(alvo)
             enviado = str(cliente.chamadas[0]["mensagens"])
             self.assertNotIn("TeatroDeSantos", enviado, "o nome do arquivo não pode vazar")
             self.assertNotIn("1968", enviado)

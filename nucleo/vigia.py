@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import threading
 import time
 from dataclasses import dataclass, field
@@ -48,15 +49,55 @@ class Projeto:
         """A principal, para exibição. O lote lê todas."""
         return self.pastas_imagens[0] if self.pastas_imagens else self.pasta
 
-    def arquivos(self, config: Config) -> list[Path]:
+    def arquivos(self, config: Config, so_estaveis: bool = False) -> list[Path]:
+        """Todas as imagens do projeto.
+
+        Com `so_estaveis`, deixa de fora arquivo mexido agora há pouco: o
+        scanner pode ainda estar copiando, e ler JPG pela metade dá leitura
+        errada e gasta uma chamada à toa. Ele entra na varredura seguinte.
+        """
+        limite = time.time() - config.espera_estabilidade_segundos
         vistos: set[Path] = set()
         todos: list[Path] = []
         for pasta in self.pastas_imagens:
             for arquivo in imagem.listar_imagens(pasta, config.extensoes):
-                if arquivo not in vistos:
-                    vistos.add(arquivo)
-                    todos.append(arquivo)
+                if arquivo in vistos:
+                    continue
+                if so_estaveis:
+                    try:
+                        if arquivo.stat().st_mtime > limite:
+                            continue
+                    except OSError:
+                        continue
+                vistos.add(arquivo)
+                todos.append(arquivo)
         return todos
+
+    def ja_lidos(self) -> set[str]:
+        """Nomes já registrados no checkpoint deste projeto."""
+        caminho = self.pasta / lote.NOME_CHECKPOINT
+        if not caminho.exists():
+            return set()
+        nomes: set[str] = set()
+        try:
+            for linha in caminho.read_text(encoding="utf-8").splitlines():
+                linha = linha.strip()
+                if not linha:
+                    continue
+                try:
+                    nomes.add(json.loads(linha).get("arquivo", ""))
+                except json.JSONDecodeError:
+                    continue
+        except OSError:
+            return set()
+        return {n for n in nomes if n}
+
+    def tem_pranchas_novas(self, config: Config) -> bool:
+        """Chegou prancha depois da última catalogação?"""
+        lidos = self.ja_lidos()
+        if not lidos:
+            return False
+        return any(a.name not in lidos for a in self.arquivos(config, so_estaveis=True))
 
     @property
     def caminho_status(self) -> Path:
@@ -397,6 +438,12 @@ def varrer(raiz: Path, config: Config) -> list[Projeto]:
     for projeto in descobrir(raiz, config):
         status = garantir_status(projeto.pasta, config)
 
+        # Tempo real: projeto já concluído que ganhou prancha nova volta à fila.
+        if config.reprocessar_se_houver_novas and projeto.tem_pranchas_novas(config):
+            _log.info("Projeto %s tem prancha(s) nova(s) — de volta à fila.", projeto.nome)
+            prontos.append((projeto.pasta.stat().st_mtime, projeto))
+            continue
+
         if config.processar_tudo_sem_fase:
             # Mutirão: o único portão é a fase. Status antigo, seja qual for,
             # não impede — é justamente o que se quer normalizar.
@@ -438,7 +485,7 @@ def processar(
         resultado = lote.executar(
             projeto.pasta_imagens, config, cliente,
             ao_progredir=progresso, cancelar=cancelar,
-            arquivos=projeto.arquivos(config),
+            arquivos=projeto.arquivos(config, so_estaveis=True),
             pasta_checkpoint=projeto.pasta,
         )
         t_in = resultado.progresso.tokens_entrada
@@ -466,11 +513,15 @@ def processar(
 
         custo = config.custo_estimado_usd(t_in, t_out)
         destino = projeto.pasta / "catalogacao"
-        planilha.escrever_xlsx(resultado.leituras, destino / NOME_PLANILHA)
-        planilha.escrever_csv(resultado.leituras, destino / "catalogacao.csv")
-        planilha.escrever_relatorio(resultado.leituras, destino / "relatorio.txt", custo)
+        if config.escrever_por_projeto:
+            if "xlsx" in config.formatos_saida:
+                planilha.escrever_xlsx(resultado.leituras, destino / NOME_PLANILHA)
+            if "csv" in config.formatos_saida:
+                planilha.escrever_csv(resultado.leituras, destino / "catalogacao.csv")
+            planilha.escrever_relatorio(resultado.leituras, destino / "relatorio.txt", custo)
         # Leituras finais (já consolidadas) em JSON: é daqui que a planilha
         # única do acervo é remontada, sem gastar API de novo.
+        # Sempre escrito: é daqui que a catalogação da raiz é remontada, sem API.
         planilha.escrever_json(resultado.leituras, destino / "leituras.json")
 
         evento.pranchas = len(resultado.leituras)

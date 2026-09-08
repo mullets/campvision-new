@@ -28,7 +28,7 @@ class TestDescobertaRecursiva(unittest.TestCase):
             raiz = Path(tmp)
             com_imagens(raiz / "Acervo OCG" / "1968" / "TeatroDeSantos")
             com_imagens(raiz / "Acervo SBU" / "CasaDaPraia")
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual(
                 sorted(p.nome for p in achados), ["CasaDaPraia", "TeatroDeSantos"]
             )
@@ -39,7 +39,7 @@ class TestDescobertaRecursiva(unittest.TestCase):
             projeto = raiz / "TeatroDeSantos"
             com_imagens(projeto, 2, "JPG")
             com_imagens(projeto, 2, "TIF")
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual(len(achados), 1)
             self.assertEqual(achados[0].nome, "TeatroDeSantos")
             self.assertEqual(achados[0].pasta_imagens.name, "JPG")
@@ -48,7 +48,7 @@ class TestDescobertaRecursiva(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             com_imagens(raiz / "CasaSolta", 2, subpasta=None)
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual([p.nome for p in achados], ["CasaSolta"])
             self.assertEqual(achados[0].pasta_imagens.name, "CasaSolta")
 
@@ -59,22 +59,22 @@ class TestDescobertaRecursiva(unittest.TestCase):
             com_imagens(raiz / "_catalogacao")
             com_imagens(raiz / ".oculta")
             com_imagens(raiz / "Projeto2" / "catalogacao")
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual([p.nome for p in achados], ["Projeto"])
 
     def test_respeita_a_profundidade_maxima(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             com_imagens(raiz / "a" / "b" / "c" / "d" / "e" / "f" / "Fundo")
-            self.assertEqual(vigia.descobrir(raiz, Config(profundidade_maxima=2)), [])
-            self.assertEqual(len(vigia.descobrir(raiz, Config(profundidade_maxima=9))), 1)
+            self.assertEqual(vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0, profundidade_maxima=2)), [])
+            self.assertEqual(len(vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0, profundidade_maxima=9))), 1)
 
     def test_pasta_so_de_documentos_nao_vira_projeto(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             (raiz / "Contratos").mkdir()
             (raiz / "Contratos" / "leia.txt").write_text("nada")
-            self.assertEqual(vigia.descobrir(raiz, Config()), [])
+            self.assertEqual(vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0)), [])
 
 
 class TestMarcadorDeFase(unittest.TestCase):
@@ -85,7 +85,7 @@ class TestMarcadorDeFase(unittest.TestCase):
                 json.dumps({"status": "campvision_concluido", "enviado_por": "windows"}),
                 encoding="utf-8",
             )
-            vigia.marcar_fase(pasta, Config())
+            vigia.marcar_fase(pasta, Config(espera_estabilidade_segundos=0))
             dados = json.loads((pasta / "status.json").read_text())
             self.assertEqual(dados["fase"], "organizado_v2")
             self.assertIn("fase_em", dados)
@@ -96,7 +96,7 @@ class TestMarcadorDeFase(unittest.TestCase):
     def test_cria_status_se_nao_houver(self):
         with TemporaryDirectory() as tmp:
             pasta = com_imagens(Path(tmp) / "Projeto")
-            vigia.marcar_fase(pasta, Config())
+            vigia.marcar_fase(pasta, Config(espera_estabilidade_segundos=0))
             dados = json.loads((pasta / "status.json").read_text())
             self.assertEqual(dados["fase"], "organizado_v2")
             self.assertEqual(dados["status"], "enviado_windows")
@@ -105,14 +105,14 @@ class TestMarcadorDeFase(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             pasta = com_imagens(Path(tmp) / "Projeto")
             (pasta / "status.json").write_text("{quebrado")
-            vigia.marcar_fase(pasta, Config())
+            vigia.marcar_fase(pasta, Config(espera_estabilidade_segundos=0))
             self.assertEqual(json.loads((pasta / "status.json").read_text())["fase"], "organizado_v2")
 
     def test_processar_carimba_a_fase(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             com_imagens(raiz / "Projeto", 2)
-            cfg = Config(trabalhadores=1)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1)
             projeto = vigia.varrer(raiz, cfg)[0]
             vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
             dados = json.loads((projeto.pasta / "status.json").read_text())
@@ -125,7 +125,9 @@ class TestPlanilhaDoAcervo(unittest.TestCase):
         com_imagens(raiz / "OCG" / "TeatroDeSantos", 3)
         com_imagens(raiz / "OCG" / "CasaDaPraia", 2)
         com_imagens(raiz / "Pendente", 2)
-        cfg = Config(trabalhadores=1, consolidar_por_projeto=False, pasta_vigiada=str(raiz))
+        cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1,
+                     consolidar_por_projeto=False, pasta_vigiada=str(raiz),
+                     formatos_saida=("csv", "xlsx"))
         for projeto in vigia.varrer(raiz, cfg):
             if projeto.nome == "Pendente":
                 continue
@@ -198,7 +200,9 @@ class TestPlanilhaDoAcervo(unittest.TestCase):
     def test_acervo_vazio_nao_quebra(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
-            caminho, projetos, pranchas = acervo.escrever(raiz, Config(pasta_vigiada=str(raiz)))
+            caminho, projetos, pranchas = acervo.escrever(
+                raiz, Config(espera_estabilidade_segundos=0, pasta_vigiada=str(raiz),
+                             formatos_saida=("csv", "xlsx")))
             self.assertEqual((projetos, pranchas), (0, 0))
             wb = load_workbook(caminho)
             self.assertIn("nenhuma", str(wb["Pendentes"]["A2"].value).lower())
@@ -220,7 +224,9 @@ class TestRodadaCompleta(unittest.TestCase):
             com_imagens(raiz / "Fundo A" / "Projeto 1", 2)
             com_imagens(raiz / "Fundo A" / "Projeto 2", 2)
             com_imagens(raiz / "Fundo B" / "1972" / "Projeto 3", 2)
-            cfg = Config(trabalhadores=2, pasta_vigiada=str(raiz), auto_atualizar=False)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=2,
+                         pasta_vigiada=str(raiz), auto_atualizar=False,
+                         formatos_saida=("csv", "xlsx"))
             v = vigia.Vigia(cfg, ClienteFalso([resposta_padrao()]), estado)
             self.assertEqual(v.uma_rodada(), 3)
             planilha_geral = raiz / "_catalogacao" / "acervo.xlsx"
@@ -242,7 +248,7 @@ class TestImagensSoltasNaRaiz(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp) / "99 - Saida Scanner Contex HD"
             com_imagens(raiz, 3, subpasta=None)
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual(len(achados), 1)
             self.assertEqual(achados[0].pasta, raiz)
 
@@ -251,7 +257,7 @@ class TestImagensSoltasNaRaiz(unittest.TestCase):
             raiz = Path(tmp) / "Saida"
             com_imagens(raiz, 2, subpasta=None)
             com_imagens(raiz / "TeatroDeSantos", 2)
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual(
                 sorted(p.pasta.name for p in achados), ["Saida", "TeatroDeSantos"]
             )
@@ -260,7 +266,7 @@ class TestImagensSoltasNaRaiz(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             com_imagens(raiz / "Projeto", 2)
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual([p.pasta.name for p in achados], ["Projeto"])
 
     def test_subpasta_com_imagens_soltas_nao_duplica(self):
@@ -268,5 +274,5 @@ class TestImagensSoltasNaRaiz(unittest.TestCase):
             raiz = Path(tmp)
             projeto = com_imagens(raiz / "Projeto", 2, subpasta=None)
             com_imagens(projeto / "TIF", 2, subpasta=None)
-            achados = vigia.descobrir(raiz, Config())
+            achados = vigia.descobrir(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual(len(achados), 1)

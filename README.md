@@ -284,6 +284,19 @@ python vigia.py                            # painel ao vivo, até Ctrl+C
 python vigia.py --uma-vez                  # processa e sai (para cron)
 ```
 
+**Deixar rodando de vez.** É o uso normal: `python vigia.py` (ou o LaunchAgent)
+varre a cada 30 s e processa o que aparecer. Duas proteções para isso funcionar
+com o scanner despejando arquivo na pasta:
+
+- **Arquivo recém-copiado espera.** Prancha mexida há menos de
+  `espera_estabilidade_segundos` (45 s) fica de fora da rodada: o scanner pode
+  ainda estar escrevendo, e ler JPG pela metade dá leitura errada e gasta
+  chamada à toa. Ela entra na varredura seguinte.
+- **Projeto que cresce volta para a fila.** Projeto já concluído que ganha
+  pranchas novas é recolocado na fila automaticamente, e **só as novas vão à
+  API** — o checkpoint segura as que já foram lidas. Desligar:
+  `"reprocessar_se_houver_novas": false`.
+
 O painel mostra situação, fila, barra da prancha atual, contadores do dia e custo
 acumulado. Fora de um terminal ele se desliga sozinho e vira log corrido, sem
 lixo de escape ANSI no arquivo.
@@ -380,11 +393,15 @@ projeto. Status que já existe nunca é mexido.
 
 Escrita em `_catalogacao/acervo.xlsx` ao fim de cada rodada:
 
-| Aba | O quê |
-|---|---|
-| **Acervo** | uma linha por prancha do acervo inteiro, com a pasta de origem, filtro ligado e as cores de confiança |
-| **Projetos** | uma linha por projeto: fundo, pranchas, cobertura, campos a revisar, divergências, status e fase — com totais |
-| **Pendentes** | o que ainda não passou pela leitura |
+Sai em **CSV** por padrão (`acervo.csv`): abre em tudo, é rápido em rede e serve
+para grep. Acrescente `"xlsx"` em `formatos_saida` se quiser também a planilha de
+três abas — Acervo (uma linha por prancha, com filtro e cores de confiança),
+Projetos (fundo, cobertura, campos a revisar, divergências, com totais) e
+Pendentes.
+
+Cada projeto também recebe a sua catalogação em `catalogacao/`. Para ter só a da
+raiz: `"escrever_por_projeto": false`. O `leituras.json` de cada projeto é
+sempre escrito — é dele que a catalogação da raiz é remontada, sem gastar API.
 
 Remontada dos `catalogacao/leituras.json` de cada projeto, **nunca da API**. Rode
 quantas vezes quiser, a qualquer hora, sem custo:
@@ -588,6 +605,11 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 | `criar_status_ausente` | true | cria status em pasta que não tem |
 | `processar_tudo_sem_fase` | false | mutirão: portão é a fase, não o status (`--todos`) |
 | `profundidade_maxima` | 5 | até onde desce na árvore |
+| `formatos_saida` | `["csv"]` | acrescente `"xlsx"` para a planilha colorida |
+| `escrever_por_projeto` | true | catalogação dentro de cada projeto, além da raiz |
+| `espera_estabilidade_segundos` | 45 | arquivo mexido agora espera a próxima rodada |
+| `reprocessar_se_houver_novas` | true | projeto que cresce volta para a fila |
+| `intervalo_varredura_segundos` | 30 | de quanto em quanto tempo varre |
 | `hora_relatorio` | `18:00` | quando fecha o dia |
 | `auto_atualizar` | true | puxa código novo do GitHub |
 

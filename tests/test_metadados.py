@@ -165,7 +165,7 @@ class TestStatusAusente(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             pasta = self._projeto_sem_status(raiz, "PMR-Museu-1988")
-            achados = vigia.varrer(raiz, Config())
+            achados = vigia.varrer(raiz, Config(espera_estabilidade_segundos=0))
             self.assertEqual([p.nome for p in achados], ["PMR-Museu-1988"])
             dados = json.loads((pasta / "status.json").read_text())
             self.assertEqual(dados["status"], "enviado_windows")
@@ -176,14 +176,14 @@ class TestStatusAusente(unittest.TestCase):
             raiz = Path(tmp)
             (raiz / "documentos").mkdir()
             (raiz / "documentos" / "leia.txt").write_text("nada aqui")
-            self.assertEqual(vigia.varrer(raiz, Config()), [])
+            self.assertEqual(vigia.varrer(raiz, Config(espera_estabilidade_segundos=0)), [])
             self.assertFalse((raiz / "documentos" / "status.json").exists())
 
     def test_pode_ser_desligado(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             pasta = self._projeto_sem_status(raiz, "PMR-Museu-1988")
-            self.assertEqual(vigia.varrer(raiz, Config(criar_status_ausente=False)), [])
+            self.assertEqual(vigia.varrer(raiz, Config(espera_estabilidade_segundos=0, criar_status_ausente=False)), [])
             self.assertFalse((pasta / "status.json").exists())
 
     def test_nao_mexe_em_status_que_ja_existe(self):
@@ -193,7 +193,7 @@ class TestStatusAusente(unittest.TestCase):
             (pasta / "status.json").write_text(
                 json.dumps({"status": "campvision_concluido", "quem": "outro"}), encoding="utf-8"
             )
-            self.assertEqual(vigia.varrer(raiz, Config()), [])
+            self.assertEqual(vigia.varrer(raiz, Config(espera_estabilidade_segundos=0)), [])
             dados = json.loads((pasta / "status.json").read_text())
             self.assertEqual(dados["status"], "campvision_concluido")
             self.assertEqual(dados["quem"], "outro")

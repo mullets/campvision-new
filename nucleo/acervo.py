@@ -299,13 +299,16 @@ def escrever(raiz: Path, config: Config) -> tuple[Path, int, int]:
     _aba_projetos(wb, projetos)
     _aba_pendentes(wb, pendentes)
 
-    destino = raiz / config.pasta_acervo / NOME_ARQUIVO
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(destino)
-
-    # CSV chapado junto, para quem prefere grep a Excel.
+    pasta_saida = raiz / config.pasta_acervo
+    pasta_saida.mkdir(parents=True, exist_ok=True)
     todas = [l for p in projetos for l in p.leituras]
-    mod_planilha.escrever_csv(todas, destino.with_name("acervo.csv"))
+
+    # CSV é o padrão: abre em tudo, é rápido em rede e serve para grep.
+    destino = pasta_saida / "acervo.csv"
+    mod_planilha.escrever_csv(todas, destino)
+    if "xlsx" in config.formatos_saida:
+        destino = pasta_saida / NOME_ARQUIVO
+        wb.save(destino)
 
     pranchas = sum(p.pranchas for p in projetos)
     _log.info(

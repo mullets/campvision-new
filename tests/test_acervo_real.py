@@ -28,7 +28,8 @@ from nucleo.config import Config
 from nucleo.vigia import CONTAINER, PROJETO, classificar
 from tests.test_nucleo import ClienteFalso, prancha_falsa, resposta_padrao
 
-CFG = Config(trabalhadores=1, consolidar_por_projeto=False)
+CFG = Config(espera_estabilidade_segundos=0, trabalhadores=1,
+             consolidar_por_projeto=False, formatos_saida=("csv", "xlsx"))
 
 
 def imagens(pasta: Path, n: int = 2, prefixo: str = "p") -> Path:
@@ -281,7 +282,7 @@ class TestMutirao(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             self._acervo(raiz)
-            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1, consolidar_por_projeto=False,
                          processar_tudo_sem_fase=True)
             self.assertEqual(len(vigia.varrer(raiz, cfg)), 4)
 
@@ -289,7 +290,7 @@ class TestMutirao(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             self._acervo(raiz)
-            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1, consolidar_por_projeto=False,
                          processar_tudo_sem_fase=True, pasta_vigiada=str(raiz))
             v = vigia.Vigia(cfg, ClienteFalso([resposta_padrao()]), raiz / "_estado")
             self.assertEqual(v.uma_rodada(), 4)
@@ -300,7 +301,7 @@ class TestMutirao(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             self._acervo(raiz)
-            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1, consolidar_por_projeto=False,
                          processar_tudo_sem_fase=True)
             projeto = {p.nome: p for p in vigia.varrer(raiz, cfg)}[
                 "BSG-EdificioPiracicaba-AnteProjeto-1979"
@@ -316,7 +317,7 @@ class TestMutirao(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             self._acervo(raiz)
-            cfg = Config(trabalhadores=4, processar_tudo_sem_fase=True)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=4, processar_tudo_sem_fase=True)
             e = mod_acervo.estimar(raiz, cfg)
             self.assertEqual(e["projetos"], 4)
             self.assertEqual(e["pranchas"], 11)  # 3 + 4 + 2 + 2
@@ -329,7 +330,7 @@ class TestMutirao(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             self._acervo(raiz)
-            cfg = Config(trabalhadores=1, processar_tudo_sem_fase=True)
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1, processar_tudo_sem_fase=True)
             for projeto in vigia.descobrir(raiz, cfg):
                 vigia.marcar_fase(projeto.pasta, cfg)
             e = mod_acervo.estimar(raiz, cfg)
@@ -402,7 +403,7 @@ class TestRefazer(unittest.TestCase):
             raiz = Path(tmp)
             projeto = marcar(raiz / "P0001 - Teste - 1970", status="digitalizado")
             imagens(projeto / "JPG", 2)
-            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1, consolidar_por_projeto=False,
                          processar_tudo_sem_fase=True)
             achado = vigia.varrer(raiz, cfg)[0]
             vigia.processar(achado, cfg, ClienteFalso([resposta_padrao()]))
@@ -419,7 +420,7 @@ class TestRefazer(unittest.TestCase):
             raiz = Path(tmp)
             projeto = marcar(raiz / "P0002 - Teste - 1971")
             imagens(projeto / "JPG", 3)
-            cfg = Config(trabalhadores=1, consolidar_por_projeto=False,
+            cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1, consolidar_por_projeto=False,
                          processar_tudo_sem_fase=True)
             cliente = ClienteFalso([resposta_padrao()])
             vigia.processar(vigia.varrer(raiz, cfg)[0], cfg, cliente)
@@ -477,7 +478,7 @@ class TestEstimativaCalibrada(unittest.TestCase):
             raiz = Path(tmp)
             projeto = marcar(raiz / "P0001 - Novo - 1970")
             imagens(projeto / "JPG", 10)
-            cfg = Config(processar_tudo_sem_fase=True)
+            cfg = Config(espera_estabilidade_segundos=0, processar_tudo_sem_fase=True)
             sem = mod_acervo.estimar(raiz, cfg)
             self.assertIn("sem histórico", sem["origem"])
             com = mod_acervo.estimar(

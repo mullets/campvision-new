@@ -15,7 +15,7 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-09-08-06"
+VERSAO_BUILD = "2026-09-08-07"
 
 _log = logging.getLogger("cv2.config")
 
@@ -73,6 +73,13 @@ class Config:
     # é mostrada ao modelo: entra depois da leitura, marcada como outra fonte.
     usar_pasta_como_pista: bool = True
 
+    # --- Saída ---
+    # Formatos da catalogação. CSV basta e é muito mais rápido em rede;
+    # acrescente "xlsx" se quiser a planilha colorida de revisão.
+    formatos_saida: tuple[str, ...] = ("csv",)
+    # Escrever a catalogação também dentro de cada projeto, além da raiz.
+    escrever_por_projeto: bool = True
+
     # --- Lote ---
     trabalhadores: int = 4
     # Retoma de onde parou usando o checkpoint .jsonl; desligue para reprocessar tudo.
@@ -88,7 +95,13 @@ class Config:
     # --- Vigia (modo automático) ---
     # Raiz montada por SMB onde os projetos chegam do Windows/QNAP.
     pasta_vigiada: str = ""
-    intervalo_varredura_segundos: int = 60
+    intervalo_varredura_segundos: int = 30
+    # Arquivo mexido há menos que isto ainda pode estar sendo copiado pelo
+    # scanner. Ler JPG pela metade gera leitura errada e gasta chamada à toa.
+    espera_estabilidade_segundos: int = 45
+    # Projeto já concluído que ganhou pranchas novas volta para a fila. Só as
+    # novas são lidas: o checkpoint segura as que já foram.
+    reprocessar_se_houver_novas: bool = True
     # Só processa pasta com status.json marcado como pronta. Desligue para
     # processar qualquer pasta com imagens e sem catalogacao.xlsx.
     exigir_status_json: bool = True
@@ -146,7 +159,9 @@ class Config:
         validos = {f.name for f in fields(cls)}
         for chave, valor in dados.items():
             if chave in validos:
-                setattr(cfg, chave, tuple(valor) if chave == "extensoes" else valor)
+                if chave in ("extensoes", "formatos_saida"):
+                    valor = tuple(valor)
+                setattr(cfg, chave, valor)
             else:
                 _log.warning("config.json: chave desconhecida ignorada: %s", chave)
 
@@ -166,6 +181,7 @@ class Config:
     def salvar(self, caminho: Path, incluir_chave: bool = False) -> None:
         dados: dict[str, Any] = asdict(self)
         dados["extensoes"] = list(self.extensoes)
+        dados["formatos_saida"] = list(self.formatos_saida)
         if not incluir_chave:
             dados.pop("api_key", None)
         caminho.write_text(
