@@ -140,6 +140,28 @@ Valores de `status`, nesta ordem:
 - `lotes/<lote_id>.json` — histórico de cada recebimento (origem em
   `100 - Scanners`, nome original → nome final, contagens, EXIF).
 
+## 4b. Livro de registro (CV2 escreve; painel lê para o "Histórico")
+
+`ACERVOS_CAMP/_campvision/registro/AAAA-MM.jsonl` (+ espelho `AAAA-MM.csv`),
+append-only, uma linha por ação por arquivo:
+
+```json
+{"quando": "2026-10-07T18:39:12-03:00", "acao": "copiado", "lote_id": "2026-10-07-contex1-001",
+ "codigo_projeto": "F002-P0002", "codigo_documento": "F002-P0002-1975-S01-D00017",
+ "arquivo_origem": "100 - Scanners/F002 BSG/Pranchas/DEST352844.tif",
+ "arquivo_destino": "F002 - BSG Barretto Segnini/01 - Projetos/F002-P0002 - Residência X/01 - Desenhos e pranchas/F002-P0002-1975-S01-D00017.tif",
+ "nome_original": "DEST352844.tif", "tamanho": 20811234, "sha256": "…",
+ "operador": "Beatriz", "estacao": "Contex 1", "versao_cv2": "2026-10-07-01", "detalhe": ""}
+```
+
+`acao` ∈ recebido, copiado, conferido, renomeado, lido, exif_gravado,
+apagado_original, erro, refeito, legado.
+
+- O painel lê de forma incremental (guarda a posição em bytes do arquivo do mês)
+  e mostra no "Histórico" do projeto e do documento.
+- O painel **nunca** escreve nesta pasta. Linha nunca é alterada; correção é linha nova.
+- `_campvision/` começa com `_`: a varredura de projetos do painel ignora.
+
 ## 5. HTTP — CV2 chama o painel
 
 Base: `http://192.168.15.60:8000`. Cabeçalho `X-Camp-Token`.
@@ -198,6 +220,7 @@ número (e o lote **não** é copiado com código inventado).
 - [ ] `/contexto` para fundos, `/reservar` para P, `/heartbeat` a cada 60 s,
       `/api/campvision/aviso` a cada troca de status.
 - [ ] Estrutura de pasta do item 1, rasa.
+- [ ] Livro de registro do item 4b, no QNAP.
 
 ## 7. Lado do painel — o que fazer
 
@@ -211,6 +234,7 @@ número (e o lote **não** é copiado com código inventado).
 - [ ] Ler `catalogacao.csv` e `contatos.jpg` → revisão pós-CAMP Vision.
 - [ ] Cadastrar a estação `campvision2` (.40) e o token.
 - [ ] Mostrar o heartbeat do CV2 no topo (já existe para estações).
+- [ ] Ler `_campvision/registro/` (incremental) → "Histórico" do projeto/documento; ignorar `_campvision/` na varredura.
 
 ## 8. Teste de ponta a ponta
 
