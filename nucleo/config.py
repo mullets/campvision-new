@@ -15,7 +15,7 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-10-07-01"
+VERSAO_BUILD = "2026-10-07-02"
 
 _log = logging.getLogger("cv2.config")
 
@@ -74,9 +74,8 @@ class Config:
     usar_pasta_como_pista: bool = True
 
     # --- Saída ---
-    # Formatos da catalogação. CSV basta e é muito mais rápido em rede;
-    # acrescente "xlsx" se quiser a planilha colorida de revisão.
-    formatos_saida: tuple[str, ...] = ("csv",)
+    # Formato da catalogação. Só CSV: XLSX foi abolido.
+    formatos_saida: tuple[str, ...] = ("csv",)  # só CSV (decisão de 07/10/2026)
     # Escrever a catalogação também dentro de cada projeto, além da raiz.
     escrever_por_projeto: bool = True
 
@@ -106,7 +105,7 @@ class Config:
     # novas são lidas: o checkpoint segura as que já foram.
     reprocessar_se_houver_novas: bool = True
     # Só processa pasta com status.json marcado como pronta. Desligue para
-    # processar qualquer pasta com imagens e sem catalogacao.xlsx.
+    # processar qualquer pasta com imagens e sem catalogacao/catalogacao.csv.
     exigir_status_json: bool = True
     # Pasta com imagens e SEM status.json ganha um, criado pelo vigia.
     criar_status_ausente: bool = True
@@ -129,23 +128,30 @@ class Config:
     # o ponto do redesenho é você revisar a planilha antes de mexer em arquivo.
     aplicar_automaticamente: bool = False
 
-    # --- Entrada bruta (lotes das estações) ---
-    # Pasta do QNAP onde as estações largam os lotes com manifesto.json
-    # (qnap.entrada_captura). Vazio = recebimento desligado.
+    # --- Entrada bruta (100 - Scanners) e acervo final (ACERVOS_CAMP) ---
+    # Onde os scanners largam o material. Vazio = recebimento desligado.
     pasta_entrada: str = ""
-    # Raiz da estrutura final Fundo → Projeto → Série. Vazio = pasta_vigiada.
+    # Raiz do acervo organizado (Fundo → 01 - Projetos → Projeto → Série).
+    # Vazio = pasta_vigiada.
     pasta_acervo_final: str = ""
-    # Nome da pasta de cada série dentro do projeto.
-    pastas_series: dict = field(default_factory=lambda: {
-        "S01": "01 - Desenhos e Pranchas",
-        "S02": "02 - Documentos Textuais",
-        "S03": "03 - Fotografias",
-        "S04": "04 - Negativos",
-        "S05": "05 - Slides",
-        "S06": "06 - Materiais",
-    })
-    # Lote só vira "pronto" com o crédito gravado em TODAS as cópias.
+    # Pasta só é considerada completa depois de este tempo sem mudança — a
+    # menos que traga manifesto.json ou status.json "enviado_windows".
+    entrada_quieto_minutos: int = 10
+    # Lote só vira "pronto" com o EXIF conferido em TODAS as cópias.
     entrada_exigir_exif: bool = True
+    # Depois de "pronto" (cópia conferida por hash + EXIF), apaga o original
+    # da entrada. Decisão de 07/10/2026.
+    apagar_original_apos_pronto: bool = True
+    # A varredura antiga (status.json "enviado_windows" na pasta_vigiada).
+    # None = automática: ligada só quando não há pasta_entrada.
+    processar_pasta_vigiada: bool | None = None
+
+    # --- Painel de administração (docs/contrato-painel.md) ---
+    painel_url: str = ""
+    # Token lido de CAMP_PAINEL_TOKEN no ambiente; aqui só se quiser persistir.
+    painel_token: str = ""
+    estacao_id: str = "campvision2"
+    heartbeat_segundos: int = 60
 
     # --- Auto-atualização pelo GitHub ---
     auto_atualizar: bool = True
@@ -182,6 +188,9 @@ class Config:
             if chave in validos:
                 if chave in ("extensoes", "formatos_saida"):
                     valor = tuple(valor)
+                if chave == "formatos_saida" and "xlsx" in valor:
+                    _log.warning("config.json: 'xlsx' não é mais suportado (só CSV) — ignorado.")
+                    valor = tuple(v for v in valor if v != "xlsx") or ("csv",)
                 setattr(cfg, chave, valor)
             else:
                 _log.warning("config.json: chave desconhecida ignorada: %s", chave)
@@ -235,6 +244,21 @@ class Config:
         caminho.write_text(cls.modelo_json() + "\n", encoding="utf-8")
         _log.info("Config criado em %s", caminho)
         return True
+
+    @property
+    def raiz_final(self) -> str:
+        return self.pasta_acervo_final or self.pasta_vigiada
+
+    @property
+    def varre_pasta_vigiada(self) -> bool:
+        if self.processar_pasta_vigiada is None:
+            return not self.pasta_entrada
+        return bool(self.processar_pasta_vigiada)
+
+    def token_painel(self) -> str:
+        import os
+
+        return os.environ.get("CAMP_PAINEL_TOKEN", "") or self.painel_token
 
     def identidade(self):
         """Identidade institucional para os metadados."""

@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from openpyxl import load_workbook
 
 from nucleo import acervo, vigia
 from nucleo.config import Config
@@ -120,14 +119,19 @@ class TestMarcadorDeFase(unittest.TestCase):
             self.assertEqual(dados["status"], "campvision_concluido")
 
 
+def ler_csv(caminho):
+    import csv as _csv
+    with open(caminho, encoding="utf-8-sig", newline="") as f:
+        return list(_csv.reader(f))
+
+
 class TestPlanilhaDoAcervo(unittest.TestCase):
     def _acervo_processado(self, raiz: Path) -> Config:
         com_imagens(raiz / "OCG" / "TeatroDeSantos", 3)
         com_imagens(raiz / "OCG" / "CasaDaPraia", 2)
         com_imagens(raiz / "Pendente", 2)
         cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1,
-                     consolidar_por_projeto=False, pasta_vigiada=str(raiz),
-                     formatos_saida=("csv", "xlsx"))
+                     consolidar_por_projeto=False, pasta_vigiada=str(raiz))
         for projeto in vigia.varrer(raiz, cfg):
             if projeto.nome == "Pendente":
                 continue
@@ -149,39 +153,37 @@ class TestPlanilhaDoAcervo(unittest.TestCase):
             raiz = Path(tmp)
             cfg = self._acervo_processado(raiz)
             caminho, _, _ = acervo.escrever(raiz, cfg)
-            wb = load_workbook(caminho)
-            self.assertEqual(wb.sheetnames, ["Acervo", "Projetos", "Pendentes"])
+            nomes = sorted(p.name for p in caminho.parent.glob("*.csv"))
+            self.assertEqual(nomes, ["acervo.csv", "pendentes.csv", "projetos.csv"])
+            self.assertEqual(list(caminho.parent.glob("*.xlsx")), [])
 
     def test_aba_acervo_traz_a_pasta_de_cada_prancha(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             cfg = self._acervo_processado(raiz)
             caminho, _, _ = acervo.escrever(raiz, cfg)
-            ws = load_workbook(caminho)["Acervo"]
-            pastas = {ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)}
-            self.assertIn(str(Path("OCG") / "TeatroDeSantos"), pastas)
-            self.assertEqual(ws.max_row, 6)  # 5 pranchas + cabeçalho
+            linhas = ler_csv(caminho)
+            self.assertEqual(len(linhas), 6)  # 5 pranchas + cabeçalho
+            self.assertIn("Revisar", linhas[0])
 
     def test_aba_projetos_totaliza(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             cfg = self._acervo_processado(raiz)
             caminho, _, _ = acervo.escrever(raiz, cfg)
-            wb = load_workbook(caminho)["Projetos"]
-            cabecalho = [c.value for c in wb[1]]
-            ultima = [c.value for c in wb[wb.max_row]]
-            self.assertIn("TOTAL: 2 projeto(s)", str(ultima[0]))
+            linhas = ler_csv(caminho.parent / "projetos.csv")
+            cabecalho = linhas[0]
+            self.assertEqual(len(linhas), 3)
             # busca a coluna pelo nome: inserir coluna não pode quebrar o teste
-            self.assertEqual(ultima[cabecalho.index("Pranchas")], 5)
-            self.assertEqual(ultima[cabecalho.index("Com carimbo")], 5)
+            self.assertEqual(sum(int(l[cabecalho.index("Pranchas")]) for l in linhas[1:]), 5)
+            self.assertEqual(sum(int(l[cabecalho.index("Com carimbo")]) for l in linhas[1:]), 5)
 
     def test_aba_pendentes_lista_o_que_falta(self):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             cfg = self._acervo_processado(raiz)
             caminho, _, _ = acervo.escrever(raiz, cfg)
-            ws = load_workbook(caminho)["Pendentes"]
-            valores = [ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)]
+            valores = [l[0] for l in ler_csv(caminho.parent / "pendentes.csv")[1:]]
             self.assertIn("Pendente", valores)
 
     def test_remonta_sem_gastar_api(self):
@@ -201,11 +203,9 @@ class TestPlanilhaDoAcervo(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             raiz = Path(tmp)
             caminho, projetos, pranchas = acervo.escrever(
-                raiz, Config(espera_estabilidade_segundos=0, pasta_vigiada=str(raiz),
-                             formatos_saida=("csv", "xlsx")))
+                raiz, Config(espera_estabilidade_segundos=0, pasta_vigiada=str(raiz)))
             self.assertEqual((projetos, pranchas), (0, 0))
-            wb = load_workbook(caminho)
-            self.assertIn("nenhuma", str(wb["Pendentes"]["A2"].value).lower())
+            self.assertEqual(len(ler_csv(caminho.parent / "pendentes.csv")), 1)
 
     def test_planilha_do_acervo_e_ignorada_na_varredura_seguinte(self):
         with TemporaryDirectory() as tmp:
@@ -225,16 +225,14 @@ class TestRodadaCompleta(unittest.TestCase):
             com_imagens(raiz / "Fundo A" / "Projeto 2", 2)
             com_imagens(raiz / "Fundo B" / "1972" / "Projeto 3", 2)
             cfg = Config(espera_estabilidade_segundos=0, trabalhadores=2,
-                         pasta_vigiada=str(raiz), auto_atualizar=False,
-                         formatos_saida=("csv", "xlsx"))
+                         pasta_vigiada=str(raiz), auto_atualizar=False)
             v = vigia.Vigia(cfg, ClienteFalso([resposta_padrao()]), estado)
             self.assertEqual(v.uma_rodada(), 3)
-            planilha_geral = raiz / "_catalogacao" / "acervo.xlsx"
+            planilha_geral = raiz / "_catalogacao" / "acervo.csv"
             self.assertTrue(planilha_geral.exists())
-            ws = load_workbook(planilha_geral)["Acervo"]
-            self.assertEqual(ws.max_row, 7)  # 6 pranchas + cabeçalho
+            self.assertEqual(len(ler_csv(planilha_geral)), 7)  # 6 pranchas + cabeçalho
             # e cada projeto tem a sua planilha própria
-            self.assertTrue((raiz / "Fundo A" / "Projeto 1" / "catalogacao" / "catalogacao.xlsx").exists())
+            self.assertTrue((raiz / "Fundo A" / "Projeto 1" / "catalogacao" / "catalogacao.csv").exists())
 
 
 if __name__ == "__main__":

@@ -2,9 +2,9 @@
 
     python cli.py /caminho/da/pasta
     python cli.py /caminho/da/pasta --sem-consolidacao --trabalhadores 6
-    python cli.py /caminho/da/pasta --aplicar catalogacao.xlsx        # Fase 2 (simulação)
-    python cli.py /caminho/da/pasta --aplicar catalogacao.xlsx --valendo
-    python cli.py /caminho/da/pasta --regravar-metadados catalogacao.xlsx
+    python cli.py /caminho/da/pasta --aplicar catalogacao.csv        # Fase 2 (simulação)
+    python cli.py /caminho/da/pasta --aplicar catalogacao.csv --valendo
+    python cli.py /caminho/da/pasta --regravar-metadados catalogacao.csv
 
 Sai com código 0 se tudo correu, 1 se houve erro fatal, 2 se o lote terminou
 com pranchas em erro (útil para o watcher decidir se muda o status.json).
@@ -85,7 +85,6 @@ def main(argv: list[str] | None = None) -> int:
         t_out += c_out
 
     custo = config.custo_estimado_usd(t_in, t_out)
-    planilha.escrever_xlsx(resultado.leituras, args.pasta / "catalogacao.xlsx")
     planilha.escrever_csv(resultado.leituras, args.pasta / "catalogacao.csv")
     print(planilha.escrever_relatorio(resultado.leituras, args.pasta / "relatorio.txt", custo).read_text())
     return 2 if resultado.progresso.erros else 0

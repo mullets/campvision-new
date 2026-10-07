@@ -80,7 +80,26 @@ def verificar(repo: Path) -> tuple[bool, str]:
 
 
 def atualizar(repo: Path) -> tuple[bool, str]:
-    """Faz o pull. Devolve (atualizou, mensagem)."""
+    """Atualiza. Devolve (atualizou, mensagem).
+
+    Com `atualizar.sh` no repositório, usa ele (`--auto`): o mesmo caminho da
+    atualização manual — dependências, testes e volta automática se falhar.
+    """
+    script = repo / "atualizar.sh"
+    if script.exists() and os.name != "nt":
+        try:
+            proc = subprocess.run(["bash", str(script), "--auto"], cwd=repo,
+                                  capture_output=True, text=True, timeout=1800)
+        except (OSError, subprocess.TimeoutExpired) as erro:
+            return False, f"atualizar.sh falhou: {erro}"
+        saida = (proc.stdout + proc.stderr).strip().splitlines()
+        ultima = saida[-1] if saida else ""
+        if proc.returncode == 0:
+            _log.info("Código atualizado: %s", ultima)
+            return True, ultima
+        if proc.returncode == 3:
+            return False, "já está atualizado"
+        return False, "atualização falhou: " + " | ".join(saida[-3:])[:200]
     tem, mensagem = verificar(repo)
     if not tem:
         return False, mensagem

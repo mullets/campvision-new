@@ -146,8 +146,6 @@ class TestAplicar(unittest.TestCase):
 
 class TestIntegracaoComOVigia(unittest.TestCase):
     def test_pistas_chegam_na_planilha(self):
-        from openpyxl import load_workbook
-
         from nucleo import vigia
         from tests.test_acervo import com_imagens
         from tests.test_nucleo import ClienteFalso, resposta_padrao
@@ -156,19 +154,18 @@ class TestIntegracaoComOVigia(unittest.TestCase):
             raiz = Path(tmp)
             com_imagens(raiz / "Fundo OCG" / "1968" / "TeatroDeSantos", 2)
             cfg = Config(espera_estabilidade_segundos=0, trabalhadores=1,
-                         consolidar_por_projeto=False, pasta_vigiada=str(raiz),
-                         formatos_saida=("csv", "xlsx"))
+                         consolidar_por_projeto=False, pasta_vigiada=str(raiz))
             projeto = vigia.varrer(raiz, cfg)[0]
             # a resposta falsa diz CASA DA PRAIA: diverge da pasta TeatroDeSantos
             vigia.processar(projeto, cfg, ClienteFalso([resposta_padrao()]))
-            caminho_xlsx = projeto.pasta / "catalogacao" / "catalogacao.xlsx"
-            ws = load_workbook(caminho_xlsx).active
-            cabecalho = [c.value for c in ws[1]]
+            from tests.test_acervo import ler_csv
+
+            linhas = ler_csv(projeto.pasta / "catalogacao" / "catalogacao.csv")
+            cabecalho = linhas[0]
             self.assertIn("Fundo (pasta)", cabecalho)
-            coluna = cabecalho.index("Divergência") + 1
-            self.assertIn("carimbo ≠ pasta", str(ws.cell(row=2, column=coluna).value))
-            coluna_fundo = cabecalho.index("Fundo (pasta)") + 1
-            self.assertEqual(ws.cell(row=2, column=coluna_fundo).value, "Fundo OCG")
+            self.assertIn("carimbo ≠ pasta", linhas[1][cabecalho.index("Divergência")])
+            self.assertEqual(linhas[1][cabecalho.index("Fundo (pasta)")], "Fundo OCG")
+            self.assertEqual(linhas[1][cabecalho.index("Revisar")], "sim")
 
     def test_pode_ser_desligado(self):
         from nucleo import vigia

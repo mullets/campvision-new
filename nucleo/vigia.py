@@ -19,21 +19,21 @@ import logging
 import time
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import atualizador, caminho as mod_caminho, eventos as mod_eventos, grupos, imagem
 from . import info_projeto as mod_info, lote, planilha
 from . import relatorio_diario
-from .config import Config
+from .config import VERSAO_BUILD, Config
 from .planilha import LIMIAR_ATENCAO
 from .visao import ClienteAPI
 
 _log = logging.getLogger("cv2.vigia")
 
 NOME_STATUS = "status.json"
-NOME_PLANILHA = "catalogacao.xlsx"
+NOME_PLANILHA = "catalogacao.csv"  # dentro de catalogacao/
 SUBPASTAS_IMAGEM = ("JPG", "jpg", "JPEG", "IMAGENS")
 
 
@@ -457,7 +457,7 @@ def varrer(raiz: Path, config: Config) -> list[Projeto]:
             if status != config.status_pronto:
                 continue
         else:
-            if status == config.status_concluido or (projeto.pasta / NOME_PLANILHA).exists():
+            if status == config.status_concluido or (projeto.pasta / "catalogacao" / NOME_PLANILHA).exists():
                 continue
 
         prontos.append((projeto.pasta.stat().st_mtime, projeto))
@@ -518,10 +518,7 @@ def processar(
         custo = config.custo_estimado_usd(t_in, t_out)
         destino = projeto.pasta / "catalogacao"
         if config.escrever_por_projeto:
-            if "xlsx" in config.formatos_saida:
-                planilha.escrever_xlsx(resultado.leituras, destino / NOME_PLANILHA)
-            if "csv" in config.formatos_saida:
-                planilha.escrever_csv(resultado.leituras, destino / "catalogacao.csv")
+            planilha.escrever_csv(resultado.leituras, destino / NOME_PLANILHA)
             planilha.escrever_relatorio(resultado.leituras, destino / "relatorio.txt", custo)
         # Leituras finais (já consolidadas) em JSON: é daqui que a planilha
         # única do acervo é remontada, sem gastar API de novo.
@@ -583,6 +580,7 @@ class Vigia:
         cliente: ClienteAPI,
         pasta_estado: Path,
         repo: Path | None = None,
+        painel=None,
     ) -> None:
         self.config = config
         self.cliente = cliente
@@ -594,6 +592,18 @@ class Vigia:
         self._proximo_relatorio = _proxima_hora(config.hora_relatorio, datetime.now())
         self._proxima_atualizacao = datetime.now()
         self.estado.proximo_relatorio = self._proximo_relatorio.strftime("%d/%m %H:%M")
+        from . import livro as mod_livro, painel as mod_painel
+
+        self.painel = painel or (
+            mod_painel.Painel(config.painel_url, config.token_painel(), pasta_estado)
+            if config.painel_url else mod_painel.PainelDesligado()
+        )
+        self.livro = mod_livro.Livro(
+            Path(config.raiz_final) if config.raiz_final else pasta_estado,
+            reserva=pasta_estado / "registro_reserva",
+        )
+        self._recebedor_obj = None
+        self._ultimo_heartbeat = -1e9
 
     # ------------------------------------------------------------ tarefas
     def _talvez_atualizar(self) -> None:
@@ -658,6 +668,11 @@ class Vigia:
     def uma_rodada(self) -> int:
         """Processa tudo o que está pronto agora. Devolve quantos projetos rodou."""
         recebidos = self.receber_lotes()
+        if not self.config.varre_pasta_vigiada or not self.config.pasta_vigiada:
+            self.estado.situacao = "vigiando"
+            self.estado.projeto_atual = ""
+            self._salvar_estado()
+            return recebidos
         raiz = Path(self.config.pasta_vigiada)
         pendentes = varrer(raiz, self.config)
         self.estado.fila = len(pendentes)
@@ -684,41 +699,108 @@ class Vigia:
         self.estado.projeto_atual = ""
         return feitos + recebidos
 
-    def receber_lotes(self) -> int:
-        """Puxa os lotes brutos das estações para o acervo final.
+    # ------------------------------------------------------------ entrada
+    def _recebedor(self):
+        from . import entrada as mod_entrada
 
-        Roda antes da varredura normal: o lote vira projeto organizado, é lido,
-        recebe EXIF e só então é marcado como pronto para o painel.
-        """
+        if self._recebedor_obj is None:
+            self._recebedor_obj = mod_entrada.Recebedor(
+                self.config, self.cliente, self.painel, self.livro, self.pasta_estado)
+        return self._recebedor_obj
+
+    def receber_lotes(self) -> int:
+        """Puxa o que os scanners largaram em 100 - Scanners para ACERVOS_CAMP."""
         if not self.config.pasta_entrada:
             return 0
         from . import entrada as mod_entrada
 
         pasta = Path(self.config.pasta_entrada)
-        if not pasta.is_dir():
-            self.estado.anotar(f"entrada bruta: {diagnosticar_pasta(pasta)}")
+        if not pasta.is_dir() or not Path(self.config.raiz_final).is_dir():
+            alvo = pasta if not pasta.is_dir() else Path(self.config.raiz_final)
+            self.estado.situacao = "pasta indisponível"
+            self.estado.anotar(diagnosticar_pasta(alvo))
             return 0
+        recebedor = self._recebedor()
+        fila = recebedor.pendentes()
+        self.estado.fila = len(fila)
         feitos = 0
-        for lote_bruto in mod_entrada.varrer(pasta, self.pasta_estado):
+        for unidade in fila:
             if self.cancelar.is_set():
                 break
             self._talvez_atualizar()
-            resultado = mod_entrada.processar_lote(
-                lote_bruto, self.config, self.cliente, self.pasta_estado,
-                self.estado, self.cancelar,
-            )
-            situacao = resultado.get("status", "")
-            if situacao == "aguardando":
+            self.estado.situacao = "processando"
+            self.estado.projeto_atual = str(unidade.relativo)
+            comeco = time.monotonic()
+            r = recebedor.processar(unidade, self.estado, self.cancelar)
+            self.estado.fila = max(0, self.estado.fila - 1)
+            if r.status == mod_entrada.AGUARDANDO:
                 continue
             feitos += 1
-            nome = lote_bruto.pasta.name
-            if situacao == mod_entrada.PRONTO:
-                c = resultado.get("contagens", {})
-                self.estado.anotar(f"lote {nome}: pronto, {c.get('copiados', 0)} arquivo(s)")
-            else:
-                motivo = resultado.get("motivo") or "; ".join(resultado.get("erros", []))
-                self.estado.anotar(f"lote {nome}: {situacao.upper()} — {motivo[:60]}")
+            contagens = r.lote.get("contagens", {})
+            evento = mod_eventos.Evento(projeto=r.codigo or unidade.pasta.name,
+                                        pasta=str(r.pasta_projeto or unidade.pasta))
+            evento.pranchas = contagens.get("documentos", 0)
+            evento.com_carimbo = contagens.get("com_carimbo", 0)
+            evento.erros = contagens.get("erros", 0)
+            evento.custo_usd = r.lote.get("custo_usd", 0.0)
+            evento.falha = r.motivo if r.status != mod_entrada.PRONTO else ""
+            evento.duracao_segundos = int(time.monotonic() - comeco)
+            self._contabilizar(evento)
+            self._salvar_estado()
+        self.estado.projeto_atual = ""
         return feitos
+
+    # ------------------------------------------------------------ painel/tela
+    def _salvar_estado(self) -> None:
+        """estado.json: o que a tela do servidor (--monitor) desenha."""
+        dados = asdict(self.estado)
+        dados["inicio"] = self.estado.inicio.isoformat(timespec="seconds")
+        dados["gravado_em"] = datetime.now().isoformat(timespec="seconds")
+        dados["painel"] = {
+            "url": self.painel.url, "ultimo_ok": self.painel.ultimo_ok,
+            "ultimo_erro": self.painel.ultimo_erro, "avisos_pendentes": self.painel.pendentes(),
+        }
+        try:
+            caminho = self.pasta_estado / "estado.json"
+            temporario = caminho.with_suffix(".tmp")
+            temporario.write_text(json.dumps(dados, ensure_ascii=False, indent=1), encoding="utf-8")
+            temporario.replace(caminho)
+        except OSError:
+            pass
+
+    def _talvez_heartbeat(self, forcar: bool = False) -> None:
+        if not self.painel.ligado:
+            return
+        agora = time.monotonic()
+        if not forcar and agora - self._ultimo_heartbeat < self.config.heartbeat_segundos:
+            return
+        self._ultimo_heartbeat = agora
+        montagens = {
+            "entrada": bool(self.config.pasta_entrada) and Path(self.config.pasta_entrada).is_dir(),
+            "acervo": bool(self.config.raiz_final) and Path(self.config.raiz_final).is_dir(),
+        }
+        self.painel.heartbeat({
+            "estacao_id": self.config.estacao_id, "tipo_estacao": "campvision",
+            "app": "CAMP Vision 2", "versao": VERSAO_BUILD,
+            "estado": self.estado.situacao, "projeto": self.estado.projeto_atual,
+            "progresso": {"feitos": self.estado.concluidos_no_projeto,
+                          "total": self.estado.total_no_projeto},
+            "fila": self.estado.fila,
+            "hoje": {"projetos": self.estado.projetos_hoje, "imagens": self.estado.pranchas_hoje,
+                     "erros": self.estado.erros_hoje, "custo_usd": round(self.estado.custo_hoje, 2)},
+            "montagens": montagens,
+        })
+        self.painel.reenviar()
+
+    def _batimento(self) -> None:
+        """Thread: heartbeat e estado.json mesmo no meio de um lote longo."""
+        while not self.cancelar.is_set():
+            try:
+                self._talvez_heartbeat()
+                self._salvar_estado()
+            except Exception as erro:  # noqa: BLE001 - nunca derruba o vigia
+                _log.debug("batimento: %s", erro)
+            self.cancelar.wait(5)
 
     def atualizar_planilha_do_acervo(self) -> None:
         """Reescreve a planilha única da raiz. Não gasta API: remonta dos JSONs."""
@@ -737,17 +819,19 @@ class Vigia:
         self._recarregar_contadores_do_dia()
         raiz = Path(self.config.pasta_vigiada)
         _log.info("Vigia no ar. Pasta: %s", raiz)
+        threading.Thread(target=self._batimento, name="batimento", daemon=True).start()
         ultimo_dia = date.today()
 
         while not self.cancelar.is_set():
             if date.today() != ultimo_dia:  # virou o dia: zera o painel
                 ultimo_dia = date.today()
                 self._recarregar_contadores_do_dia()
-            if not raiz.is_dir():
+            if self.config.varre_pasta_vigiada and not raiz.is_dir():
                 self.estado.situacao = "pasta indisponível"
                 self.estado.anotar(diagnosticar_pasta(raiz))
             else:
                 self.uma_rodada()
+            self.livro.descarregar_reserva()
             # Fora de qualquer lote: é a hora segura de puxar código novo.
             # Sem isto, um vigia ocioso — que é o estado normal dele — nunca
             # se atualizaria, porque uma_rodada() volta cedo com a fila vazia.

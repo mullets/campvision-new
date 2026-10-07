@@ -5,31 +5,28 @@ Junta o que cada projeto produziu numa planilha só, na raiz. Não gasta API:
 rodar quantas vezes quiser, a qualquer momento, e ela sempre reflete o estado
 atual do acervo.
 
-Três abas:
-  Acervo   — uma linha por prancha, o acervo inteiro
-  Projetos — uma linha por projeto: quantas pranchas, cobertura, o que revisar
-  Pendentes— o que ainda não passou pela leitura
+Três CSV em `_catalogacao/` (só CSV desde 07/10/2026):
+  acervo.csv    — uma linha por prancha, o acervo inteiro
+  projetos.csv  — uma linha por projeto: quantas pranchas, cobertura, o que revisar
+  pendentes.csv — o que ainda não passou pela leitura
 """
 
 from __future__ import annotations
 
+import csv
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
-
 from . import planilha as mod_planilha
 from .config import Config
 from .esquema import CAMPOS, Leitura
-from .planilha import LIMIAR_ATENCAO, _VERMELHO, _AMARELO, _CINZA, _CABECALHO
+from .planilha import LIMIAR_ATENCAO
 from .vigia import NOME_STATUS, descobrir, ler_status
 
 _log = logging.getLogger("cv2.acervo")
 
-NOME_ARQUIVO = "acervo.xlsx"
+NOME_ARQUIVO = "acervo.csv"
 
 
 @dataclass
@@ -184,131 +181,47 @@ def levantar(raiz: Path, config: Config) -> tuple[list[ProjetoNoAcervo], list[st
     return processados, pendentes
 
 
-def _aba_acervo(wb: Workbook, projetos: list[ProjetoNoAcervo]) -> None:
-    ws = wb.active
-    ws.title = "Acervo"
-    colunas = ["Pasta", "Arquivo", "OK?", "Carimbo?", "Confiança"] + [c.rotulo for c in CAMPOS]
-    ws.append(colunas)
-    for celula in ws[1]:
-        celula.font = Font(bold=True, color="FFFFFF")
-        celula.fill = _CABECALHO
-        celula.alignment = Alignment(vertical="center", wrap_text=True)
-
-    inicio_campos = 6
-    for projeto in sorted(projetos, key=lambda p: p.caminho_relativo.lower()):
-        for leitura in projeto.leituras:
-            ws.append(
-                [
-                    projeto.caminho_relativo,
-                    leitura.arquivo,
-                    "",
-                    "sim" if leitura.carimbo_encontrado else "NÃO",
-                    round(leitura.confianca_media, 2),
-                ]
-                + [leitura.valores.get(c.nome, "") for c in CAMPOS]
-            )
-            linha = ws.max_row
-            for i, campo in enumerate(CAMPOS):
-                celula = ws.cell(row=linha, column=inicio_campos + i)
-                confianca = leitura.confiancas.get(campo.nome, 0.0)
-                if not str(celula.value or "").strip():
-                    celula.fill = _CINZA
-                elif confianca < LIMIAR_ATENCAO:
-                    celula.fill = _VERMELHO
-                elif confianca < 0.85:
-                    celula.fill = _AMARELO
-
-    ws.freeze_panes = "C2"
-    ws.auto_filter.ref = ws.dimensions
-    for i, nome in enumerate(colunas, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = (
-            38 if i == 1 else 30 if i == 2 else max(11, min(26, len(nome) + 4))
-        )
+def _escrever_csv(destino: Path, cabecalho: list[str], linhas: list[list]) -> None:
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    temporario = destino.with_name(f".{destino.name}.tmp")
+    with temporario.open("w", encoding="utf-8-sig", newline="") as f:
+        escritor = csv.writer(f)
+        escritor.writerow(cabecalho)
+        escritor.writerows(linhas)
+    temporario.replace(destino)
 
 
-def _aba_projetos(wb: Workbook, projetos: list[ProjetoNoAcervo]) -> None:
-    ws = wb.create_sheet("Projetos")
-    colunas = [
-        "Pasta", "Fundo", "Projeto (lido)", "Arquiteto", "Cidade", "Ano(s)",
-        "Pranchas", "Com carimbo", "%", "A revisar", "Divergências", "Status", "Fase",
-    ]
-    ws.append(colunas)
-    for celula in ws[1]:
-        celula.font = Font(bold=True, color="FFFFFF")
-        celula.fill = _CABECALHO
-
+def _linhas_projetos(projetos: list[ProjetoNoAcervo]) -> list[list]:
+    linhas = []
     for projeto in sorted(projetos, key=lambda p: -p.pranchas):
         pct = round(projeto.com_carimbo / projeto.pranchas * 100) if projeto.pranchas else 0
-        ws.append([
-            projeto.caminho_relativo,
-            projeto.fundo,
-            projeto.campo_predominante("projeto"),
-            projeto.campo_predominante("arquiteto"),
-            projeto.campo_predominante("cidade"),
-            projeto.anos,
-            projeto.pranchas,
-            projeto.com_carimbo,
-            pct,
-            projeto.a_revisar,
-            projeto.divergencias,
-            projeto.status,
-            projeto.fase,
+        linhas.append([
+            projeto.caminho_relativo, projeto.fundo,
+            projeto.campo_predominante("projeto"), projeto.campo_predominante("arquiteto"),
+            projeto.campo_predominante("cidade"), projeto.anos,
+            projeto.pranchas, projeto.com_carimbo, pct, projeto.a_revisar,
+            projeto.divergencias, projeto.status, projeto.fase,
         ])
-        if pct < 80:
-            ws.cell(row=ws.max_row, column=9).fill = _VERMELHO
-        elif pct < 95:
-            ws.cell(row=ws.max_row, column=9).fill = _AMARELO
-        if projeto.divergencias:
-            ws.cell(row=ws.max_row, column=11).fill = _VERMELHO
-
-    total = sum(p.pranchas for p in projetos)
-    carimbos = sum(p.com_carimbo for p in projetos)
-    ws.append([])
-    ws.append([
-        f"TOTAL: {len(projetos)} projeto(s)", "", "", "", "", "",
-        total, carimbos,
-        round(carimbos / total * 100) if total else 0,
-        sum(p.a_revisar for p in projetos),
-        sum(p.divergencias for p in projetos), "", "",
-    ])
-    for celula in ws[ws.max_row]:
-        celula.font = Font(bold=True)
-
-    ws.freeze_panes = "B2"
-    for i, nome in enumerate(colunas, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = 38 if i in (1, 3) else max(11, len(nome) + 4)
+    return linhas
 
 
-def _aba_pendentes(wb: Workbook, pendentes: list[str]) -> None:
-    ws = wb.create_sheet("Pendentes")
-    ws.append(["Pasta ainda não catalogada"])
-    ws["A1"].font = Font(bold=True, color="FFFFFF")
-    ws["A1"].fill = _CABECALHO
-    for caminho in sorted(pendentes):
-        ws.append([caminho])
-    if not pendentes:
-        ws.append(["(nenhuma — o acervo inteiro passou pela leitura)"])
-    ws.column_dimensions["A"].width = 70
+COLUNAS_PROJETOS = [
+    "Pasta", "Fundo", "Projeto (lido)", "Arquiteto", "Cidade", "Ano(s)",
+    "Pranchas", "Com carimbo", "%", "A revisar", "Divergências", "Status", "Fase",
+]
 
 
 def escrever(raiz: Path, config: Config) -> tuple[Path, int, int]:
-    """Monta a planilha única. Devolve (caminho, projetos, pranchas)."""
+    """Monta os CSV do acervo. Devolve (acervo.csv, projetos, pranchas)."""
     projetos, pendentes = levantar(raiz, config)
-    wb = Workbook()
-    _aba_acervo(wb, projetos)
-    _aba_projetos(wb, projetos)
-    _aba_pendentes(wb, pendentes)
-
     pasta_saida = raiz / config.pasta_acervo
-    pasta_saida.mkdir(parents=True, exist_ok=True)
     todas = [l for p in projetos for l in p.leituras]
 
-    # CSV é o padrão: abre em tudo, é rápido em rede e serve para grep.
-    destino = pasta_saida / "acervo.csv"
+    destino = pasta_saida / NOME_ARQUIVO
     mod_planilha.escrever_csv(todas, destino)
-    if "xlsx" in config.formatos_saida:
-        destino = pasta_saida / NOME_ARQUIVO
-        wb.save(destino)
+    _escrever_csv(pasta_saida / "projetos.csv", COLUNAS_PROJETOS, _linhas_projetos(projetos))
+    _escrever_csv(pasta_saida / "pendentes.csv", ["Pasta ainda não catalogada"],
+                  [[c] for c in sorted(pendentes)])
 
     pranchas = sum(p.pranchas for p in projetos)
     _log.info(

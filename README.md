@@ -12,6 +12,7 @@ vigia uma pasta sozinho.
 ## Índice
 
 - [Começar](#começar) — ambiente, chave, primeira leitura
+- [Servidor da CAMP (Ubuntu)](#servidor-da-camp-ubuntu) — instalar, atualizar, dia a dia
 - [Como funciona](#como-funciona) — as duas fases, a leitura, a pasta, os metadados
 - [Modo automático](#modo-automático) — vigia, acervo inteiro, serviço do macOS
 - [Relatórios](#relatórios)
@@ -106,7 +107,7 @@ Sem ele o app funciona, mas não grava metadados nas imagens.
 ### 6. Primeira leitura
 
 ```bash
-python -m unittest discover -s tests -t .   # 221 testes, sem rede
+python -m unittest discover -s tests -t .   # 230 testes, sem rede
 python app.py                                # janela
 ```
 
@@ -115,11 +116,88 @@ em dez segundos se vale seguir.
 
 ---
 
+## Servidor da CAMP (Ubuntu)
+
+A máquina dedicada é um notebook Ubuntu Server, usuário `campvision`, IP fixo
+**192.168.15.40**. Ele lê `100 - Scanners`, organiza `ACERVOS_CAMP` e avisa o
+painel (192.168.15.60). Contrato com o painel: [docs/contrato-painel.md](docs/contrato-painel.md).
+
+### Instalar (uma vez)
+
+**0. IP fixo .40** — no próprio notebook (não por SSH):
+
+```bash
+ip -br a                     # nome da placa (ex.: enp3s0)
+ip route | grep default      # roteador (ex.: 192.168.15.1)
+sudo tee /etc/netplan/01-camp-ip-fixo.yaml >/dev/null <<'EOF'
+network:
+  version: 2
+  ethernets:
+    enp3s0:
+      dhcp4: false
+      addresses: [192.168.15.40/24]
+      routes:
+        - to: default
+          via: 192.168.15.1
+      nameservers:
+        addresses: [192.168.15.1, 1.1.1.1]
+EOF
+sudo chmod 600 /etc/netplan/01-camp-ip-fixo.yaml
+sudo netplan try             # Enter para confirmar
+```
+
+**1. Código:**
+
+```bash
+sudo apt update && sudo apt install -y git
+cd ~ && git clone https://github.com/mullets/campvision-new.git
+```
+
+**2. Tudo o resto, um comando:**
+
+```bash
+cd ~/campvision-new && sudo ./instalar.sh
+```
+
+Pergunta IP/usuário/senha do QNAP, chave da Anthropic, token do painel e token
+do GitHub, e faz: pacotes (exiftool, poppler, cifs), **tampa do notebook não
+suspende**, QNAP montado para sempre em `/mnt/camp/backup`, `.venv`, config,
+serviço `campvision2` (sobe no boot, volta se cair) e a **tela do notebook**
+(tty1) mostrando o vigia ao vivo. Termina conferindo tudo. Pode rodar de novo
+sem estragar nada.
+
+**3. Conferir:** `systemctl status campvision2`, `.venv/bin/python vigia.py --lotes`,
+e `sudo reboot` — a tela tem que voltar sozinha em "vigiando".
+
+### Atualizar
+
+```bash
+cd ~/campvision-new && ./atualizar.sh
+```
+
+Espera o lote em andamento, puxa o código, instala dependências novas, faz
+backup do `~/.campvision2`, roda os testes — **se falharem, volta sozinho** — e
+reinicia o serviço. `./atualizar.sh --voltar` desfaz a última atualização (e
+pausa a auto-atualização até a próxima manual). A auto-atualização de hora em
+hora usa o mesmo script.
+
+### No dia a dia
+
+| Comando | Para quê |
+|---|---|
+| `vigia.py --lotes` | o que está em `100 - Scanners` e em que pé está |
+| `vigia.py --historico DEST352844.tif` | caminho completo de um arquivo (também aceita código, lote ou data) |
+| `vigia.py --refazer-lote TEXTO` | devolve à fila uma pasta com erro, depois de corrigir |
+| `vigia.py --monitor` | a mesma tela do notebook, por SSH |
+| `journalctl -u campvision2 -f` | log ao vivo |
+
+(Todos com `~/campvision-new/.venv/bin/python` na frente.)
+
 ## Como funciona
 
 ### As duas fases
 
-**Fase 1 — Ler.** Lê os carimbos e escreve `catalogacao.xlsx`, `.csv`,
+**Fase 1 — Ler.** Lê os carimbos e escreve `catalogacao.csv`,
 `leituras.json` e `relatorio.txt`. **Não move, não renomeia, não apaga nada.**
 
 **Fase 2 — Aplicar.** Você revisa a planilha; ela vira a fonte da verdade. O app
@@ -142,7 +220,7 @@ de OCR, o banco SQLite de conhecimento, a quarentena de grafias,
 `unificar_grafias`, a moda de ano por grupo, a correção de orientação por
 heurística, `imagecodecs` e o pin `numpy<2`.
 
-**Dependências:** anthropic, Pillow, openpyxl. Só. Nada exige AVX2, GPU ou
+**Dependências:** anthropic, Pillow. Só. Nada exige AVX2, GPU ou
 compilação — roda igual no Mac Pro 2013 e no MacBook Pro 2011.
 
 **Sobreviveram, porque provaram valor:** log com o nome do arquivo em toda linha,
@@ -259,7 +337,7 @@ levam segundos. Acentuação vai em UTF-8 e volta íntegra.
 Mudou o site ou a licença? Regrave sem reprocessar:
 
 ```bash
-python cli.py /caminho/da/pasta --regravar-metadados catalogacao.xlsx
+python cli.py /caminho/da/pasta --regravar-metadados catalogacao.csv
 ```
 
 ---
@@ -338,7 +416,7 @@ Aponte para a raiz e ele acha os projetos em qualquer nível abaixo:
 │   ├── 1968/TeatroDeSantos/JPG/      ← projeto
 │   └── 1972/CasaDaPraia/JPG/         ← projeto
 ├── Fundo SBU/EletropauloCARMONA/     ← projeto (imagens soltas)
-└── _catalogacao/acervo.xlsx          ← planilha única de tudo
+└── _catalogacao/acervo.csv           ← planilha única de tudo
 ```
 
 **Como ele decide o que é projeto.** Cada acervo veio de um fluxo diferente, e
@@ -389,74 +467,45 @@ subpasta de imagem. Profundidade máxima em `profundidade_maxima` (padrão 5).
 ignorado em silêncio; agora entra. Pasta sem imagem não ganha status — não é
 projeto. Status que já existe nunca é mexido.
 
-### Entrada bruta: lotes das estações
+### Do 100 - Scanners para o ACERVOS_CAMP
 
-As estações (Foto/Mac, Contex/Windows, Universal) **não organizam o acervo**:
-cada uma larga o lote numa subpasta da entrada bruta do QNAP e grava um
-`manifesto.json` **por último**. Sem manifesto, o lote é tratado como "ainda
-enviando".
+Os scanners largam o material em `100 - Scanners/<fundo>/<material>/<projeto>/`
+(a ordem de material e projeto tanto faz; `TIF/`, `JPG/`, `DNG/`, `PDF/` dentro são
+aceitos). Para cada pasta, o vigia:
 
-```json
-{
-  "versao": 1,
-  "lote_id": "2026-10-07-contex1-001",
-  "operador": "Beatriz",
-  "operador_email": "beatriz@camp.arq.br",
-  "estacao": "Contex 1",
-  "tipo_estacao": "contex",
-  "fundo": "F026",
-  "fundo_nome": "SBU Sami Bussab",
-  "projeto": "Edifício Tarumã",
-  "projeto_codigo": "P0001",
-  "ano": "1972",
-  "tipo_material": "pranchas",
-  "serie": "S01",
-  "enviado_em": "2026-10-07T14:00:00",
-  "contagens": {"arquivos": 48}
-}
-```
+1. espera ela ficar **completa**: `manifesto.json` ou `status.json`
+   `enviado_windows` da estação, ou nada mudar por `entrada_quieto_minutos` (10);
+2. monta o **contexto**: fundo **pela tabela de autoridade** (código, sigla ou nome —
+   nunca chuta; código e nome em conflito é erro), série pela pasta de material
+   (sem ela: `99 - Não identificado`), projeto e ano pelo nome da pasta
+   (`SBU-Taruma-1972` também), operador e estação pelo manifesto;
+3. acha o projeto em `ACERVOS_CAMP` ou **pede o número ao painel** (`/reservar`;
+   sem painel o projeto novo espera, nunca recebe número inventado);
+4. **copia** com o nome CAMP `F0xx-P000x-AAAA-S0x-DNNNNN` para
+   `<Fundo>/01 - Projetos/<F0xx-P000x - Nome>/<série>/`, criando o MODELO de pastas
+   e os README; confere cada cópia por hash; TIF/JPG/DNG do mesmo documento
+   ganham o mesmo código; arquivo que já está no acervo não é copiado de novo;
+5. **lê o carimbo** uma vez por documento, da versão mais leve (DNG pelo preview,
+   PDF pela primeira página);
+6. grava **EXIF/XMP completo** em todas as versões — crédito
+   "Acervo {Arquiteto}/CAMP - Casa da Arquitetura Moderna Paulista", código,
+   fundo, operador — e confere arquivo por arquivo;
+7. escreve `catalogacao/` (`catalogacao.csv`, `contatos.jpg`, `erros.json`,
+   `lotes/`) e `info_projeto.json`;
+8. marca `status.json` = `pronto` (por último) e avisa o painel;
+9. **apaga o original** da entrada — só o que foi copiado, conferido e não mudou.
 
-Obrigatórios: `operador`, `estacao`, `fundo` (código F000 da tabela de
-autoridade), `projeto`, `tipo_material`. `serie` sai do material quando não
-vem (pranchas S01, documentos S02, fotografias S03, negativos S04, slides S05,
-materiais S06). `contagens.arquivos` é conferido: enquanto o número de imagens
-não bater, o lote espera.
-
-O que o vigia faz com cada lote, nesta ordem:
-
-1. espera o lote ficar estável e completo;
-2. **copia** para `<acervo>/<Fundo>/<Projeto>/<Série>/`, mantendo `TIF/` e
-   `JPG/` — reaproveita a pasta de fundo/projeto que já começa com o código
-   (`F026 - ...`, `P0001 - ...`); a entrada **nunca** é alterada;
-3. lê os carimbos (o mesmo processamento de sempre);
-4. grava o EXIF com o crédito nas cópias (exige `exiftool`);
-5. escreve `<Projeto>/catalogacao/lotes/<lote_id>.json` com contexto, arquivos,
-   metadados, EXIF, outliers, erros e contagens;
-6. **só então** grava `"status": "pronto"` nesse JSON (gravação atômica) e
-   `ultimo_lote_pronto` no `status.json` do projeto.
-
-O painel deve considerar pronto **apenas** o JSON com `"status": "pronto"`.
-`"processando"` é trabalho em curso; `"erro"` traz o motivo em `erros`.
-Lote com erro ou manifesto recusado não volta sozinho:
-
-```bash
-python vigia.py --entrada /mnt/qnap/entrada_captura   # liga (salva no config)
-python vigia.py --lotes                               # estado de cada lote
-python vigia.py --refazer-lote 2026-10-07-contex1     # devolve à fila depois de corrigir
-```
-
-A raiz final é `pasta_acervo_final` ou, vazia, a `pasta_vigiada`. Os nomes das
-pastas de série ficam em `pastas_series` no config.
+Qualquer falha antes do 8 deixa o projeto em `erro` com o motivo e **não apaga
+nada**. Tudo vai para o **livro de registro**
+(`ACERVOS_CAMP/_campvision/registro/AAAA-MM.jsonl` e `.csv`): copiado, lido,
+exif_gravado, apagado_original, erro — com origem, destino, nome original e hash.
 
 ### A planilha única do acervo
 
-Escrita em `_catalogacao/acervo.xlsx` ao fim de cada rodada:
-
-Sai em **CSV** por padrão (`acervo.csv`): abre em tudo, é rápido em rede e serve
-para grep. Acrescente `"xlsx"` em `formatos_saida` se quiser também a planilha de
-três abas — Acervo (uma linha por prancha, com filtro e cores de confiança),
-Projetos (fundo, cobertura, campos a revisar, divergências, com totais) e
-Pendentes.
+Escrita em `_catalogacao/` ao fim de cada rodada, **só CSV** (XLSX foi abolido
+em 07/10/2026): `acervo.csv` (uma linha por prancha, com as colunas **Revisar** e
+**Campos a revisar** no lugar das cores), `projetos.csv` (fundo, cobertura,
+campos a revisar, divergências) e `pendentes.csv`.
 
 Cada projeto também recebe a sua catalogação em `catalogacao/`. Para ter só a da
 raiz: `"escrever_por_projeto": false`. O `leituras.json` de cada projeto é
@@ -533,50 +582,8 @@ de sincronizar, e você descobriria dias depois com os arquivos parados no Mac.
 
 ### No Ubuntu
 
-Roda igual — o que muda é o serviço e onde o share monta.
-
-```bash
-sudo apt install -y python3-venv python3-tk libimage-exiftool-perl
-git clone git@github.com:mullets/campvision2.git
-cd campvision2
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-python vigia.py --criar-config
-# preencha identidade_site no ~/.campvision2/config.json
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-python vigia.py --pasta /mnt/qnap/acervos
-python vigia.py --status
-./systemd/instalar.sh
-```
-
-Com o share já montado (fstab, `mount -t cifs`), passe o caminho direto — não
-precisa de `smb://`. Se usar a URL, ele traduz para `/mnt` no Linux e `/Volumes`
-no macOS; para outra raiz, preencha `raiz_de_montagem` no config.
-
-`python3-tk` só é necessário para a janela (`app.py`). Numa máquina headless, o
-`vigia.py` e o `cli.py` funcionam sem ele.
-
-Gerenciar o serviço:
-
-```bash
-systemctl --user status campvision2
-journalctl --user -u campvision2 -f     # acompanhar
-./systemd/instalar.sh --remover
-```
-
-**Numa máquina dedicada, habilite o lingering**, senão o serviço morre quando
-você sai da sessão SSH:
-
-```bash
-sudo loginctl enable-linger $USER
-```
-
-A chave da API vai para `~/.campvision2/ambiente` com permissão 600, nunca para
-o unit file — unit é legível por qualquer usuário da máquina. A chave SSH da
-auto-atualização é apontada ali também, pelo mesmo motivo do macOS: serviço não
-tem `ssh-agent`.
+Veja [Servidor da CAMP (Ubuntu)](#servidor-da-camp-ubuntu): `sudo ./instalar.sh`
+faz tudo. O `systemd/instalar.sh` antigo (serviço de usuário) foi substituído.
 
 ### Instalar como serviço do macOS
 
@@ -654,61 +661,7 @@ versionado, roda os testes e commita o que estiver pendente.
 
 ## Na máquina dedicada
 
-```bash
-git clone git@github.com:mullets/campvision2.git
-cd campvision2
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-python vigia.py --criar-config          # cria ~/.campvision2/config.json
-# preencha identidade_site no config
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-python vigia.py --pasta "smb://Server-Camp._smb._tcp.local/Backup Servidor CAMP/Arquivos/99 - Saida Scanner Contex HD"
-python vigia.py --status                # confira a árvore antes de soltar
-./launchagent/instalar.sh               # deixa rodando de vez
-```
-
-O `config.json` não é versionado, então cada máquina tem o seu e a chave da API
-nunca sobe para o GitHub.
-
-**Uma máquina de cada vez no mesmo share.** O `status.json` evita refazer
-projeto já concluído, mas duas máquinas varrendo a mesma pasta podem pegar o
-mesmo projeto no mesmo minuto e pagar duas vezes pelas mesmas pranchas. Ao
-passar o vigia para a máquina dedicada, tire o serviço do outro Mac:
-`./launchagent/instalar.sh --remover`.
-
-O `.gitignore` barra o que não pode subir: `config.json` (pode conter a chave),
-checkpoints, planilhas e logs.
-
-Com um remoto configurado, o vigia verifica atualizações a cada hora, **fora de
-qualquer lote** — entre um projeto e outro, e também quando está ocioso, que é o
-estado normal dele. Se veio código novo, faz `pull --ff-only` e se reinicia
-sozinho para carregar a versão nova. Se aquela máquina tiver alterações locais
-não commitadas, a atualização é pulada com aviso, sem sobrescrever seu trabalho.
-
-**A chave SSH precisa estar disponível ao serviço.** Rodando pelo LaunchAgent, o
-processo não herda o `ssh-agent` do seu login, então o `git fetch` falharia toda
-hora em silêncio. O `instalar.sh` detecta a chave em `~/.ssh` e a aponta no plist
-via `GIT_SSH_COMMAND`. Duas ressalvas:
-
-- **Chave com senha não serve** — não há quem a digite num serviço. O instalador
-  avisa. Gere uma chave sem senha só para isso, ou use remoto HTTPS com token:
-  `git remote set-url origin https://TOKEN@github.com/mullets/campvision2.git`
-- Quando o fetch falha, o log diz **por quê** (sem chave, sem rede, ssh ausente)
-  em vez de errar calado. Conferir: `grep -i atualiz ~/.campvision2/vigia.log`
-
-Fluxo do dia a dia: você mexe no código aqui, dá push, e em até uma hora o
-notebook puxa e reinicia sozinho. Para forçar na hora, `git pull` lá e reinicie
-o serviço.
-
-Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
-`--sem-auto-atualizar` ou `"auto_atualizar": false`.
-
-O `.github/workflows/testes.yml` roda os 221 testes a cada push, em Python 3.10 e
-3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
-
----
+Veja [Servidor da CAMP (Ubuntu)](#servidor-da-camp-ubuntu).
 
 ## Referência
 
@@ -718,8 +671,8 @@ O `.github/workflows/testes.yml` roda os 221 testes a cada push, em Python 3.10 
 |---|---|
 | `python app.py` | janela: escolher pasta, ler, aplicar |
 | `python cli.py PASTA` | lê uma pasta e escreve a planilha |
-| `python cli.py PASTA --aplicar catalogacao.xlsx [--valendo]` | Fase 2 (sem `--valendo`, só simula) |
-| `python cli.py PASTA --regravar-metadados catalogacao.xlsx` | regrava metadados sem reprocessar |
+| `python cli.py PASTA --aplicar catalogacao.csv [--valendo]` | Fase 2 (sem `--valendo`, só simula) |
+| `python cli.py PASTA --regravar-metadados catalogacao.csv` | regrava metadados sem reprocessar |
 | `python vigia.py` | painel ao vivo |
 | `python vigia.py --status` | árvore do acervo e o que está pendente |
 | `python vigia.py --uma-vez` | processa o pendente e sai |
@@ -753,7 +706,13 @@ Tudo em `~/.campvision2/config.json` — crie com `--criar-config`. O
 | `criar_status_ausente` | true | cria status em pasta que não tem |
 | `processar_tudo_sem_fase` | false | mutirão: portão é a fase, não o status (`--todos`) |
 | `profundidade_maxima` | 5 | até onde desce na árvore |
-| `formatos_saida` | `["csv"]` | acrescente `"xlsx"` para a planilha colorida |
+| `formatos_saida` | `["csv"]` | só CSV; `"xlsx"` em config antigo é ignorado com aviso |
+| `pasta_entrada` | `""` | `100 - Scanners` montado; vazio desliga o recebimento |
+| `pasta_acervo_final` | `""` | `ACERVOS_CAMP` montado |
+| `entrada_quieto_minutos` | `10` | pasta sem manifesto conta como completa depois disso |
+| `apagar_original_apos_pronto` | `true` | apaga da entrada o que foi arquivado e conferido |
+| `painel_url` | `""` | `http://192.168.15.60:8000`; token em `CAMP_PAINEL_TOKEN` |
+| `heartbeat_segundos` | `60` | batimento para o painel |
 | `escrever_por_projeto` | true | catalogação dentro de cada projeto, além da raiz |
 | `espera_estabilidade_segundos` | 45 | arquivo mexido agora espera a próxima rodada |
 | `reprocessar_se_houver_novas` | true | projeto que cresce volta para a fila |
@@ -802,7 +761,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-221 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+230 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote

@@ -66,7 +66,14 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
 
     `campos` usa os rótulos da planilha (Projeto, Arquiteto, Cidade...).
     Campo vazio é omitido: melhor ausente do que presente e em branco.
+
+    Chaves com `_` na frente são do acervo, não do carimbo:
+    `_credito` (crédito do fundo, vence o da identidade), `_codigo`
+    (F002-P0002-1975-S01-D00017), `_fundo`, `_serie`, `_operador`,
+    `_estacao`, `_digitalizado_em`.
     """
+    extras = {k: str(v).strip() for k, v in campos.items() if k.startswith("_") and v}
+    campos = {k: v for k, v in campos.items() if not k.startswith("_")}
     def pega(*rotulos: str) -> str:
         for rotulo in rotulos:
             valor = (campos.get(rotulo) or "").strip()
@@ -87,9 +94,13 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
         for rotulo, valor in campos.items()
         if valor and str(valor).strip()
     ]
+    credito = extras.get("_credito") or identidade.credito
+    if extras.get("_codigo"):
+        descricao_partes.insert(0, f"Código: {extras['_codigo']}")
     descricao = " | ".join(descricao_partes)[:1900]
-    if identidade.nome:
-        descricao = f"{descricao} | Acervo: {identidade.credito}" if descricao else f"Acervo: {identidade.credito}"
+    rodape = credito if extras.get("_credito") else (f"Acervo: {credito}" if credito else "")
+    if rodape:
+        descricao = f"{descricao} | {rodape}" if descricao else rodape
 
     palavras = [p for p in (projeto, autor, pega("Tipo"), cidade, ano, identidade.nome) if p]
 
@@ -111,10 +122,10 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
 
     # --- Crédito institucional: SEMPRE, mesmo sem autor identificado ---
     adicionar("XMP-dc:Publisher", identidade.nome)
-    adicionar("XMP-photoshop:Credit", identidade.credito)
-    adicionar("XMP-photoshop:Source", identidade.credito)
-    adicionar("IPTC:Credit", identidade.credito)
-    adicionar("IPTC:Source", identidade.credito)
+    adicionar("XMP-photoshop:Credit", credito)
+    adicionar("XMP-photoshop:Source", credito)
+    adicionar("IPTC:Credit", credito)
+    adicionar("IPTC:Source", credito)
     adicionar("XMP-xmpRights:WebStatement", identidade.site)
     adicionar("XMP-iptcCore:CreatorWorkURL", identidade.site)
     adicionar("XMP-iptcCore:CreatorContactInfoCiEmailWork", identidade.contato)
@@ -143,6 +154,15 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
     for palavra in palavras:
         argumentos.append(f"-XMP-dc:Subject+={palavra}")
         argumentos.append(f"-IPTC:Keywords+={palavra}")
+
+    # --- Identificação no acervo ---
+    adicionar("XMP-dc:Identifier", extras.get("_codigo", ""))
+    adicionar("XMP-photoshop:TransmissionReference", extras.get("_codigo", ""))
+    adicionar("IPTC:OriginalTransmissionReference", extras.get("_codigo", "")[:32])
+    adicionar("XMP-xmpMM:PreservedFileName", extras.get("_nome_original", ""))
+    quem = " / ".join(p for p in (extras.get("_operador", ""), extras.get("_estacao", "")) if p)
+    adicionar("XMP-photoshop:CaptionWriter", quem)
+    adicionar("XMP-xmp:MetadataDate", extras.get("_digitalizado_em", ""))
 
     adicionar("XMP-xmp:CreatorTool", f"CAMP Vision 2 ({VERSAO_BUILD})")
     argumentos.append(str(caminho))
@@ -224,7 +244,7 @@ def conferir(caminho: Path) -> dict[str, str]:
                 "exiftool", "-json", "-charset", "utf8",
                 "-XMP-dc:Publisher", "-XMP-photoshop:Credit",
                 "-XMP-xmpRights:WebStatement", "-EXIF:Copyright",
-                "-XMP-dc:Title", "-EXIF:Artist",
+                "-XMP-dc:Title", "-EXIF:Artist", "-XMP-dc:Identifier",
                 str(caminho),
             ],
             capture_output=True, text=True, timeout=60,

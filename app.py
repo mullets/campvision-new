@@ -177,10 +177,9 @@ class Janela(tk.Tk):
                 t_out += c_out
 
             custo = self.config_app.custo_estimado_usd(t_in, t_out)
-            xlsx = planilha.escrever_xlsx(resultado.leituras, pasta / "catalogacao.xlsx")
-            planilha.escrever_csv(resultado.leituras, pasta / "catalogacao.csv")
+            saida = planilha.escrever_csv(resultado.leituras, pasta / "catalogacao.csv")
             planilha.escrever_relatorio(resultado.leituras, pasta / "relatorio.txt", custo)
-            self.status.set(f"Pronto. Planilha: {xlsx.name} — custo estimado US$ {custo:.2f}")
+            self.status.set(f"Pronto. Planilha: {saida.name} — custo estimado US$ {custo:.2f}")
         except Exception as erro:  # noqa: BLE001
             logging.getLogger("cv2").exception("Falha no lote")
             self.status.set(f"Falhou: {erro}")
@@ -198,7 +197,7 @@ class Janela(tk.Tk):
         caminho = filedialog.askopenfilename(
             title="Planilha revisada",
             initialdir=str(pasta),
-            filetypes=[("Planilha", "*.xlsx *.csv")],
+            filetypes=[("Planilha CSV", "*.csv")],
         )
         if not caminho:
             return

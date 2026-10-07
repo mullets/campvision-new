@@ -1,0 +1,22 @@
+[Unit]
+Description=CAMP Vision 2 — recebe 100 - Scanners e organiza ACERVOS_CAMP
+Documentation=https://github.com/mullets/campvision-new
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USUARIO__
+WorkingDirectory=__REPO__
+ExecStart=__REPO__/.venv/bin/python __REPO__/vigia.py --sem-painel
+# Chaves (Anthropic, painel) num arquivo 600, nunca no unit file.
+EnvironmentFile=__CASA__/.campvision2/ambiente
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=15
+# Ctrl+C elegante: termina a prancha em andamento antes de sair.
+KillSignal=SIGTERM
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

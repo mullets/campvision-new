@@ -1,6 +1,6 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-Versão 1 — 07/10/2026. Vale para os dois repositórios: `campvision-new` (CV2) e
+Versão 1 — 07/10/2026. Lado do CV2 implementado (nucleo/entrada.py, painel.py, livro.py). Vale para os dois repositórios: `campvision-new` (CV2) e
 `camp-painel`. Mudou aqui, muda nos dois.
 
 ```

@@ -16,7 +16,11 @@
     python vigia.py --refazer TEXTO           # devolve projetos à fila (TEXTO=tudo p/ todos)
     python vigia.py --status                 # o que está pendente agora, sem processar
     python vigia.py --entrada /mnt/qnap/entrada # liga o recebimento de lotes das estações
-    python vigia.py --lotes                  # lotes da entrada bruta e seu estado
+    python vigia.py --acervo /mnt/camp/acervos  # raiz do ACERVOS_CAMP
+    python vigia.py --painel http://192.168.15.60:8000
+    python vigia.py --lotes                  # pastas da entrada e seu estado
+    python vigia.py --historico DEST352844.tif  # caminho de um arquivo (ou código, lote, data)
+    python vigia.py --monitor                # tela do servidor: estado do serviço ao vivo
     python vigia.py --refazer-lote NOME      # devolve um lote com erro/recusado à fila
 
 Ctrl+C encerra com elegância: termina a prancha em andamento, grava o
@@ -112,7 +116,7 @@ class Painel:
 
 
 def _comando_status(config: Config) -> int:
-    if not config.pasta_vigiada:
+    if not config.pasta_vigiada and not config.pasta_entrada:
         print("Nenhuma pasta vigiada. Rode com --pasta /caminho uma vez.", file=sys.stderr)
         return 1
     raiz = Path(config.pasta_vigiada)
@@ -294,18 +298,19 @@ def _comando_lotes(config: Config) -> int:
         print("Recebimento desligado. Rode com --entrada /caminho uma vez.")
         return 1
     pasta = Path(config.pasta_entrada)
-    registrados = mod_entrada.lotes_registrados(PASTA_ESTADO)
     if not pasta.is_dir():
         print(mod_vigia.diagnosticar_pasta(pasta))
         return 1
-    for lote in sorted(p for p in pasta.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
-        if not (lote / mod_entrada.NOME_MANIFESTO).exists():
-            print(f"  enviando    {lote.name}  (sem manifesto ainda)")
-            continue
-        item = registrados.get(mod_entrada.chave_do_lote(lote), {})
-        situacao = item.get("status", "na fila")
-        motivo = f"  — {item['motivo']}" if item.get("motivo") else ""
-        print(f"  {situacao:<11} {lote.name}{motivo}")
+    estado = mod_entrada.Estado(PASTA_ESTADO).ultimos()
+    unidades = mod_entrada.descobrir(pasta)
+    if not unidades:
+        print("Entrada vazia.")
+    for unidade in unidades:
+        ultimo = estado.get(unidade.chave, {})
+        pronta, motivo = mod_entrada.pronta(unidade, config)
+        situacao = ultimo.get("status") or ("na fila" if pronta else "chegando")
+        detalhe = ultimo.get("motivo") or motivo
+        print(f"  {situacao:<11} {unidade.relativo}" + (f"  — {detalhe}" if detalhe else ""))
     return 0
 
 
@@ -313,18 +318,91 @@ def _comando_refazer_lote(config: Config, texto: str) -> int:
     from nucleo import entrada as mod_entrada
 
     if not config.pasta_entrada or not Path(config.pasta_entrada).is_dir():
-        print("Entrada bruta não configurada ou inacessível.", file=sys.stderr)
+        print("Entrada não configurada ou inacessível.", file=sys.stderr)
         return 1
-    alvos = [p for p in Path(config.pasta_entrada).iterdir() if p.is_dir() and texto in p.name]
-    for lote in alvos:
-        mod_entrada.registrar(PASTA_ESTADO, {
-            "chave": mod_entrada.chave_do_lote(lote), "lote": lote.name,
-            "status": "refazer", "em": datetime.now().isoformat(timespec="seconds"),
-        })
-        print(f"De volta à fila: {lote.name}")
+    estado = mod_entrada.Estado(PASTA_ESTADO)
+    alvos = [u for u in mod_entrada.descobrir(Path(config.pasta_entrada)) if texto in str(u.relativo)]
+    for unidade in alvos:
+        estado.anotar(unidade.chave, "refazer")
+        print(f"De volta à fila: {unidade.relativo}")
     if not alvos:
-        print(f"Nenhum lote contém '{texto}'.")
+        print(f"Nenhuma pasta da entrada contém '{texto}'.")
     return 0
+
+
+def _comando_historico(config: Config, termo: str) -> int:
+    from nucleo.livro import Livro
+
+    if not config.raiz_final:
+        print("Acervo final não configurado.", file=sys.stderr)
+        return 1
+    linhas = Livro(Path(config.raiz_final)).historico(termo)
+    for l in linhas:
+        print(f"{l['quando'][:19]}  {l['acao']:<16} {l.get('codigo_documento') or l.get('codigo_projeto') or ''}")
+        for rotulo, chave in (("de", "arquivo_origem"), ("para", "arquivo_destino"), ("", "detalhe")):
+            if l.get(chave):
+                print(f"{'':21}{rotulo:<5}{l[chave]}")
+    print(f"{len(linhas)} registro(s).")
+    return 0
+
+
+def _comando_livro_legado(config: Config) -> int:
+    """Leva o histórico antigo (eventos.jsonl) para o livro, como 'legado'."""
+    from nucleo.livro import Livro
+
+    if not config.raiz_final:
+        print("Acervo final não configurado.", file=sys.stderr)
+        return 1
+    livro = Livro(Path(config.raiz_final))
+    if any(l.get("acao") == "legado" for l in livro.todas()):
+        print("O legado já foi importado — nada feito.")
+        return 0
+    eventos = mod_eventos.ler(PASTA_ESTADO / "eventos.jsonl")
+    for e in eventos:
+        livro.anotar("legado", codigo_projeto=e.projeto, arquivo_destino=e.pasta,
+                     detalhe=f"{e.quando} {e.pranchas} prancha(s), "
+                             f"{e.com_carimbo} com carimbo, {e.erros} erro(s)"
+                             + (f", FALHA: {e.falha}" if e.falha else ""))
+    print(f"{len(eventos)} evento(s) antigo(s) levados ao livro como 'legado'.")
+    return 0
+
+
+def _comando_monitor() -> int:
+    """Tela do servidor: desenha o estado do serviço, sem rodar outra instância."""
+    import json as _json
+    import time as _time
+
+    painel = Painel(interativo=True)
+    caminho = PASTA_ESTADO / "estado.json"
+    sys.stdout.write(ESCONDER_CURSOR)
+    try:
+        while True:
+            try:
+                dados = _json.loads(caminho.read_text(encoding="utf-8"))
+                estado = mod_vigia.EstadoVigia(**{
+                    k: v for k, v in dados.items()
+                    if k in mod_vigia.EstadoVigia.__dataclass_fields__ and k != "inicio"
+                })
+                estado.inicio = datetime.fromisoformat(dados.get("inicio"))
+                idade = (datetime.now() - datetime.fromisoformat(dados["gravado_em"])).total_seconds()
+                if idade > 120:
+                    estado.situacao = f"serviço parado? (sem notícia há {int(idade // 60)} min)"
+                info = dados.get("painel", {})
+                if info.get("url"):
+                    estado.ultimas_linhas = estado.ultimas_linhas[-6:] + [
+                        f"painel {info['url']}: " + ("ok " + info["ultimo_ok"][11:19] if info.get("ultimo_ok")
+                                                     else info.get("ultimo_erro") or "sem resposta"),
+                    ]
+                painel.desenhar(estado)
+            except (OSError, ValueError, KeyError, TypeError):
+                sys.stdout.write(LIMPAR + "CAMP Vision 2 — aguardando o serviço subir...\n"
+                                 "  systemctl status campvision2\n")
+                sys.stdout.flush()
+            _time.sleep(2)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        sys.stdout.write(MOSTRAR_CURSOR + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -347,7 +425,16 @@ def main(argv: list[str] | None = None) -> int:
                         "(use 'tudo' para todos), devolvendo-os à fila")
     p.add_argument("--entrada", type=str,
                    help="Pasta de entrada bruta das estações (salva no config)")
-    p.add_argument("--lotes", action="store_true", help="Lista os lotes da entrada bruta")
+    p.add_argument("--acervo", type=str,
+                   help="Raiz do acervo final ACERVOS_CAMP (salva no config)")
+    p.add_argument("--painel", type=str, help="URL do painel, ex.: http://192.168.15.60:8000 (salva)")
+    p.add_argument("--lotes", action="store_true", help="Lista as pastas da entrada e o estado")
+    p.add_argument("--historico", metavar="TERMO",
+                   help="Livro de registro: arquivo, código, lote ou data (AAAA-MM-DD)")
+    p.add_argument("--livro-legado", action="store_true",
+                   help="Leva o histórico antigo (eventos.jsonl) para o livro de registro")
+    p.add_argument("--monitor", action="store_true",
+                   help="Só desenha o estado do serviço (para a tela do servidor)")
     p.add_argument("--refazer-lote", metavar="NOME",
                    help="Devolve à fila o lote cuja pasta contém NOME")
     p.add_argument("--estimativa", action="store_true",
@@ -357,6 +444,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     PASTA_ESTADO.mkdir(parents=True, exist_ok=True)
+    if args.monitor:
+        return _comando_monitor()
     if args.criar_config:
         criado = Config.criar_se_faltar(CAMINHO_CONFIG)
         print(("Criado: " if criado else "Já existia (não mexi): ") + str(CAMINHO_CONFIG))
@@ -384,6 +473,25 @@ def main(argv: list[str] | None = None) -> int:
         config.pasta_entrada = str(alvo)
         config.salvar(CAMINHO_CONFIG)
         print(f"Entrada bruta: {alvo}")
+    if args.acervo:
+        alvo = Path(args.acervo).expanduser()
+        if not alvo.is_dir():
+            print(f"Pasta não encontrada: {alvo}", file=sys.stderr)
+            return 1
+        config.pasta_acervo_final = str(alvo)
+        config.salvar(CAMINHO_CONFIG)
+        print(f"Acervo final: {alvo}")
+    if args.painel:
+        config.painel_url = args.painel.rstrip("/")
+        config.salvar(CAMINHO_CONFIG)
+        print(f"Painel: {config.painel_url}")
+    configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
+    acao = any((args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+                args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
+                args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
+                args.todos, args.sem_painel))
+    if configurou and not acao:
+        return 0  # só gravou a configuração; o serviço é quem roda
     if args.intervalo:
         config.intervalo_varredura_segundos = args.intervalo
     if args.sem_auto_atualizar:
@@ -414,10 +522,14 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_status(config)
     if args.lotes:
         return _comando_lotes(config)
+    if args.historico:
+        return _comando_historico(config, args.historico)
+    if args.livro_legado:
+        return _comando_livro_legado(config)
     if args.refazer_lote:
         return _comando_refazer_lote(config, args.refazer_lote)
 
-    if not config.pasta_vigiada:
+    if not config.pasta_vigiada and not config.pasta_entrada:
         print("Nenhuma pasta vigiada. Rode com --pasta /caminho uma vez.", file=sys.stderr)
         return 1
 

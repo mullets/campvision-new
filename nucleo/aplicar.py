@@ -1,6 +1,6 @@
 """Fase 2 — aplicar a planilha revisada aos arquivos.
 
-Roda SÓ depois de você revisar a planilha. Lê o XLSX/CSV editado e renomeia,
+Roda SÓ depois de você revisar a planilha. Lê o CSV editado e renomeia,
 organiza em pastas e (opcionalmente) grava EXIF. Separar isto da leitura é o
 ponto central do redesenho: leitura errada vira célula errada na planilha, que
 você corrige em 5 segundos — nunca uma prancha perdida em pasta errada.
@@ -42,23 +42,21 @@ def limpar_nome(texto: str, limite: int = 80) -> str:
 
 
 def ler_planilha(caminho: Path) -> list[dict[str, str]]:
-    """Lê o XLSX ou CSV revisado e devolve as linhas como dicionários."""
-    if caminho.suffix.lower() in (".xlsx", ".xlsm"):
-        from openpyxl import load_workbook
+    """Lê o CSV revisado (só CSV desde 07/10/2026) e devolve as linhas.
 
-        wb = load_workbook(caminho, data_only=True)
-        ws = wb.active
-        linhas = list(ws.iter_rows(values_only=True))
-        if not linhas:
-            return []
-        cabecalho = [str(c or "") for c in linhas[0]]
-        return [
-            {cabecalho[i]: ("" if v is None else str(v)) for i, v in enumerate(linha) if i < len(cabecalho)}
-            for linha in linhas[1:]
-            if any(v is not None and str(v).strip() for v in linha)
-        ]
-    with caminho.open(encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
+    Aceita vírgula ou ponto e vírgula — o Excel em português salva com ";".
+    """
+    if caminho.suffix.lower() != ".csv":
+        raise ValueError(f"Só CSV é aceito agora: {caminho.name}")
+    texto = caminho.read_text(encoding="utf-8-sig")
+    try:
+        dialeto = csv.Sniffer().sniff(texto.splitlines()[0] if texto else ",", delimiters=",;")
+    except csv.Error:
+        dialeto = csv.excel
+    return [
+        linha for linha in csv.DictReader(texto.splitlines(), dialect=dialeto)
+        if any((v or "").strip() for v in linha.values())
+    ]
 
 
 def montar_nome(linha: dict[str, str], sequencial: int) -> str:

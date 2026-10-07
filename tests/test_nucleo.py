@@ -299,14 +299,14 @@ class TestPlanilha(unittest.TestCase):
             ),
         ]
 
-    def test_xlsx_sai_ordenado_por_folha(self):
-        from openpyxl import load_workbook
+    def test_csv_sai_ordenado_por_folha(self):
+        from tests.test_acervo import ler_csv
 
         with TemporaryDirectory() as tmp:
-            destino = planilha.escrever_xlsx(self._amostra(), Path(tmp) / "c.xlsx")
-            ws = load_workbook(destino).active
-            self.assertEqual(ws.cell(row=2, column=1).value, "p1.jpg")
-            self.assertEqual(ws.cell(row=3, column=1).value, "p2.jpg")
+            linhas = ler_csv(planilha.escrever_csv(self._amostra(), Path(tmp) / "c.csv"))
+            self.assertEqual(linhas[0][:2], ["Código", "Arquivo"])
+            self.assertEqual(linhas[1][1], "p1.jpg")
+            self.assertEqual(linhas[2][1], "p2.jpg")
 
     def test_csv_tem_as_mesmas_colunas(self):
         import csv as _csv
@@ -315,7 +315,7 @@ class TestPlanilha(unittest.TestCase):
             destino = planilha.escrever_csv(self._amostra(), Path(tmp) / "c.csv")
             with destino.open(encoding="utf-8-sig") as f:
                 linhas = list(_csv.reader(f))
-            self.assertEqual(linhas[0][:2], ["Arquivo", "OK?"])
+            self.assertEqual(linhas[0][:4], ["Código", "Arquivo", "OK?", "Revisar"])
             self.assertEqual(len(linhas), 3)
 
     def test_relatorio_conta_campos_fracos(self):

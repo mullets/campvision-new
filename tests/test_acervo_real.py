@@ -29,7 +29,7 @@ from nucleo.vigia import CONTAINER, PROJETO, classificar
 from tests.test_nucleo import ClienteFalso, prancha_falsa, resposta_padrao
 
 CFG = Config(espera_estabilidade_segundos=0, trabalhadores=1,
-             consolidar_por_projeto=False, formatos_saida=("csv", "xlsx"))
+             consolidar_por_projeto=False)
 
 
 def imagens(pasta: Path, n: int = 2, prefixo: str = "p") -> Path:
@@ -177,7 +177,7 @@ class TestProcessamentoNoAcervoReal(unittest.TestCase):
             self.assertEqual(evento.pranchas, 4, "só as 4 do preview, não as 4 do TIFF")
             # checkpoint e planilha na RAIZ do projeto, não dentro do Preview
             self.assertTrue((projeto.pasta / "campvision2_checkpoint.jsonl").exists())
-            self.assertTrue((projeto.pasta / "catalogacao" / "catalogacao.xlsx").exists())
+            self.assertTrue((projeto.pasta / "catalogacao" / "catalogacao.csv").exists())
             self.assertFalse((projeto.pastas_imagens[0] / "campvision2_checkpoint.jsonl").exists())
 
     def test_status_existente_e_respeitado(self):
