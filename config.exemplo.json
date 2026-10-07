@@ -43,6 +43,17 @@
   "profundidade_maxima": 5,
   "pasta_acervo": "_catalogacao",
   "aplicar_automaticamente": false,
+  "pasta_entrada": "",
+  "pasta_acervo_final": "",
+  "pastas_series": {
+    "S01": "01 - Desenhos e Pranchas",
+    "S02": "02 - Documentos Textuais",
+    "S03": "03 - Fotografias",
+    "S04": "04 - Negativos",
+    "S05": "05 - Slides",
+    "S06": "06 - Materiais"
+  },
+  "entrada_exigir_exif": true,
   "auto_atualizar": true,
   "intervalo_atualizacao_minutos": 60,
   "hora_relatorio": "18:00",

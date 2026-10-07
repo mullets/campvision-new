@@ -15,7 +15,7 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-09-08-09"
+VERSAO_BUILD = "2026-10-07-01"
 
 _log = logging.getLogger("cv2.config")
 
@@ -128,6 +128,24 @@ class Config:
     # Aplica a Fase 2 sozinho ao terminar a leitura. Padrão FALSE de propósito:
     # o ponto do redesenho é você revisar a planilha antes de mexer em arquivo.
     aplicar_automaticamente: bool = False
+
+    # --- Entrada bruta (lotes das estações) ---
+    # Pasta do QNAP onde as estações largam os lotes com manifesto.json
+    # (qnap.entrada_captura). Vazio = recebimento desligado.
+    pasta_entrada: str = ""
+    # Raiz da estrutura final Fundo → Projeto → Série. Vazio = pasta_vigiada.
+    pasta_acervo_final: str = ""
+    # Nome da pasta de cada série dentro do projeto.
+    pastas_series: dict = field(default_factory=lambda: {
+        "S01": "01 - Desenhos e Pranchas",
+        "S02": "02 - Documentos Textuais",
+        "S03": "03 - Fotografias",
+        "S04": "04 - Negativos",
+        "S05": "05 - Slides",
+        "S06": "06 - Materiais",
+    })
+    # Lote só vira "pronto" com o crédito gravado em TODAS as cópias.
+    entrada_exigir_exif: bool = True
 
     # --- Auto-atualização pelo GitHub ---
     auto_atualizar: bool = True

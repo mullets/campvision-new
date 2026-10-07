@@ -15,6 +15,9 @@
     python vigia.py --todos --uma-vez         # mutirão: passa em tudo, uma vez
     python vigia.py --refazer TEXTO           # devolve projetos à fila (TEXTO=tudo p/ todos)
     python vigia.py --status                 # o que está pendente agora, sem processar
+    python vigia.py --entrada /mnt/qnap/entrada # liga o recebimento de lotes das estações
+    python vigia.py --lotes                  # lotes da entrada bruta e seu estado
+    python vigia.py --refazer-lote NOME      # devolve um lote com erro/recusado à fila
 
 Ctrl+C encerra com elegância: termina a prancha em andamento, grava o
 checkpoint e sai. O projeto interrompido não avança de status, então na próxima
@@ -284,6 +287,46 @@ def _comando_relatorio(config: Config, texto_data: str) -> int:
     return 0
 
 
+def _comando_lotes(config: Config) -> int:
+    from nucleo import entrada as mod_entrada
+
+    if not config.pasta_entrada:
+        print("Recebimento desligado. Rode com --entrada /caminho uma vez.")
+        return 1
+    pasta = Path(config.pasta_entrada)
+    registrados = mod_entrada.lotes_registrados(PASTA_ESTADO)
+    if not pasta.is_dir():
+        print(mod_vigia.diagnosticar_pasta(pasta))
+        return 1
+    for lote in sorted(p for p in pasta.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
+        if not (lote / mod_entrada.NOME_MANIFESTO).exists():
+            print(f"  enviando    {lote.name}  (sem manifesto ainda)")
+            continue
+        item = registrados.get(mod_entrada.chave_do_lote(lote), {})
+        situacao = item.get("status", "na fila")
+        motivo = f"  — {item['motivo']}" if item.get("motivo") else ""
+        print(f"  {situacao:<11} {lote.name}{motivo}")
+    return 0
+
+
+def _comando_refazer_lote(config: Config, texto: str) -> int:
+    from nucleo import entrada as mod_entrada
+
+    if not config.pasta_entrada or not Path(config.pasta_entrada).is_dir():
+        print("Entrada bruta não configurada ou inacessível.", file=sys.stderr)
+        return 1
+    alvos = [p for p in Path(config.pasta_entrada).iterdir() if p.is_dir() and texto in p.name]
+    for lote in alvos:
+        mod_entrada.registrar(PASTA_ESTADO, {
+            "chave": mod_entrada.chave_do_lote(lote), "lote": lote.name,
+            "status": "refazer", "em": datetime.now().isoformat(timespec="seconds"),
+        })
+        print(f"De volta à fila: {lote.name}")
+    if not alvos:
+        print(f"Nenhum lote contém '{texto}'.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=f"CAMP Vision 2 — vigia (build {VERSAO_BUILD})")
     p.add_argument("--pasta", type=str, help="Pasta a vigiar; aceita smb:// (salva no config)")
@@ -302,6 +345,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--refazer", metavar="TEXTO",
                    help="Tira a fase dos projetos cujo caminho contém TEXTO "
                         "(use 'tudo' para todos), devolvendo-os à fila")
+    p.add_argument("--entrada", type=str,
+                   help="Pasta de entrada bruta das estações (salva no config)")
+    p.add_argument("--lotes", action="store_true", help="Lista os lotes da entrada bruta")
+    p.add_argument("--refazer-lote", metavar="NOME",
+                   help="Devolve à fila o lote cuja pasta contém NOME")
     p.add_argument("--estimativa", action="store_true",
                    help="Conta pranchas e estima custo e tempo, sem chamar a API")
     p.add_argument("--sem-auto-atualizar", action="store_true")
@@ -327,6 +375,15 @@ def main(argv: list[str] | None = None) -> int:
         config.pasta_vigiada = str(alvo)
         config.salvar(CAMINHO_CONFIG)
         print(f"Pasta vigiada: {alvo}")
+    if args.entrada:
+        alvo = Path(args.entrada).expanduser()
+        if not alvo.is_dir():
+            print(f"Pasta não encontrada: {alvo}", file=sys.stderr)
+            print(mod_vigia.diagnosticar_pasta(alvo), file=sys.stderr)
+            return 1
+        config.pasta_entrada = str(alvo)
+        config.salvar(CAMINHO_CONFIG)
+        print(f"Entrada bruta: {alvo}")
     if args.intervalo:
         config.intervalo_varredura_segundos = args.intervalo
     if args.sem_auto_atualizar:
@@ -355,6 +412,10 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_relatorio(config, args.relatorio)
     if args.status:
         return _comando_status(config)
+    if args.lotes:
+        return _comando_lotes(config)
+    if args.refazer_lote:
+        return _comando_refazer_lote(config, args.refazer_lote)
 
     if not config.pasta_vigiada:
         print("Nenhuma pasta vigiada. Rode com --pasta /caminho uma vez.", file=sys.stderr)

@@ -106,7 +106,7 @@ Sem ele o app funciona, mas não grava metadados nas imagens.
 ### 6. Primeira leitura
 
 ```bash
-python -m unittest discover -s tests -t .   # 123 testes, sem rede
+python -m unittest discover -s tests -t .   # 221 testes, sem rede
 python app.py                                # janela
 ```
 
@@ -389,6 +389,65 @@ subpasta de imagem. Profundidade máxima em `profundidade_maxima` (padrão 5).
 ignorado em silêncio; agora entra. Pasta sem imagem não ganha status — não é
 projeto. Status que já existe nunca é mexido.
 
+### Entrada bruta: lotes das estações
+
+As estações (Foto/Mac, Contex/Windows, Universal) **não organizam o acervo**:
+cada uma larga o lote numa subpasta da entrada bruta do QNAP e grava um
+`manifesto.json` **por último**. Sem manifesto, o lote é tratado como "ainda
+enviando".
+
+```json
+{
+  "versao": 1,
+  "lote_id": "2026-10-07-contex1-001",
+  "operador": "Beatriz",
+  "operador_email": "beatriz@camp.arq.br",
+  "estacao": "Contex 1",
+  "tipo_estacao": "contex",
+  "fundo": "F026",
+  "fundo_nome": "SBU Sami Bussab",
+  "projeto": "Edifício Tarumã",
+  "projeto_codigo": "P0001",
+  "ano": "1972",
+  "tipo_material": "pranchas",
+  "serie": "S01",
+  "enviado_em": "2026-10-07T14:00:00",
+  "contagens": {"arquivos": 48}
+}
+```
+
+Obrigatórios: `operador`, `estacao`, `fundo` (código F000 da tabela de
+autoridade), `projeto`, `tipo_material`. `serie` sai do material quando não
+vem (pranchas S01, documentos S02, fotografias S03, negativos S04, slides S05,
+materiais S06). `contagens.arquivos` é conferido: enquanto o número de imagens
+não bater, o lote espera.
+
+O que o vigia faz com cada lote, nesta ordem:
+
+1. espera o lote ficar estável e completo;
+2. **copia** para `<acervo>/<Fundo>/<Projeto>/<Série>/`, mantendo `TIF/` e
+   `JPG/` — reaproveita a pasta de fundo/projeto que já começa com o código
+   (`F026 - ...`, `P0001 - ...`); a entrada **nunca** é alterada;
+3. lê os carimbos (o mesmo processamento de sempre);
+4. grava o EXIF com o crédito nas cópias (exige `exiftool`);
+5. escreve `<Projeto>/catalogacao/lotes/<lote_id>.json` com contexto, arquivos,
+   metadados, EXIF, outliers, erros e contagens;
+6. **só então** grava `"status": "pronto"` nesse JSON (gravação atômica) e
+   `ultimo_lote_pronto` no `status.json` do projeto.
+
+O painel deve considerar pronto **apenas** o JSON com `"status": "pronto"`.
+`"processando"` é trabalho em curso; `"erro"` traz o motivo em `erros`.
+Lote com erro ou manifesto recusado não volta sozinho:
+
+```bash
+python vigia.py --entrada /mnt/qnap/entrada_captura   # liga (salva no config)
+python vigia.py --lotes                               # estado de cada lote
+python vigia.py --refazer-lote 2026-10-07-contex1     # devolve à fila depois de corrigir
+```
+
+A raiz final é `pasta_acervo_final` ou, vazia, a `pasta_vigiada`. Os nomes das
+pastas de série ficam em `pastas_series` no config.
+
 ### A planilha única do acervo
 
 Escrita em `_catalogacao/acervo.xlsx` ao fim de cada rodada:
@@ -646,7 +705,7 @@ o serviço.
 Você desenvolve num Mac, dá push, os outros pegam sozinhos. Desligar:
 `--sem-auto-atualizar` ou `"auto_atualizar": false`.
 
-O `.github/workflows/testes.yml` roda os 207 testes a cada push, em Python 3.10 e
+O `.github/workflows/testes.yml` roda os 221 testes a cada push, em Python 3.10 e
 3.12 — se algo quebrar, você descobre antes das máquinas puxarem.
 
 ---
@@ -743,7 +802,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-207 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+221 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote

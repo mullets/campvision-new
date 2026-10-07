@@ -657,13 +657,16 @@ class Vigia:
     # -------------------------------------------------------------- laços
     def uma_rodada(self) -> int:
         """Processa tudo o que está pronto agora. Devolve quantos projetos rodou."""
+        recebidos = self.receber_lotes()
         raiz = Path(self.config.pasta_vigiada)
         pendentes = varrer(raiz, self.config)
         self.estado.fila = len(pendentes)
         if not pendentes:
+            if recebidos:
+                self.atualizar_planilha_do_acervo()
             self.estado.situacao = "vigiando"
             self.estado.projeto_atual = ""
-            return 0
+            return recebidos
 
         feitos = 0
         for projeto in pendentes:
@@ -675,10 +678,46 @@ class Vigia:
             feitos += 1
             self.estado.fila = max(0, self.estado.fila - 1)
 
-        if feitos:
+        if feitos or recebidos:
             self.atualizar_planilha_do_acervo()
         self.estado.situacao = "vigiando"
         self.estado.projeto_atual = ""
+        return feitos + recebidos
+
+    def receber_lotes(self) -> int:
+        """Puxa os lotes brutos das estações para o acervo final.
+
+        Roda antes da varredura normal: o lote vira projeto organizado, é lido,
+        recebe EXIF e só então é marcado como pronto para o painel.
+        """
+        if not self.config.pasta_entrada:
+            return 0
+        from . import entrada as mod_entrada
+
+        pasta = Path(self.config.pasta_entrada)
+        if not pasta.is_dir():
+            self.estado.anotar(f"entrada bruta: {diagnosticar_pasta(pasta)}")
+            return 0
+        feitos = 0
+        for lote_bruto in mod_entrada.varrer(pasta, self.pasta_estado):
+            if self.cancelar.is_set():
+                break
+            self._talvez_atualizar()
+            resultado = mod_entrada.processar_lote(
+                lote_bruto, self.config, self.cliente, self.pasta_estado,
+                self.estado, self.cancelar,
+            )
+            situacao = resultado.get("status", "")
+            if situacao == "aguardando":
+                continue
+            feitos += 1
+            nome = lote_bruto.pasta.name
+            if situacao == mod_entrada.PRONTO:
+                c = resultado.get("contagens", {})
+                self.estado.anotar(f"lote {nome}: pronto, {c.get('copiados', 0)} arquivo(s)")
+            else:
+                motivo = resultado.get("motivo") or "; ".join(resultado.get("erros", []))
+                self.estado.anotar(f"lote {nome}: {situacao.upper()} — {motivo[:60]}")
         return feitos
 
     def atualizar_planilha_do_acervo(self) -> None:
