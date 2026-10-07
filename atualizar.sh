@@ -5,6 +5,7 @@
 #   ./atualizar.sh --agora    não espera o lote em andamento (o checkpoint retoma)
 #   ./atualizar.sh --voltar   volta para a versão anterior
 #   ./atualizar.sh --versao X vai para um commit/tag específico
+#   ./atualizar.sh --sem-log  não abre o log ao vivo no fim
 #   ./atualizar.sh --auto     usado pela auto-atualização do vigia: não reinicia
 #                             o serviço (o próprio vigia se reinicia)
 #
@@ -22,12 +23,13 @@ FIXADA="$ESTADO/versao_fixada"   # depois de --voltar/--versao, a auto não mexe
 cd "$REPO"
 mkdir -p "$ESTADO"
 
-MODO="normal"; ALVO=""
+MODO="normal"; ALVO=""; SEM_LOG=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --agora) MODO="agora" ;;
     --voltar) MODO="voltar" ;;
     --auto) MODO="auto" ;;
+    --sem-log) SEM_LOG=1 ;;
     --versao) ALVO="${2:-}"; shift ;;
     *) echo "Opção desconhecida: $1" >&2; exit 2 ;;
   esac
@@ -95,6 +97,10 @@ fi
 if [[ "$NOVO" == "$ATUAL" ]]; then
   ok "já está na versão mais nova"
   [[ "$MODO" == "auto" ]] && exit 3
+  if [[ -t 1 && "$SEM_LOG" != "1" ]]; then
+    echo "Log ao vivo — Ctrl+C para sair (o serviço continua rodando):"
+    exec journalctl -u "$NOME" -f -n 20
+  fi
   exit 0
 fi
 echo "$ATUAL" > "$ANTERIOR"
@@ -142,4 +148,10 @@ fi
 # ---------------------------------------------------------------- reiniciar
 reiniciar || desfazer "serviço não subiu na versão nova"
 echo "Versão nova: $(versao) ($(git rev-parse --short HEAD))"
+# Depois de atualizar à mão, já abre o log ao vivo (Ctrl+C sai; o serviço segue).
+if [[ "$MODO" != "auto" && -t 1 && "$SEM_LOG" != "1" ]]; then
+  echo
+  echo "Log ao vivo — Ctrl+C para sair (o serviço continua rodando):"
+  exec journalctl -u "$NOME" -f -n 20
+fi
 journalctl -u "$NOME" -n 5 --no-pager 2>/dev/null | sed 's/^/  /' || true
