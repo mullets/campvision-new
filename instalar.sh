@@ -206,31 +206,9 @@ systemctl restart "$NOME.service"
 ok "serviço $NOME ligado (sobe no boot, reinicia se cair)"
 
 # ------------------------------------------------------------------ 8
-passo "8/9 Tela do notebook"
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/camp-autologin.conf <<EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $USUARIO --noclear %I \$TERM
-EOF
-MARCA="# CAMP Vision 2 — tela"
-PERFIL="$CASA/.bash_profile"
-touch "$PERFIL"; chown "$USUARIO:" "$PERFIL"
-if ! grep -q "$MARCA" "$PERFIL"; then
-  cat >> "$PERFIL" <<EOF
-
-$MARCA
-if [ "\$(tty)" = "/dev/tty1" ]; then
-  setterm --blank 0 --powerdown 0 2>/dev/null
-  trap '' INT TSTP QUIT
-  while true; do "$PY" "$REPO/vigia.py" --monitor; sleep 2; done
-fi
-[ -f "\$HOME/.bashrc" ] && . "\$HOME/.bashrc"
-EOF
-fi
-systemctl daemon-reload
-systemctl restart getty@tty1.service
-ok "tty1 entra sozinho e mostra o vigia ao vivo (Ctrl+C não sai)"
+passo "8/9 Tela do notebook e atalhos"
+SUDO_USER="$USUARIO" bash "$REPO/scripts/tela_e_atalhos.sh" | sed 's/^/  /'
+ok "tty1: log ao vivo · tty2 (Ctrl+Alt+F2): painel · atalhos cvlog/cvtela/cvlotes/cvatualizar"
 
 # ------------------------------------------------------------------ 9
 passo "9/9 Conferência"
@@ -248,7 +226,7 @@ IP_ATUAL="$(hostname -I | awk '{print $1}')"
 
 echo
 echo "${NEGRITO}Pronto.${NORMAL}"
-echo "  ver a tela:      no próprio notebook (tty1)  ou  $PY $REPO/vigia.py --monitor"
+echo "  atalhos (terminal novo): cvlog  cvtela  cvlotes  cvhist TERMO  cvatualizar  cvstatus"
 echo "  lotes:           $PY $REPO/vigia.py --lotes"
 echo "  histórico:       $PY $REPO/vigia.py --historico NOME-OU-CODIGO"
 echo "  log:             journalctl -u $NOME -f"
