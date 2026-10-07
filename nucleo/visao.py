@@ -86,7 +86,15 @@ class ClienteAnthropic:
                 "Sem chave de API. Defina ANTHROPIC_API_KEY no ambiente ou "
                 "preencha a chave na janela de configuração."
             )
-        self._cliente = anthropic.Anthropic(api_key=chave, timeout=config.timeout_segundos)
+        # Chave de usuário (sk-ant-usr-...) não tem workspace: a API exige o
+        # cabeçalho anthropic-workspace-id. Vem de ANTHROPIC_WORKSPACE_ID.
+        import os
+
+        workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+        cabecalhos = {"anthropic-workspace-id": workspace} if workspace else None
+        self._cliente = anthropic.Anthropic(
+            api_key=chave, timeout=config.timeout_segundos, default_headers=cabecalhos,
+        )
         self._config = config
 
     def chamar(
