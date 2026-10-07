@@ -127,6 +127,7 @@ def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
     if destino.exists() and destino.stat().st_mtime >= origem.stat().st_mtime:
         return destino
     ext = origem.suffix.lower()
+    destino.parent.mkdir(parents=True, exist_ok=True)  # o pdftoppm grava direto aqui
     img: Image.Image | None = None
     try:
         if ext == ".dng":

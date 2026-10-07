@@ -603,6 +603,7 @@ class Recebedor:
 
         # ---- 5. leitura: imagem leve por documento, cache fora do acervo
         cache = self.pasta_estado / "leitura" / codigo
+        cache.mkdir(parents=True, exist_ok=True)
         por_codigo: dict[str, list[Path]] = {}
         for _o, destino, codigo_doc, _s in arquivados:
             por_codigo.setdefault(codigo_doc, []).append(destino)
