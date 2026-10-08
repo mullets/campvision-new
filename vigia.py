@@ -464,6 +464,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--serie", metavar="S01", help="Série nova para --reclassificar")
     p.add_argument("--de", metavar="S99", help="Só os documentos desta série (padrão: todos)")
     p.add_argument("--ano", metavar="AAAA", help="Ano novo para --reclassificar")
+    p.add_argument("--codigo-novo", metavar="F0xx-P000x", help="Código novo do projeto para --reclassificar")
+    p.add_argument("--nome-novo", metavar="NOME", help="Nome novo do projeto para --reclassificar")
     p.add_argument("--livro-legado", action="store_true",
                    help="Leva o histórico antigo (eventos.jsonl) para o livro de registro")
     p.add_argument("--monitor", action="store_true",
@@ -566,7 +568,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             n = mod_renomear.reclassificar(
                 Path(config.raiz_final), PASTA_ESTADO, args.reclassificar, args.serie, args.de,
-                args.ano, Livro(Path(config.raiz_final)))
+                args.ano, Livro(Path(config.raiz_final)), args.codigo_novo, args.nome_novo)
         except (OSError, ValueError) as erro:
             print(f"Não reclassifiquei: {erro}", file=sys.stderr)
             return 1

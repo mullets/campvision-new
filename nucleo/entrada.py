@@ -284,6 +284,19 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
         achado = estrutura.CODIGO_PROJETO.search(" ".join(restantes))
         if achado:
             ctx.codigo = f"{achado.group(1)}-{achado.group(2)}".upper()
+    # Número P sozinho ("P0001", ou a pasta "P0001 - EXPO Brasil...") é o
+    # número que a estação já reservou no painel: vale como código do projeto
+    # no fundo identificado — reservar outro duplicava o projeto (F022, 08/10).
+    if not ctx.codigo and ctx.fundo:
+        for candidato in [nome, *reversed(restantes)]:
+            achado = re.match(r"^\s*P(\d{4})\b", candidato or "", re.IGNORECASE)
+            if achado:
+                ctx.codigo = f"{ctx.fundo.codigo}-P{achado.group(1)}"
+                break
+    # Nome que é só o código não é nome: usa o resto da pasta.
+    if re.fullmatch(r"\s*(F\d{3}-)?P\d{4}\s*", nome or "", re.IGNORECASE):
+        nome = next((r for r in reversed(restantes)
+                     if re.sub(r"^\s*(F\d{3}-)?P\d{4}\s*[-–]?\s*", "", r, flags=re.IGNORECASE)), "")
     # "SBU-Taruma-1972" (padrão da estação Windows): tira prefixo e ano.
     nome = re.sub(r"^\s*(F\d{3}-)?P\d{4}\s*[-–]\s*", "", nome)
     padrao_windows = re.match(r"^[A-Z]{3}-(.+?)(?:-(\d{4}))?$", nome)

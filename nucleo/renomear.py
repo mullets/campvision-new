@@ -26,13 +26,15 @@ from . import estrutura
 _log = logging.getLogger("cv2.renomear")
 
 
-def novo_codigo(codigo: str, serie: str | None = None, ano: str | None = None) -> str:
+def novo_codigo(codigo: str, serie: str | None = None, ano: str | None = None,
+                projeto: str | None = None) -> str:
+    """`projeto` é o código novo do projeto inteiro (F022-P0001)."""
     achado = estrutura.CODIGO_DOCUMENTO.match(codigo)
     if not achado:
         return codigo
-    fundo, projeto, ano_atual, serie_atual, numero = achado.groups()
-    return (f"{fundo.upper()}-{projeto.upper()}-{ano or ano_atual}-"
-            f"{(serie or serie_atual).upper()}-D{numero}")
+    fundo, proj, ano_atual, serie_atual, numero = achado.groups()
+    prefixo = projeto.upper() if projeto else f"{fundo.upper()}-{proj.upper()}"
+    return f"{prefixo}-{ano or ano_atual}-{(serie or serie_atual).upper()}-D{numero}"
 
 
 def _trocar_texto(arquivo: Path, trocas: list[tuple[str, str]]) -> None:
@@ -132,13 +134,20 @@ def achar_projeto(raiz_final: Path, codigo: str) -> Path | None:
 
 def reclassificar(raiz_final: Path, pasta_estado: Path, codigo_projeto: str,
                   serie: str | None = None, de: str | None = None, ano: str | None = None,
-                  livro=None) -> int:
-    """Troca série (e/ou ano) de todos os documentos do projeto — ou só dos da série `de`."""
+                  livro=None, codigo_novo: str | None = None, nome_novo: str | None = None) -> int:
+    """Troca série, ano e/ou o CÓDIGO e nome do projeto de todos os documentos."""
     pasta = achar_projeto(raiz_final, codigo_projeto)
     if pasta is None:
         raise FileNotFoundError(f"projeto {codigo_projeto} não encontrado em {raiz_final}")
     if serie and serie.upper() not in estrutura.SERIES:
         raise ValueError(f"série {serie} desconhecida (use {', '.join(estrutura.SERIES)})")
+    codigo_antigo = estrutura.codigo_da_pasta(pasta)
+    if codigo_novo:
+        codigo_novo = codigo_novo.upper()
+        if not estrutura.CODIGO_PROJETO.fullmatch(codigo_novo) or codigo_novo[:4] != codigo_antigo[:4]:
+            raise ValueError(f"código novo {codigo_novo} inválido ou de outro fundo")
+        if achar_projeto(raiz_final, codigo_novo):
+            raise FileExistsError(f"já existe um projeto {codigo_novo}: junte à mão ou escolha outro")
     trocas: dict[str, str] = {}
     for arquivo in pasta.rglob("*"):
         achado = estrutura.CODIGO_DOCUMENTO.match(arquivo.stem)
@@ -146,6 +155,31 @@ def reclassificar(raiz_final: Path, pasta_estado: Path, codigo_projeto: str,
             continue
         if de and achado.group(4).upper() != de.upper():
             continue
-        trocas[arquivo.stem] = novo_codigo(arquivo.stem, serie, ano)
-    motivo = f"reclassificado: série {serie or '='} ano {ano or '='}"
-    return len(renomear(pasta, raiz_final, pasta_estado, trocas, livro, motivo))
+        trocas[arquivo.stem] = novo_codigo(arquivo.stem, serie, ano, codigo_novo)
+    motivo = (f"reclassificado: série {serie or '='} ano {ano or '='}"
+              + (f" projeto {codigo_antigo}→{codigo_novo}" if codigo_novo else ""))
+    n = len(renomear(pasta, raiz_final, pasta_estado, trocas, livro, motivo))
+    if codigo_novo or nome_novo:
+        nome = nome_novo or estrutura.nome_sem_codigo(pasta.name)
+        nova = pasta.parent / estrutura.limpar(f"{codigo_novo or codigo_antigo} - {nome}", 110)
+        if nova != pasta:
+            os.replace(pasta, nova)
+
+            def rel(p: Path) -> str:
+                return str(p.relative_to(raiz_final))
+
+            textos = [(rel(pasta), rel(nova))]
+            if codigo_novo:
+                textos.append((codigo_antigo, codigo_novo))
+            for arquivo in [*(nova / "catalogacao").rglob("*"), nova / "status.json",
+                            nova / "info_projeto.json", nova / "campvision2_checkpoint.jsonl"]:
+                if arquivo.is_file() and arquivo.suffix in (".json", ".jsonl", ".csv", ".txt"):
+                    _trocar_texto(arquivo, textos)
+            if codigo_novo:
+                for base in (pasta_estado / "leitura", raiz_final / "_campvision" / "preview"):
+                    if (base / codigo_antigo).is_dir() and not (base / codigo_novo).exists():
+                        os.replace(base / codigo_antigo, base / codigo_novo)
+            readme = nova / "README.md"
+            if readme.exists():
+                _trocar_texto(readme, textos + [(estrutura.nome_sem_codigo(pasta.name), nome)])
+    return n

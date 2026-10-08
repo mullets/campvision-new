@@ -160,6 +160,17 @@ class TestContexto(Base):
         self.assertEqual(c.problemas, [])
         self.assertEqual(c.fundo.codigo, "F022")
 
+    def test_numero_p_da_estacao_vira_codigo_e_nao_nome(self):
+        # Caso real (08/10): info com projeto "P0001" e pasta "P0001 - EXPO Brasil 1978 Cingapura - 1978"
+        pasta = self.scan("F022 - MSL - Marklen Slan", "P0001 - EXPO Brasil 1978 Cingapura - 1978", n=1)
+        (pasta / "info_projeto.json").write_text(json.dumps({"projeto": "P0001", "fundo": "Marklen Slan"}),
+                                                 encoding="utf-8")
+        c = entrada.contexto(entrada.Unidade(pasta, pasta.relative_to(self.scanners)),
+                             fundos.Tabela(fundos.EMBUTIDA))
+        self.assertEqual(c.codigo, "F022-P0001")
+        self.assertEqual(c.projeto, "EXPO Brasil 1978 Cingapura")
+        self.assertEqual(c.ano, "1978")
+
     def test_info_e_pasta_em_conflito_param(self):
         pasta = self.scan("F022 - MSL", "Casa", n=1)
         (pasta / "info_projeto.json").write_text(json.dumps({"fundo_codigo": "F026"}), encoding="utf-8")
@@ -355,6 +366,16 @@ class TestSerieEAno(Base):
         self.assertFalse(any((res.pasta_projeto / "01 - Desenhos e pranchas").iterdir()))
         leituras = json.loads((res.pasta_projeto / "catalogacao" / "leituras.json").read_text())
         self.assertTrue(all("-S03-" in l["arquivo"] for l in leituras))
+        # Código e nome do projeto (caso F022-P0007 "P0001" → F022-P0001 "EXPO Brasil")
+        renomear.reclassificar(self.acervo, self.estado, "F026-P0001", codigo_novo="F026-P0009",
+                               nome_novo="Clube Sírio", livro=Livro(self.acervo))
+        nova = res.pasta_projeto.parent / "F026-P0009 - Clube Sírio"
+        self.assertTrue((nova / "03 - Fotografias" / "F026-P0009-1975-S03-D00001.jpg").exists())
+        self.assertFalse(res.pasta_projeto.exists())
+        self.assertIn('"F026-P0009"', (nova / "status.json").read_text())
+        self.assertIn("F026-P0009", (nova / "info_projeto.json").read_text())
+        self.assertNotIn("F026-P0001", (nova / "catalogacao" / "mapa_origem.json").read_text())
+        self.assertTrue((self.acervo / "_campvision" / "preview" / "F026-P0009").is_dir())
 
 
 class TestFalhasNaoApagam(Base):
