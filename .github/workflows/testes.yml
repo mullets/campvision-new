@@ -20,4 +20,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install Pillow openpyxl
       - name: Rodar os testes
-        run: python -m unittest discover -s tests -t . -v
+        run: |
+          set +e
+          python -m unittest discover -s tests -t . -v > saida.txt 2>&1
+          codigo=$?
+          if [ $codigo -ne 0 ]; then
+            resumo=$(grep -n -E "^(FAIL|ERROR):|Error|Traceback|File \"/home/runner" saida.txt | head -40 | cut -c1-220 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=falhas::$resumo"
+            fim=$(tail -30 saida.txt | cut -c1-220 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=fim do log::$fim"
+          fi
+          tail -5 saida.txt
+          exit $codigo
