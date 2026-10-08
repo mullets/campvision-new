@@ -69,6 +69,9 @@ class Config:
     ganho_minimo_2o_passe: float = 1.3
     # Consolida os campos por projeto no fim do lote (1 chamada de texto por grupo).
     consolidar_por_projeto: bool = True
+    # Como consolidar: "modelo" (1 chamada de texto por grupo; o padrão de hoje) ou "codigo" (moda, outliers e ressalvas em código,
+    # sem chamar o modelo; método de leitura §4.1). O padrão só muda depois da validação (ticket do protocolo de validação).
+    consolidacao: str = "modelo"
     # A pasta (projeto/ano) preenche campo que o carimbo não deu. A pasta NUNCA
     # é mostrada ao modelo: entra depois da leitura, marcada como outra fonte.
     usar_pasta_como_pista: bool = True

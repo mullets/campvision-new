@@ -71,6 +71,9 @@ class Leitura:
     lidos_originais: dict[str, str] = field(default_factory=dict)
     ano_do_projeto: str = ""
     suspeita_grupo: bool = False
+    # Consenso em código (nucleo/consenso.py): campo -> valor LIDO que ficou fora do consenso do grupo, e as ressalvas anexadas.
+    outliers: dict[str, str] = field(default_factory=dict)
+    ressalvas: list[str] = field(default_factory=list)
     # Pistas tiradas do caminho da pasta (nucleo/caminho.py) — segunda fonte,
     # sempre etiquetada: nunca se confunde com o que foi lido do carimbo.
     pista_projeto: str = ""
@@ -116,6 +119,8 @@ class Leitura:
             "lidos_originais": self.lidos_originais,
             "ano_do_projeto": self.ano_do_projeto,
             "suspeita_grupo": self.suspeita_grupo,
+            "outliers": self.outliers,
+            "ressalvas": self.ressalvas,
             "pista_projeto": self.pista_projeto,
             "pista_ano": self.pista_ano,
             "pista_fundo": self.pista_fundo,
@@ -146,6 +151,8 @@ class Leitura:
             grupo=dados.get("grupo", ""),
             lidos_originais=dados.get("lidos_originais", {}),
             ano_do_projeto=dados.get("ano_do_projeto", ""),
+            outliers=dados.get("outliers", {}),
+            ressalvas=dados.get("ressalvas", []),
             suspeita_grupo=dados.get("suspeita_grupo", False),
             pista_projeto=dados.get("pista_projeto", ""),
             pista_ano=dados.get("pista_ano", ""),

@@ -67,6 +67,7 @@ def consolidar(
     leituras: list[Leitura],
     cliente: ClienteAPI,
     ao_progredir: Callable[[str], None] | None = None,
+    modo: str = "modelo",
 ) -> tuple[dict[str, dict[str, str]], int, int]:
     """Roda a consolidação em cada grupo com 2+ pranchas.
 
@@ -83,6 +84,18 @@ def consolidar(
             continue
         if ao_progredir:
             ao_progredir(nome)
+        if modo == "codigo":
+            # Passada 3 em CÓDIGO (nucleo/consenso.py): moda, outliers e ressalvas, sem chamar o modelo. Não detecta folha de
+            # outro projeto no grupo (`suspeita_grupo` fica False): isso é de outro ticket.
+            from . import consenso
+            resultados = consenso.consenso_do_grupo(itens)
+            consenso.aplicar(itens, resultados)
+            for leitura in itens:
+                leitura.grupo = nome
+            canonicos[nome] = {c: r.valor for c, r in resultados.items() if r.valor and c != "ano"}
+            if resultados["ano"].valor:
+                canonicos[nome]["ano_do_projeto"] = resultados["ano"].valor
+            continue
         try:
             dados, t_in, t_out = consolidar_grupo(cliente, nome, itens)
         except Exception as erro:  # noqa: BLE001

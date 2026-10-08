@@ -172,7 +172,7 @@ class Janela(tk.Tk):
 
             if self.config_app.consolidar_por_projeto and resultado.leituras:
                 self.status.set("Consolidando campos por projeto…")
-                _, c_in, c_out = grupos.consolidar(resultado.leituras, cliente)
+                _, c_in, c_out = grupos.consolidar(resultado.leituras, cliente, modo=self.config_app.consolidacao)
                 t_in += c_in
                 t_out += c_out
 

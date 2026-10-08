@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     t_out = resultado.progresso.tokens_saida
 
     if config.consolidar_por_projeto and resultado.leituras:
-        _, c_in, c_out = grupos.consolidar(resultado.leituras, cliente)
+        _, c_in, c_out = grupos.consolidar(resultado.leituras, cliente, modo=config.consolidacao)
         t_in += c_in
         t_out += c_out
 

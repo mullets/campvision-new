@@ -12,7 +12,7 @@ nada foi executado contra o modelo (não há chave da API fora do servidor). "N�
 | 2.4 | Chave `pasta + nome` | `chave_de_identidade` no módulo | Módulo pronto; falta ligar |
 | 2.5 | Limpar EXIF herdado; ignorar lote de teste | Ignora `teste` (`entrada.py`). `metadados.py` grava com `-overwrite_original`; não encontrei limpeza das tags herdadas | **Verificar** quais tags de título são gravadas/limpas |
 | 3 | Prompt de folha inteira; campos `{valor, confianca, alternativas, onde}`; `transcricao_integral`, `materiais_citados`, `anotacoes_manuscritas`, `revisao`, `codigo_serie` | 17 campos com `{valor, confianca}`; sem `alternativas`, `onde`, `revisao`, `codigo_serie`, `transcricao_integral`, `materiais_citados`; o prompt manda "ler carimbos" e "não confundir com legenda de material" | **Falta** |
-| 4.1 | Consenso em CÓDIGO (moda), `outlier_<campo>`, valor lido preservado | `grupos.consolidar` chama o MODELO (texto) por grupo; guarda `lidos_originais` e `suspeita_grupo`; descarta valor que nenhuma prancha leu | **Falta** (parcial) |
+| 4.1 | Consenso em CÓDIGO (moda), `outlier_<campo>`, valor lido preservado | `grupos.consolidar` chama o MODELO (texto) por grupo; guarda `lidos_originais` e `suspeita_grupo`; descarta valor que nenhuma prancha leu | **Módulo pronto** (`nucleo/consenso.py`, 12 testes) atrás de `consolidacao = "codigo"` (padrão continua `"modelo"`); falta validar em lote real e então trocar o padrão |
 | 4.1 | Grafia canônica congela; quarentena | Sem vocabulário persistente entre lotes | **Falta** |
 | 4.2 | Ano da pasta = moda do grupo; "Ano desconhecido" | `ano_do_projeto` decidido pelo modelo na consolidação | Falta |
 | 4.3 | Pasta não é projeto | Agrupa pelo `projeto` lido (similaridade de texto), sem usar a pasta | **Conforme** |
@@ -36,3 +36,7 @@ nada foi executado contra o modelo (não há chave da API fora do servidor). "N�
   a 80% + q60 13, deslocada 3 px 19, girada 1° 18; folhas DIFERENTES com a mesma moldura e carimbo: mínimo 34 (276 pares). Um limiar baixo único perde o rescan real; um alto arrisca esconder folha de verdade.
   Por isso há dois níveis (`LIMIAR_MARCA=8` marca; até `LIMIAR_REVISAO=24` só sugere revisão humana). **Falta medir em pares reais** (as pranchas 0085/0086 do McDonald's são o caso-guia).
 - `e_ficha_de_documentacao` usa só a lista da §5.5. "Documentação" (com ç) NÃO está na lista; estender é decisão do Rafa e pede back-test.
+- **Consenso em código (§4.1), decisão de projeto:** o consenso é calculado para todos os campos, mas NÃO sobrescreve a leitura de cada folha em dois: `ano` (cada prancha mantém o seu; a moda vai em `ano_do_projeto`, §4.2)
+  e `arquiteto` (a especificação diz que o consenso esconderia uma prancha intrusa num grupo de 30, §4.4; a folha de outro arquiteto continua com o que foi lido e fica marcada outlier).
+  Os demais campos recebem o valor do grupo, com o lido guardado em `lidos_originais` e o outlier em `outliers`/`ressalvas`. O modo `codigo` NÃO detecta folha de OUTRO projeto dentro do grupo
+  (`suspeita_grupo` fica falso) e não tem quarentena nem canônica congelada: são tickets próprios.
