@@ -127,13 +127,19 @@ def orientar(img: Image.Image) -> Orientacao:
     pontos = rodada(False)
     espelhada = False
     melhor = max(pontos, key=pontos.get)
-    # Texto fraco ou sem vencedor claro: pode ser folha digitalizada pelo verso.
-    if pontos[melhor] < PISO_TEXTO * 2 or incerto(pontos):
-        espelhos = rodada(True)
-        m2 = max(espelhos, key=espelhos.get)
-        if espelhos[m2] >= PISO_TEXTO and espelhos[m2] > pontos[melhor] * 1.5:
-            pontos, melhor, espelhada = espelhos, m2, True
+    # Espelhar a folha é a decisão mais perigosa (preview publicado ao contrário),
+    # então só acontece com prova forte: a leitura normal não acha texto nenhum
+    # e a espelhada acha bastante. Na dúvida: não espelha e marca incerta.
     incerta = incerto(pontos)
+    # O espelho é sempre conferido: em algumas versões do tesseract a folha
+    # espelhada ainda "lê" bem na rotação certa sem espelho.
+    espelhos = rodada(True)
+    m2 = max(espelhos, key=espelhos.get)
+    if espelhos[m2] >= PISO_TEXTO * 2 and espelhos[m2] >= 2 * max(pontos[melhor], 1):
+        pontos, melhor, espelhada = espelhos, m2, True
+        incerta = incerto(pontos)
+    elif espelhos[m2] >= PISO_TEXTO and espelhos[m2] * 2 >= pontos[melhor]:
+        incerta = True  # espelho leu quase tanto: não decide sozinho
     return Orientacao(rotacao=melhor, espelhada=espelhada, incerta=incerta,
                       pontos={str(k): v for k, v in pontos.items()})
 
