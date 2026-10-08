@@ -29,7 +29,7 @@ _log = logging.getLogger("cv2.formatos")
 EXTENSOES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".pdf")
 # Ordem de preferência para LER (a mais leve primeiro).
 PREFERENCIA = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".pdf")
-LADO_LEITURA = 2400
+LADO_LEITURA = 3000  # bruta: daqui saem a leitura (2000) e o preview (3000)
 
 
 @dataclass
@@ -61,7 +61,7 @@ def _reduzir_e_salvar(img: Image.Image, destino: Path) -> Path:
     img = img.convert("RGB")
     img.thumbnail((LADO_LEITURA, LADO_LEITURA))
     destino.parent.mkdir(parents=True, exist_ok=True)
-    img.save(destino, "JPEG", quality=88)
+    img.save(destino, "JPEG", quality=90)
     return destino
 
 

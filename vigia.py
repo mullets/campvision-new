@@ -367,6 +367,28 @@ def _comando_livro_legado(config: Config) -> int:
     return 0
 
 
+def _comando_backtest(config: Config, curado: str | None, contra: str | None,
+                      reconferir: bool) -> int:
+    from nucleo import backtest as bt
+
+    raiz = Path(contra or config.raiz_final or ".")
+    leituras = bt.carregar_leituras(raiz)
+    print(f"{len(leituras)} leitura(s) em {raiz}")
+    codigo = 0
+    if curado:
+        resultados = bt.backtest(bt.carregar_curado(Path(curado)), leituras)
+        print(bt.relatorio(resultados))
+        if not resultados or not all(r.liberado for r in resultados):
+            codigo = 1
+    if reconferir:
+        divergencias = bt.reconferir_tipo(leituras)
+        print(f"\nReconferência do tipo de desenho: {len(divergencias)} divergência(s)")
+        for c, gravado, recalc in divergencias[:200]:
+            print(f"  {c}: gravado {gravado!r} · recalculado {recalc!r}")
+        codigo = codigo or (1 if divergencias else 0)
+    return codigo
+
+
 def _comando_monitor() -> int:
     """Tela do servidor: desenha o estado do serviço, sem rodar outra instância."""
     import json as _json
@@ -431,6 +453,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lotes", action="store_true", help="Lista as pastas da entrada e o estado")
     p.add_argument("--historico", metavar="TERMO",
                    help="Livro de registro: arquivo, código, lote ou data (AAAA-MM-DD)")
+    p.add_argument("--backtest", metavar="CURADO.csv",
+                   help="Compara as leituras com a base curada à mão (método §9)")
+    p.add_argument("--contra", metavar="PASTA",
+                   help="Onde estão os leituras.json (padrão: acervo final)")
+    p.add_argument("--reconferir-tipo", action="store_true",
+                   help="Recalcula o tipo de desenho e compara com o gravado (método §9.2)")
     p.add_argument("--livro-legado", action="store_true",
                    help="Leva o histórico antigo (eventos.jsonl) para o livro de registro")
     p.add_argument("--monitor", action="store_true",
@@ -486,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -526,6 +554,8 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_historico(config, args.historico)
     if args.livro_legado:
         return _comando_livro_legado(config)
+    if args.backtest or args.reconferir_tipo:
+        return _comando_backtest(config, args.backtest, args.contra, args.reconferir_tipo)
     if args.refazer_lote:
         return _comando_refazer_lote(config, args.refazer_lote)
 

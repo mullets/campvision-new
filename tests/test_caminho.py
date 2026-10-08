@@ -192,7 +192,7 @@ class TestProveniencia(unittest.TestCase):
         """A instrução do leitor não pode conter nada de caminho de pasta."""
         from nucleo import visao
 
-        texto = (visao.INSTRUCOES + visao.INSTRUCOES_RECORTE).lower()
+        texto = (visao.INSTRUCOES + visao.INSTRUCOES_FOTO).lower()
         for proibido in ("pasta", "diretório", "caminho do arquivo", "nome do arquivo"):
             self.assertNotIn(proibido, texto)
 

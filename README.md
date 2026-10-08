@@ -107,7 +107,7 @@ Sem ele o app funciona, mas não grava metadados nas imagens.
 ### 6. Primeira leitura
 
 ```bash
-python -m unittest discover -s tests -t .   # 230 testes, sem rede
+python -m unittest discover -s tests -t .   # 233 testes, sem rede
 python app.py                                # janela
 ```
 
@@ -229,24 +229,29 @@ atribuição institucional no Copyright.
 
 ### A leitura
 
-1. **Cache de região.** Pranchas do mesmo projeto têm o carimbo no mesmo lugar.
-   Achou na primeira, as próximas vão direto ao recorte: 1 chamada em vez de 2.
-2. **Página inteira reduzida.** O modelo devolve os campos **e** a região do
-   carimbo em coordenadas normalizadas.
-3. **Segundo passe.** Se a confiança média ficou abaixo de 0.75, recorta aquela
-   região na resolução **original** e relê só ela.
-4. **Consolidação por projeto.** No fim do lote, uma chamada de texto por grupo
-   com todos os carimbos lado a lado decide a grafia canônica. É o que resolve o
-   caso `HOSWALDO` sem quarentena nem contagem — e nunca aplica valor que
-   nenhuma prancha leu.
+Segue o **método de leitura** (projeto Tainacam: `claude/campvision-metodo-de-leitura.md`),
+em quatro passadas — só a 2 chama o modelo:
 
-Cada campo vem com **confiança própria**. Na planilha: vermelho abaixo de 0.60,
-amarelo abaixo de 0.85, cinza é campo ausente no carimbo, **azul veio da pasta**.
-Você revisa o vermelho, não o lote.
+1. **Preparo** (código): imagem de leitura a 2000 px; **orientação pelo texto**
+   (OCR rápido nas 4 rotações, testa espelhado; empate → `orientacao_incerta`);
+   md5 e hash perceptual; preview de 3000 px já girado; EXIF herdado é limpo.
+2. **Leitura** (modelo): **uma chamada por folha, página inteira, sem recorte do
+   carimbo.** Transcrição literal, `null` quando ilegível, alternativas para dígito
+   ambíguo, `onde` foi lido. Campos novos: escritório separado do arquiteto,
+   código de série, revisão, transcrição integral, materiais citados.
+   Fotografias, negativos e slides (S03–S05) têm prompt próprio; crédito de
+   fotógrafo nunca vem do modelo.
+3. **Consolidação** (código): moda por grupo (projeto + revisão), quarentena,
+   outliers marcados sem apagar o lido; ano do grupo pela moda, ano de cada folha
+   intacto, com ressalva quando a alternativa bate com a série; autoria nunca é
+   "corrigida" pelo consenso.
+4. **Derivação** (código): ano só da data escrita; tipo de desenho pelos 15
+   detectores (§5.2); ficha de documentação ≠ obra; autoria divergente contra
+   titular + coautores do fundo; duplicatas; `pacote_tainacan.json` e checklist
+   de aceite.
 
-O que ele procura está escrito em português na constante `INSTRUCOES` de
-`nucleo/visao.py` — ajustar o comportamento do modelo é editar aquele texto, e
-sai mais barato que qualquer linha de código.
+Validação: `vigia.py --backtest CURADO.csv` compara com a base curada à mão
+(≥ 85% exato para liberar) e `--reconferir-tipo` recalcula o tipo gravado.
 
 ### As fontes secundárias
 
@@ -761,7 +766,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-230 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+233 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote

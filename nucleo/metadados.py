@@ -111,6 +111,14 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
         "-codedcharacterset=utf8",
     ]
 
+    # Limpa o que o scanner ou um lote anterior deixou (método §2.5): título
+    # "Acervo dos Arquitetos — Ruth Verde Zein" herdado chegou a ir para o site.
+    for herdado in ("XMP-dc:Title", "XMP-dc:Description", "XMP-dc:Subject", "XMP-photoshop:Headline",
+                    "EXIF:ImageDescription", "EXIF:XPTitle", "EXIF:XPSubject", "EXIF:XPComment",
+                    "IPTC:ObjectName", "IPTC:Caption-Abstract", "IPTC:Keywords", "PDF:Title",
+                    "PDF:Subject", "PDF:Keywords"):
+        argumentos.append(f"-{herdado}=")
+
     def adicionar(tag: str, valor: str) -> None:
         if valor:
             argumentos.append(f"-{tag}={valor}")

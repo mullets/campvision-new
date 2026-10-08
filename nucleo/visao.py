@@ -1,22 +1,19 @@
-"""Leitura do carimbo por modelo de visão.
+"""Passada 2 — leitura (método de leitura §0, §3, §6).
 
-Estratégia, em ordem:
+Uma chamada por folha. Página INTEIRA, 2000 px, já orientada pelo preparo.
+Sem localizar nem recortar o carimbo: o recorte destrói dado (data a lápis na
+margem, número de folha no contorno, monograma, amostras de material).
 
-1. Se há região conhecida (cache da prancha anterior da mesma pasta), manda
-   direto o recorte em alta resolução — 1 chamada, barata e precisa.
-2. Senão, manda a página inteira reduzida. O modelo devolve os campos E a
-   região do carimbo em coordenadas normalizadas.
-3. Se a confiança média ficou abaixo do limiar, faz o 2º passe: recorta a
-   região devolvida na resolução ORIGINAL e relê só ela.
-
-Não existe detector geométrico, YOLO, limiar de contorno nem correção de
-orientação por heurística. Quem localiza e quem lê é o mesmo modelo.
+Prancha → prompt de transcrição literal (§3.1), esquema {valor, confianca,
+alternativas, onde} por campo (§3.2). Fotografia/negativo/slide → prompt
+próprio (§6.1); crédito de fotógrafo nunca vem do modelo (§6.2).
 """
 
 from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any, Protocol
@@ -25,36 +22,61 @@ from PIL import Image
 
 from . import imagem as img_mod
 from .config import Config
-from .esquema import CAMPOS, Leitura, esquema_consolidacao, esquema_ferramenta
+from .esquema import CAMPOS_DO_MODELO, Leitura, esquema_ferramenta, esquema_fotografia
 
 _log = logging.getLogger("cv2.visao")
 
-INSTRUCOES = """Você lê carimbos (legendas de título) de pranchas de arquitetura \
-brasileiras digitalizadas, a maioria entre 1940 e 1990.
+LADO_ENVIO = 2000
+QUALIDADE_ENVIO = 78
 
-Como trabalhar:
-- O carimbo é o bloco com o nome do projeto, do autor e dados técnicos. Costuma \
-ficar num canto ou numa faixa da borda, mas pode estar em qualquer lugar, girado \
-ou de cabeça para baixo. Às vezes é dividido em dois blocos vizinhos — nesse caso \
-considere os dois juntos como um carimbo só.
-- Não confunda carimbo com legenda de material, tabela de esquadrias ou nota \
-construtiva. Se a imagem não tem carimbo, diga carimbo_encontrado=false e deixe \
-todos os campos vazios.
-- Transcreva LITERALMENTE o que está escrito, inclusive grafia antiga e \
-abreviação. Não corrija, não complete, não deduza nome de arquiteto famoso a \
-partir de fragmento.
-- Campo que não existe no carimbo: valor vazio, confiança 0. Campo que existe \
-mas está ilegível: valor vazio, confiança 0, e cite na nota.
-- Confiança é sua de verdade: use 0.9+ só para texto nítido e inequívoco; use \
-abaixo de 0.6 sempre que tiver chutado caractere.
-- Manuscrito conta: leia se der, mas baixe a confiança.
+INSTRUCOES = """Você vai ler UMA prancha de arquitetura digitalizada e TRANSCREVER o que está
+escrito nela. Você não interpreta, não completa e não supõe.
 
-Devolva a resposta chamando a ferramenta registrar_carimbo."""
+REGRAS
 
-INSTRUCOES_RECORTE = """Esta imagem já é um RECORTE aproximado da região do \
-carimbo, em alta resolução. Leia os campos com atenção máxima. Se este recorte \
-não contiver um carimbo de fato, diga carimbo_encontrado=false. \
-Em regiao_carimbo, informe onde o carimbo está DENTRO deste recorte."""
+1. Transcreva literalmente: grafia, acentuação e pontuação como estão na folha,
+   inclusive erros e abreviações. "Res." não se torna "Residência".
+2. Leia a folha INTEIRA, não só o carimbo: legendas, anotações manuscritas,
+   número de folha no contorno, selos, datas a lápis na margem, códigos de
+   série, amostras de material com o nome escrito ao lado.
+3. Campo que você não conseguir ler fica null. NUNCA preencha por
+   plausibilidade, simetria com outros campos ou conhecimento de arquitetura.
+4. Se houver duas leituras possíveis para o mesmo texto, devolva a mais
+   provável em "valor" e a outra em "alternativas". Dígito ambíguo (3/5/8,
+   1/7, 0/6) é o caso mais comum — sempre devolva a alternativa.
+5. NÃO use conhecimento externo. Se o nome do arquiteto não está escrito na
+   folha, o campo é null, mesmo que você reconheça a obra.
+6. Não descreva o projeto, não classifique estilo, não diga em que ano
+   "deve" ter sido feito.
+7. "arquiteto" é a pessoa; "escritorio" é a empresa. Nunca misture os dois.
+8. Em "onde", diga em que parte da folha leu: carimbo, margem, contorno,
+   manuscrito, legenda ou corpo.
+
+Devolva chamando a ferramenta registrar_prancha."""
+
+INSTRUCOES_FOTO = """Você vai descrever UMA fotografia de acervo de arquitetura.
+
+REGRAS
+
+1. Descreva SOMENTE o que está visível no quadro.
+2. NÃO nomeie pessoas. NÃO atribua autoria da fotografia. NÃO diga onde foi
+   tirada, a não ser que haja indicação visual inequívoca (placa, letreiro,
+   fachada identificada).
+3. NÃO estime data, estilo, nem autoria do edifício fotografado.
+4. Transcreva qualquer texto legível na imagem (placa, letreiro, legenda
+   escrita no slide, anotação na moldura) em "texto_na_imagem".
+5. Se a imagem for um negativo, verso, cartela de teste ou folha de contato,
+   diga isso em "tipo_de_imagem" e não descreva como se fosse a obra.
+
+Devolva chamando a ferramenta registrar_fotografia."""
+
+# Série pelo código do documento: S03 fotografias, S04 negativos, S05 slides.
+SERIES_FOTO = ("S03", "S04", "S05")
+
+
+def modo_do_arquivo(nome: str) -> str:
+    achado = re.search(r"-(S\d{2})-D\d{5}", nome)
+    return "fotografia" if achado and achado.group(1) in SERIES_FOTO else "prancha"
 
 
 class ClienteAPI(Protocol):
@@ -106,7 +128,7 @@ class ClienteAnthropic:
             try:
                 resposta = self._cliente.messages.create(
                     model=cfg.modelo,
-                    max_tokens=2000,
+                    max_tokens=4000,
                     system=sistema,
                     messages=mensagens,
                     tools=[ferramenta],
@@ -153,194 +175,129 @@ def _bloco_imagem(env: img_mod.ImagemParaEnvio) -> dict[str, Any]:
     }
 
 
+def _texto(valor: Any) -> str:
+    return "" if valor is None else str(valor).strip()
+
+
+def _lista(valor: Any) -> list[str]:
+    if isinstance(valor, (list, tuple)):
+        return [str(v).strip() for v in valor if str(v).strip()]
+    return [str(valor).strip()] if _texto(valor) else []
+
+
 def _para_leitura(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
-    """Converte a saída da ferramenta em Leitura, sem confiar na forma."""
-    leitura.carimbo_encontrado = bool(entrada.get("carimbo_encontrado", False))
-    leitura.nota_ia = str(entrada.get("nota", "") or "")
+    """Converte a saída da ferramenta em Leitura, sem confiar na forma.
+
+    Aceita também o formato antigo (carimbo_encontrado, nota, rotacao).
+    """
+    leitura.carimbo_encontrado = bool(entrada.get("tem_carimbo", entrada.get("carimbo_encontrado", False)))
+    leitura.legivel = bool(entrada.get("legivel", True))
+    leitura.nota_ia = _texto(entrada.get("nota"))
     try:
         leitura.rotacao = int(entrada.get("rotacao", 0) or 0) % 360
     except (TypeError, ValueError):
         leitura.rotacao = 0
+    leitura.transcricao_integral = _texto(entrada.get("transcricao_integral"))
+    leitura.materiais_citados = _lista(entrada.get("materiais_citados"))
+    leitura.anotacoes_manuscritas = _lista(entrada.get("anotacoes_manuscritas"))
+    leitura.observacoes_leitura = _lista(entrada.get("observacoes_de_leitura"))
 
-    regiao = entrada.get("regiao_carimbo")
-    if isinstance(regiao, (list, tuple)) and len(regiao) == 4:
-        try:
-            valores = [max(0.0, min(1.0, float(v))) for v in regiao]
-            if valores[2] > valores[0] and valores[3] > valores[1]:
-                leitura.regiao = (valores[0], valores[1], valores[2], valores[3])
-        except (TypeError, ValueError):
-            pass
-
-    for campo in CAMPOS:
-        bruto = entrada.get(campo.nome) or {}
+    for campo in CAMPOS_DO_MODELO:
+        bruto = entrada.get(campo.nome)
         if not isinstance(bruto, dict):
-            bruto = {"valor": str(bruto), "confianca": 0.0}
-        valor = str(bruto.get("valor", "") or "").strip()
+            bruto = {"valor": bruto, "confianca": 0.0}
+        valor = _texto(bruto.get("valor"))
         try:
             confianca = max(0.0, min(1.0, float(bruto.get("confianca", 0.0) or 0.0)))
         except (TypeError, ValueError):
             confianca = 0.0
         leitura.valores[campo.nome] = valor
         leitura.confiancas[campo.nome] = confianca if valor else 0.0
+        alternativas = [a for a in _lista(bruto.get("alternativas")) if a != valor]
+        if alternativas:
+            leitura.alternativas[campo.nome] = alternativas
+        if bruto.get("onde") and valor:
+            leitura.onde[campo.nome] = _texto(bruto.get("onde"))
+    # Derivações em código, nunca pedidas ao modelo (§5): ano da data escrita,
+    # tipo de desenho do título escrito, ficha de documentação.
+    from .derivacao import ano_da_data, e_documento, tipo_de_desenho
+
+    data = leitura.valores.get("data", "")
+    if data and ano_da_data(data):
+        leitura.valores["ano"] = ano_da_data(data)
+        leitura.confiancas["ano"] = leitura.confiancas.get("data", 0.0) if leitura.valores["ano"] else 0.0
+        anos_alt = [ano_da_data(a) for a in leitura.alternativas.get("data", [])]
+        anos_alt = [a for a in anos_alt if a and a != leitura.valores["ano"]]
+        if anos_alt:
+            leitura.alternativas["ano"] = anos_alt
+    titulo = leitura.valores.get("titulo_prancha", "")
+    leitura.valores["tipo"] = tipo_de_desenho(titulo)
+    leitura.confiancas["tipo"] = leitura.confiancas.get("titulo_prancha", 0.0) if leitura.valores["tipo"] else 0.0
+    leitura.e_documento = e_documento(titulo)
+    # Formato antigo trazia "ano" do modelo; o novo deriva em código.
+    if not leitura.valores.get("ano") and _texto((entrada.get("ano") or {}).get("valor") if isinstance(entrada.get("ano"), dict) else entrada.get("ano")):
+        bruto = entrada["ano"] if isinstance(entrada.get("ano"), dict) else {"valor": entrada["ano"], "confianca": 0.0}
+        leitura.valores["ano"] = _texto(bruto.get("valor"))
+        leitura.confiancas["ano"] = float(bruto.get("confianca", 0.0) or 0.0)
     return leitura
 
 
-def _melhor(a: Leitura, b: Leitura) -> Leitura:
-    """Entre dois passes, fica com o que leu mais campos com mais confiança."""
-    def pontos(l: Leitura) -> tuple[int, int, float]:
-        preenchidos = sum(1 for v in l.valores.values() if v)
-        return (int(l.carimbo_encontrado), preenchidos, l.confianca_media)
-
-    return b if pontos(b) > pontos(a) else a
+def _para_foto(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
+    leitura.modo = "fotografia"
+    leitura.carimbo_encontrado = False
+    foto = {
+        "tipo_de_imagem": _texto(entrada.get("tipo_de_imagem")) or "fotografia",
+        "assunto": _texto(entrada.get("assunto")),
+        "enquadramento": _texto(entrada.get("enquadramento")),
+        "elementos_visiveis": _lista(entrada.get("elementos_visiveis")),
+        "texto_na_imagem": _lista(entrada.get("texto_na_imagem")),
+        "legenda_proposta": _texto(entrada.get("legenda_proposta")),
+    }
+    try:
+        confianca = max(0.0, min(1.0, float(entrada.get("confianca", 0.0) or 0.0)))
+    except (TypeError, ValueError):
+        confianca = 0.0
+    leitura.foto = foto
+    leitura.valores["titulo_prancha"] = foto["legenda_proposta"]
+    leitura.confiancas["titulo_prancha"] = confianca if foto["legenda_proposta"] else 0.0
+    leitura.transcricao_integral = " | ".join(foto["texto_na_imagem"])
+    leitura.valores["tipo"] = "Fotografia"
+    leitura.confiancas["tipo"] = 1.0
+    return leitura
 
 
 class LeitorDeCarimbo:
-    """Orquestra os passes de leitura de uma prancha."""
+    """Uma chamada por folha, página inteira. Nome mantido por compatibilidade."""
 
     def __init__(self, config: Config, cliente: ClienteAPI) -> None:
         self.config = config
         self.cliente = cliente
         self.ferramenta = esquema_ferramenta()
+        self.ferramenta_foto = esquema_fotografia()
 
-    def _ler_imagem(self, img: Image.Image, instrucao_extra: str = "") -> tuple[Leitura, int, int]:
-        env = img_mod.para_envio(
-            img, self.config.lado_maximo_envio, self.config.qualidade_jpeg_envio
-        )
-        texto = instrucao_extra or "Leia o carimbo desta prancha."
-        mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": texto}]}]
-        entrada, t_in, t_out = self.cliente.chamar(mensagens, self.ferramenta, INSTRUCOES)
-        return _para_leitura(entrada, Leitura()), t_in, t_out
-
-    def _ganho_de_resolucao(self, original: Image.Image, regiao: img_mod.Caixa) -> float:
-        """Quantas vezes mais nítido o recorte fica no 2º passe.
-
-        Reler custa uma chamada inteira. Se a região do carimbo já foi enviada
-        praticamente na resolução máxima no 1º passe, o 2º passe não traz pixel
-        novo nenhum — só conta o mesmo texto de novo e cobra por isso.
-        """
-        lado_maximo = self.config.lado_maximo_envio
-        maior_original = max(original.size)
-        fator = min(1.0, lado_maximo / maior_original) if maior_original else 1.0
-        x0, y0, x1, y1 = regiao
-        recorte_px = max(abs(x1 - x0) * original.width, abs(y1 - y0) * original.height)
-        if recorte_px <= 0:
-            return 0.0
-        enviado_no_1o = recorte_px * fator
-        enviado_no_2o = min(lado_maximo, recorte_px)
-        return enviado_no_2o / max(1.0, enviado_no_1o)
-
-    def ler(self, caminho: Path, regiao_sugerida: img_mod.Caixa | None = None) -> Leitura:
-        """Lê uma prancha. `regiao_sugerida` vem do cache da pasta."""
+    def ler(self, caminho: Path, regiao_sugerida=None, modo: str | None = None) -> Leitura:
         resultado = Leitura(arquivo=caminho.name)
+        modo = modo or modo_do_arquivo(caminho.name)
         try:
             original = img_mod.abrir(caminho)
         except Exception as erro:  # noqa: BLE001
             resultado.erro = f"não foi possível abrir a imagem: {erro}"
             _log.error("%s: %s", caminho.name, resultado.erro)
             return resultado
-
         try:
-            # Passe 0 — atalho pelo cache de região da pasta.
-            if regiao_sugerida and self.config.usar_cache_de_regiao:
-                recorte = img_mod.recortar(original, regiao_sugerida, self.config.margem_recorte)
-                leitura, t_in, t_out = self._ler_imagem(recorte, INSTRUCOES_RECORTE)
-                resultado.tokens_entrada += t_in
-                resultado.tokens_saida += t_out
-                resultado.passes += 1
-                if leitura.carimbo_encontrado and leitura.confianca_media >= self.config.confianca_minima_para_aceitar:
-                    return _fundir(resultado, leitura, regiao_sugerida)
-                resultado.cache_falhou = True
-                _log.info("%s: cache de região não bastou, indo pela página inteira.", caminho.name)
-
-            # Passe 1 — página inteira reduzida: localiza e já lê.
-            leitura, t_in, t_out = self._ler_imagem(original)
-            resultado.tokens_entrada += t_in
-            resultado.tokens_saida += t_out
-            resultado.passes += 1
-
-            precisa_segundo_passe = (
-                leitura.carimbo_encontrado
-                and leitura.regiao is not None
-                and leitura.confianca_media < self.config.confianca_minima_para_aceitar
-                and self._ganho_de_resolucao(original, leitura.regiao) >= self.config.ganho_minimo_2o_passe
+            env = img_mod.para_envio(original, LADO_ENVIO, QUALIDADE_ENVIO)
+            foto = modo == "fotografia"
+            texto = "Descreva esta fotografia." if foto else "Transcreva esta prancha."
+            mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": texto}]}]
+            entrada, t_in, t_out = self.cliente.chamar(
+                mensagens, self.ferramenta_foto if foto else self.ferramenta,
+                INSTRUCOES_FOTO if foto else INSTRUCOES,
             )
-            if not precisa_segundo_passe:
-                return _fundir(resultado, leitura, leitura.regiao)
-
-            # Passe 2 — recorte na resolução ORIGINAL, onde o texto está inteiro.
-            ganho = self._ganho_de_resolucao(original, leitura.regiao)
-            _log.info(
-                "%s: confiança %.2f abaixo do limiar, relendo o recorte em alta (%.1fx).",
-                caminho.name, leitura.confianca_media, ganho,
-            )
-            resultado.fez_segundo_passe = True
-            resultado.confianca_antes_do_2o = leitura.confianca_media
-            resultado.ganho_de_resolucao = ganho
-            recorte = img_mod.recortar(original, leitura.regiao, self.config.margem_recorte)
-            if leitura.rotacao:
-                recorte = img_mod.girar(recorte, leitura.rotacao)
-            fino, t_in, t_out = self._ler_imagem(recorte, INSTRUCOES_RECORTE)
-            resultado.tokens_entrada += t_in
-            resultado.tokens_saida += t_out
-            resultado.passes += 1
-            return _fundir(resultado, _melhor(leitura, fino), leitura.regiao)
-
+            resultado.tokens_entrada, resultado.tokens_saida, resultado.passes = t_in, t_out, 1
+            return _para_foto(entrada, resultado) if foto else _para_leitura(entrada, resultado)
         except Exception as erro:  # noqa: BLE001
             resultado.erro = str(erro)
             _log.error("%s: %s", caminho.name, erro)
             return resultado
         finally:
             original.close()
-
-
-def _fundir(base: Leitura, leitura: Leitura, regiao: img_mod.Caixa | None) -> Leitura:
-    """Copia o resultado da leitura para o acumulador, preservando os contadores.
-
-    Os campos de medição (passes, tokens, 2º passe) já vivem em `base` e não
-    podem ser sobrescritos pelo objeto que veio de uma chamada isolada.
-    """
-    base.valores = leitura.valores
-    base.confiancas = leitura.confiancas
-    base.carimbo_encontrado = leitura.carimbo_encontrado
-    base.rotacao = leitura.rotacao
-    base.nota_ia = leitura.nota_ia
-    # A região que interessa guardar é a da PÁGINA, não a de dentro do recorte.
-    base.regiao = regiao
-    return base
-
-
-def consolidar_grupo(
-    cliente: ClienteAPI, nome_grupo: str, leituras: list[Leitura]
-) -> tuple[dict[str, str], int, int]:
-    """Normaliza os campos de projeto de um grupo. Chamada só de texto, barata.
-
-    É isto que substitui a quarentena, o `unificar_grafias` e a moda de ano do
-    app antigo: o modelo vê as N leituras lado a lado e decide a grafia boa.
-    """
-    linhas = []
-    for leitura in leituras:
-        campos = ", ".join(
-            f"{nome}={leitura.valores.get(nome, '')!r}({leitura.confiancas.get(nome, 0):.2f})"
-            for nome in ("projeto", "cliente", "arquiteto", "escritorio", "endereco", "cidade", "uf", "ano")
-            if leitura.valores.get(nome)
-        )
-        linhas.append(f"- {leitura.arquivo}: {campos or '(nada legível)'}")
-
-    texto = (
-        f"Estas pranchas foram agrupadas como o projeto {nome_grupo!r}. "
-        "Cada linha traz o que foi lido do carimbo daquela prancha, com a "
-        "confiança de cada campo entre parênteses.\n\n"
-        + "\n".join(linhas)
-        + "\n\nDefina a grafia canônica de cada campo do projeto. Regras: "
-        "prefira a grafia que aparece em mais pranchas e com maior confiança; "
-        "trate variações de acento, abreviação e erro de leitura como a mesma "
-        "coisa; NÃO invente informação que não apareça em nenhuma prancha; "
-        "e aponte pranchas que pareçam ser de outro projeto."
-    )
-    ferramenta = esquema_consolidacao()
-    entrada, t_in, t_out = cliente.chamar(
-        [{"role": "user", "content": [{"type": "text", "text": texto}]}],
-        ferramenta,
-        "Você organiza acervos de arquitetura e normaliza metadados lidos de carimbos.",
-    )
-    return {k: str(v) for k, v in entrada.items() if isinstance(v, (str, int, float))}, t_in, t_out

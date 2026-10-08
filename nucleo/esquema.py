@@ -19,32 +19,38 @@ class Campo:
     # Campo que tende a ser igual em todas as pranchas do mesmo projeto e por
     # isso pode ser normalizado/preenchido na consolidação por projeto.
     do_projeto: bool = False
+    # False = derivado em código depois da leitura, nunca pedido ao modelo.
+    do_modelo: bool = True
 
 
+# Método de leitura (projeto Tainacam: claude/campvision-metodo-de-leitura.md §3.2).
+# Os nomes antigos foram mantidos onde o significado é o mesmo:
+# projeto = projeto_carimbo, titulo_prancha = nome_prancha, folha = numero_folha.
+# `do_modelo=False` marca campo DERIVADO em código (§5), não pedido ao modelo.
 CAMPOS: tuple[Campo, ...] = (
     Campo("projeto", "Projeto", "Nome da obra/projeto como escrito no carimbo.", True),
     Campo("cliente", "Cliente", "Proprietário ou contratante.", True),
-    Campo("arquiteto", "Arquiteto", "Autor do projeto (pessoa física).", True),
-    Campo("escritorio", "Escritório", "Escritório/empresa responsável.", True),
+    Campo("arquiteto", "Arquiteto", "Autor do projeto (pessoa física), como escrito.", True),
+    Campo("escritorio", "Escritório", "Escritório/empresa responsável, SEPARADO do arquiteto. "
+                                      "Ex.: 'BELLUCCI arquitetura SC'.", True),
     Campo("endereco", "Endereço", "Endereço da obra, com número se houver.", True),
     Campo("cidade", "Cidade", "Município da obra.", True),
     Campo("uf", "UF", "Sigla do estado, 2 letras.", True),
-    Campo("ano", "Ano", "Ano da prancha, 4 dígitos. Só o ano.", False),
-    Campo("data", "Data", "Data completa como escrita, se houver.", False),
+    Campo("data", "Data", "Data como escrita (carimbo, margem, lápis). Literal: '14.10.83'.", False),
     Campo("escala", "Escala", "Escala, ex: 1:50, 1:100, S/ESC.", False),
-    Campo("tipo", "Tipo", "Tipo de desenho: planta, corte, fachada, situação, "
-                          "implantação, detalhe, elétrica, hidráulica, estrutural...", False),
-    Campo("titulo_prancha", "Título da prancha", "Título/descrição desta prancha.", False),
-    Campo("folha", "Folha", "Número da folha/prancha, ex: 03 ou 03/12.", False),
+    Campo("titulo_prancha", "Título da prancha", "Nome/título desta prancha, literal.", False),
+    Campo("folha", "Folha", "Número da folha, onde estiver (carimbo ou contorno): '03', 'F.34'.", False),
     Campo("total_folhas", "Total de folhas", "Total de folhas do conjunto, se indicado.", False),
-    Campo("desenhista", "Desenhista", "Quem desenhou, se indicado.", False),
-    Campo("aprovacao", "Aprovação", "Nº de processo/alvará/aprovação municipal.", False),
-    Campo("observacoes", "Observações", "Qualquer texto relevante do carimbo "
-                                        "que não coube nos campos acima.", False),
+    Campo("codigo_serie", "Código de série", "Código da série/folha, ex.: 'FL 1/6', 'McD-9/JK'.", False),
+    Campo("revisao", "Revisão", "Indicação de revisão/reforma, ex.: 'R-1', 'REV. A'.", False),
+    Campo("ano", "Ano", "Ano de 4 dígitos derivado da data lida.", False, do_modelo=False),
+    Campo("tipo", "Tipo", "Tipo de desenho, derivado do título por regra (§5.2).", False, do_modelo=False),
 )
 
+CAMPOS_DO_MODELO = tuple(c for c in CAMPOS if c.do_modelo)
 CAMPOS_POR_NOME = {c.nome: c for c in CAMPOS}
 CAMPOS_DO_PROJETO = tuple(c.nome for c in CAMPOS if c.do_projeto)
+LUGARES = ("carimbo", "margem", "contorno", "manuscrito", "legenda", "corpo")
 
 
 @dataclass
@@ -86,6 +92,28 @@ class Leitura:
     fez_segundo_passe: bool = False
     confianca_antes_do_2o: float = 0.0
     ganho_de_resolucao: float = 0.0
+    # --- Método de leitura (§3.2, §6, §8.1) ---
+    modo: str = "prancha"                       # prancha | fotografia
+    legivel: bool = True
+    alternativas: dict[str, list[str]] = field(default_factory=dict)
+    onde: dict[str, str] = field(default_factory=dict)
+    transcricao_integral: str = ""
+    materiais_citados: list[str] = field(default_factory=list)
+    anotacoes_manuscritas: list[str] = field(default_factory=list)
+    observacoes_leitura: list[str] = field(default_factory=list)
+    foto: dict[str, Any] = field(default_factory=dict)
+    # Preparo (§2) e consolidação (§4)
+    md5: str = ""
+    hash_perceptual: str = ""
+    duplicata_de: str = ""
+    tipo_duplicata: str = ""
+    rotacao_aplicada: int = 0
+    orientacao_incerta: bool = False
+    espelhada: bool = False
+    autoria_divergente: bool = False
+    outliers: list[str] = field(default_factory=list)
+    ressalvas: list[str] = field(default_factory=list)
+    e_documento: bool = False
 
     @property
     def confianca_media(self) -> float:
@@ -100,165 +128,87 @@ class Leitura:
         return sum(preenchidos) / len(preenchidos)
 
     def para_dict(self) -> dict[str, Any]:
-        return {
-            "arquivo": self.arquivo,
-            "valores": self.valores,
-            "confiancas": self.confiancas,
-            "regiao": list(self.regiao) if self.regiao else None,
-            "rotacao": self.rotacao,
-            "carimbo_encontrado": self.carimbo_encontrado,
-            "passes": self.passes,
-            "tokens_entrada": self.tokens_entrada,
-            "tokens_saida": self.tokens_saida,
-            "erro": self.erro,
-            "nota_ia": self.nota_ia,
-            "grupo": self.grupo,
-            "lidos_originais": self.lidos_originais,
-            "ano_do_projeto": self.ano_do_projeto,
-            "suspeita_grupo": self.suspeita_grupo,
-            "pista_projeto": self.pista_projeto,
-            "pista_ano": self.pista_ano,
-            "pista_fundo": self.pista_fundo,
-            "campos_da_pasta": self.campos_da_pasta,
-            "divergencias": self.divergencias,
-            "campos_do_info": self.campos_do_info,
-            "cache_falhou": self.cache_falhou,
-            "fez_segundo_passe": self.fez_segundo_passe,
-            "confianca_antes_do_2o": self.confianca_antes_do_2o,
-            "ganho_de_resolucao": self.ganho_de_resolucao,
-        }
+        from dataclasses import asdict
+
+        dados = asdict(self)
+        dados["regiao"] = list(self.regiao) if self.regiao else None
+        return dados
 
     @classmethod
     def de_dict(cls, dados: dict[str, Any]) -> "Leitura":
-        regiao = dados.get("regiao")
-        return cls(
-            arquivo=dados.get("arquivo", ""),
-            valores=dados.get("valores", {}),
-            confiancas=dados.get("confiancas", {}),
-            regiao=tuple(regiao) if regiao else None,  # type: ignore[arg-type]
-            rotacao=dados.get("rotacao", 0),
-            carimbo_encontrado=dados.get("carimbo_encontrado", False),
-            passes=dados.get("passes", 0),
-            tokens_entrada=dados.get("tokens_entrada", 0),
-            tokens_saida=dados.get("tokens_saida", 0),
-            erro=dados.get("erro", ""),
-            nota_ia=dados.get("nota_ia", ""),
-            grupo=dados.get("grupo", ""),
-            lidos_originais=dados.get("lidos_originais", {}),
-            ano_do_projeto=dados.get("ano_do_projeto", ""),
-            suspeita_grupo=dados.get("suspeita_grupo", False),
-            pista_projeto=dados.get("pista_projeto", ""),
-            pista_ano=dados.get("pista_ano", ""),
-            pista_fundo=dados.get("pista_fundo", ""),
-            campos_da_pasta=dados.get("campos_da_pasta", []),
-            divergencias=dados.get("divergencias", []),
-            campos_do_info=dados.get("campos_do_info", {}),
-            cache_falhou=dados.get("cache_falhou", False),
-            fez_segundo_passe=dados.get("fez_segundo_passe", False),
-            confianca_antes_do_2o=dados.get("confianca_antes_do_2o", 0.0),
-            ganho_de_resolucao=dados.get("ganho_de_resolucao", 0.0),
-        )
+        """Aceita JSON antigo e novo: chave desconhecida é ignorada, faltante usa o padrão."""
+        from dataclasses import fields as _campos
+
+        conhecidos = {f.name for f in _campos(cls)}
+        limpos = {k: v for k, v in dados.items() if k in conhecidos}
+        regiao = limpos.get("regiao")
+        limpos["regiao"] = tuple(regiao) if regiao else None
+        return cls(**limpos)
+
+
+def _campo_schema(descricao: str) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": descricao,
+        "properties": {
+            "valor": {"type": ["string", "null"],
+                      "description": "Transcrição LITERAL. null se não existe ou está ilegível."},
+            "confianca": {"type": "number", "description": "0 a 1."},
+            "alternativas": {"type": "array", "items": {"type": "string"},
+                             "description": "Outras leituras possíveis (dígito ambíguo 3/5/8, 1/7, 0/6)."},
+            "onde": {"type": "string", "enum": [*LUGARES, ""],
+                     "description": "Em que parte da folha foi lido. Vazio se o valor é null."},
+        },
+        "required": ["valor", "confianca"],
+    }
 
 
 def esquema_ferramenta() -> dict[str, Any]:
-    """Schema JSON entregue à API para forçar saída estruturada.
-
-    Cada campo vem como objeto {valor, confianca} — a confiança por campo é o
-    que permite revisar só o que está fraco, em vez de reler o lote inteiro.
-    """
+    """Esquema da leitura de PRANCHA (§3.2). Cada campo: {valor, confianca, alternativas, onde}."""
     propriedades: dict[str, Any] = {
-        "carimbo_encontrado": {
-            "type": "boolean",
-            "description": "true se você localizou um carimbo/legenda de título "
-                           "nesta imagem. false se a imagem não tem carimbo visível.",
-        },
-        "regiao_carimbo": {
-            "type": "array",
-            "items": {"type": "number"},
-            "minItems": 4,
-            "maxItems": 4,
-            "description": "Caixa do carimbo em coordenadas normalizadas de 0 a 1 "
-                           "na imagem COMO ELA FOI ENVIADA: [x0, y0, x1, y1]. "
-                           "Omita se não encontrou.",
-        },
-        "rotacao": {
-            "type": "integer",
-            "enum": [0, 90, 180, 270],
-            "description": "Graus no sentido horário para o texto do carimbo ficar "
-                           "na horizontal e legível. 0 se já está legível.",
-        },
-        "nota": {
-            "type": "string",
-            "description": "Uma frase curta sobre a qualidade da leitura ou algo "
-                           "atípico. Vazio se nada a dizer.",
+        "legivel": {"type": "boolean", "description": "false se a folha não dá para ler."},
+        "tem_carimbo": {"type": "boolean", "description": "true se há carimbo/legenda de título."},
+    }
+    for campo in CAMPOS_DO_MODELO:
+        propriedades[campo.nome] = _campo_schema(campo.descricao)
+    propriedades.update({
+        "transcricao_integral": {"type": "string",
+                                 "description": "Todo o texto legível da folha, corrido, literal."},
+        "materiais_citados": {"type": "array", "items": {"type": "string"},
+                              "description": "Materiais ESCRITOS na folha (não deduzidos)."},
+        "anotacoes_manuscritas": {"type": "array", "items": {"type": "string"}},
+        "observacoes_de_leitura": {"type": "array", "items": {"type": "string"}},
+    })
+    return {
+        "name": "registrar_prancha",
+        "description": "Registra a transcrição de uma prancha de arquitetura.",
+        "input_schema": {
+            "type": "object",
+            "properties": propriedades,
+            "required": ["legivel", "tem_carimbo", "transcricao_integral"]
+                        + [c.nome for c in CAMPOS_DO_MODELO],
         },
     }
-    for campo in CAMPOS:
-        propriedades[campo.nome] = {
+
+
+def esquema_fotografia() -> dict[str, Any]:
+    """Esquema da leitura de FOTOGRAFIA (§6.1)."""
+    return {
+        "name": "registrar_fotografia",
+        "description": "Descreve uma fotografia de acervo de arquitetura.",
+        "input_schema": {
             "type": "object",
-            "description": campo.descricao,
             "properties": {
-                "valor": {
-                    "type": "string",
-                    "description": "Transcrição literal do que está escrito. "
-                                   "String vazia se o campo não existe no carimbo "
-                                   "ou está ilegível.",
-                },
-                "confianca": {
-                    "type": "number",
-                    "description": "0 a 1. Sua confiança na transcrição. Use abaixo "
-                                   "de 0.6 quando o texto está borrado, cortado ou "
-                                   "você teve que adivinhar caracteres.",
-                },
+                "tipo_de_imagem": {"type": "string",
+                                   "enum": ["fotografia", "negativo", "verso", "cartela", "folha_de_contato"]},
+                "assunto": {"type": "string"},
+                "enquadramento": {"type": "string",
+                                  "enum": ["externa", "interna", "detalhe", "aérea", "maquete", "pessoas"]},
+                "elementos_visiveis": {"type": "array", "items": {"type": "string"}},
+                "texto_na_imagem": {"type": "array", "items": {"type": "string"}},
+                "legenda_proposta": {"type": "string"},
+                "confianca": {"type": "number"},
             },
-            "required": ["valor", "confianca"],
-        }
-
-    return {
-        "name": "registrar_carimbo",
-        "description": "Registra os dados lidos do carimbo de uma prancha de arquitetura.",
-        "input_schema": {
-            "type": "object",
-            "properties": propriedades,
-            "required": ["carimbo_encontrado", "rotacao"] + [c.nome for c in CAMPOS],
-        },
-    }
-
-
-def esquema_consolidacao() -> dict[str, Any]:
-    """Schema da 2ª etapa: normalizar os campos de projeto de um grupo."""
-    propriedades = {
-        nome: {
-            "type": "string",
-            "description": f"Grafia canônica de '{CAMPOS_POR_NOME[nome].rotulo}' para "
-                           "todo o grupo. String vazia se nenhuma prancha trouxe "
-                           "informação confiável.",
-        }
-        for nome in CAMPOS_DO_PROJETO
-    }
-    propriedades["ano_do_projeto"] = {
-        "type": "string",
-        "description": "Ano que melhor representa o conjunto (4 dígitos). "
-                       "Vazio se indeterminado.",
-    }
-    propriedades["justificativa"] = {
-        "type": "string",
-        "description": "Uma ou duas frases explicando as escolhas, citando as "
-                       "divergências que você resolveu.",
-    }
-    propriedades["pranchas_fora_do_grupo"] = {
-        "type": "array",
-        "items": {"type": "string"},
-        "description": "Nomes de arquivo que aparentam NÃO pertencer a este projeto. "
-                       "Lista vazia se todas pertencem.",
-    }
-    return {
-        "name": "consolidar_projeto",
-        "description": "Define os dados canônicos de um projeto a partir das leituras "
-                       "individuais das suas pranchas.",
-        "input_schema": {
-            "type": "object",
-            "properties": propriedades,
-            "required": list(CAMPOS_DO_PROJETO) + ["ano_do_projeto", "justificativa"],
+            "required": ["tipo_de_imagem", "assunto", "legenda_proposta", "confianca"],
         },
     }

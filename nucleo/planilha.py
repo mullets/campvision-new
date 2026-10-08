@@ -31,8 +31,12 @@ def _colunas() -> list[str]:
     da_pasta = ["Fundo (pasta)", "Projeto (pasta)", "Ano (pasta)", "Divergência"]
     espelho = [f"conf. {c.rotulo}" for c in CAMPOS]
     lidos = [f"lido: {c.rotulo}" for c in CAMPOS if c.do_projeto]
+    metodo = ["Modo", "Autoria divergente", "Duplicata de", "Tipo de duplicata",
+              "Rotação aplicada", "Espelhada", "Orientação incerta", "Outliers", "Ressalvas",
+              "Documento (não obra)", "Materiais citados", "Anotações manuscritas",
+              "Onde", "Alternativas", "Transcrição integral", "md5", "Hash perceptual"]
     return (
-        fixas + campos + da_pasta
+        fixas + campos + da_pasta + metodo
         + ["Rotação", "Passes", "Nota da IA", "Erro"] + espelho + lidos
     )
 
@@ -44,14 +48,16 @@ def campos_a_revisar(leitura: Leitura) -> list[str]:
         if (leitura.valores.get(c.nome) or "").strip()
         and leitura.confiancas.get(c.nome, 0.0) < LIMIAR_ATENCAO
     ]
-    nomes += [CAMPOS_POR_NOME[n].rotulo for n in leitura.divergencias
+    nomes += [CAMPOS_POR_NOME[n].rotulo for n in [*leitura.divergencias, *leitura.outliers]
               if n in CAMPOS_POR_NOME and CAMPOS_POR_NOME[n].rotulo not in nomes]
     return nomes
 
 
 def precisa_revisar(leitura: Leitura) -> bool:
     return bool(
-        leitura.erro or not leitura.carimbo_encontrado or leitura.suspeita_grupo
+        leitura.erro or (leitura.modo == "prancha" and not leitura.carimbo_encontrado)
+        or leitura.suspeita_grupo or leitura.autoria_divergente or leitura.duplicata_de
+        or leitura.orientacao_incerta or leitura.outliers or leitura.ressalvas
         or campos_a_revisar(leitura)
     )
 
@@ -77,6 +83,16 @@ def _linha(leitura: Leitura) -> list[object]:
         leitura.pista_ano,
         f"carimbo ≠ pasta: {rotulos_divergentes}" if rotulos_divergentes else "",
     ]
+    sim = lambda v: "sim" if v else ""  # noqa: E731
+    metodo: list[object] = [
+        leitura.modo, sim(leitura.autoria_divergente), leitura.duplicata_de, leitura.tipo_duplicata,
+        leitura.rotacao_aplicada, sim(leitura.espelhada), sim(leitura.orientacao_incerta),
+        ", ".join(leitura.outliers), " | ".join(leitura.ressalvas), sim(leitura.e_documento),
+        "; ".join(leitura.materiais_citados), "; ".join(leitura.anotacoes_manuscritas),
+        "; ".join(f"{k}={v}" for k, v in leitura.onde.items()),
+        "; ".join(f"{k}={'/'.join(v)}" for k, v in leitura.alternativas.items()),
+        leitura.transcricao_integral, leitura.md5, leitura.hash_perceptual,
+    ]
     extras: list[object] = [
         leitura.rotacao,
         leitura.passes,
@@ -85,7 +101,7 @@ def _linha(leitura: Leitura) -> list[object]:
     ]
     espelho = [round(leitura.confiancas.get(c.nome, 0.0), 2) for c in CAMPOS]
     lidos = [leitura.lidos_originais.get(c.nome, "") for c in CAMPOS if c.do_projeto]
-    return fixas + campos + da_pasta + extras + espelho + lidos
+    return fixas + campos + da_pasta + metodo + extras + espelho + lidos
 
 
 def _ordenar(leituras: list[Leitura]) -> list[Leitura]:

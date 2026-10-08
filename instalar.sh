@@ -77,7 +77,7 @@ passo "1/9 Pacotes do sistema"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq python3 python3-venv python3-pip git libimage-exiftool-perl \
-  poppler-utils cifs-utils smbclient iputils-ping >/dev/null
+  poppler-utils cifs-utils smbclient iputils-ping curl tesseract-ocr tesseract-ocr-por >/dev/null
 ok "python3 $(python3 -c 'import sys;print(".".join(map(str,sys.version_info[:2])))'), exiftool $(exiftool -ver), pdftoppm, cifs"
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' \
   || { erro "Python precisa ser 3.10 ou mais novo"; exit 1; }

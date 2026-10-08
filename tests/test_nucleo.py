@@ -105,17 +105,6 @@ class TestLeitor(unittest.TestCase):
             self.assertTrue(leitura.carimbo_encontrado)
             self.assertEqual(leitura.passes, 1)
 
-    def test_segundo_passe_quando_a_confianca_e_baixa(self):
-        with TemporaryDirectory() as tmp:
-            caminho = prancha_falsa(Path(tmp) / "p1.jpg")
-            fraca = resposta_padrao(projeto=campo("CASA DA PR?IA", 0.35), arquiteto=campo("O. C. G.", 0.3))
-            forte = resposta_padrao(projeto=campo("CASA DA PRAIA", 0.95))
-            cliente = ClienteFalso([fraca, forte])
-            leitura = LeitorDeCarimbo(Config(), cliente).ler(caminho)
-            self.assertEqual(len(cliente.chamadas), 2, "deveria reler o recorte em alta")
-            self.assertEqual(leitura.valores["projeto"], "CASA DA PRAIA")
-            self.assertEqual(leitura.passes, 2)
-
     def test_sem_carimbo_nao_faz_segundo_passe(self):
         with TemporaryDirectory() as tmp:
             caminho = prancha_falsa(Path(tmp) / "p1.jpg")
@@ -125,14 +114,6 @@ class TestLeitor(unittest.TestCase):
             leitura = LeitorDeCarimbo(Config(), cliente).ler(caminho)
             self.assertEqual(len(cliente.chamadas), 1)
             self.assertFalse(leitura.carimbo_encontrado)
-
-    def test_cache_de_regiao_usa_uma_chamada_so(self):
-        with TemporaryDirectory() as tmp:
-            caminho = prancha_falsa(Path(tmp) / "p1.jpg")
-            cliente = ClienteFalso([resposta_padrao()])
-            leitura = LeitorDeCarimbo(Config(), cliente).ler(caminho, regiao_sugerida=(0.7, 0.8, 1.0, 1.0))
-            self.assertEqual(len(cliente.chamadas), 1)
-            self.assertEqual(leitura.regiao, (0.7, 0.8, 1.0, 1.0), "guarda a região da PÁGINA, não a do recorte")
 
     def test_resposta_torta_nao_derruba_a_leitura(self):
         with TemporaryDirectory() as tmp:
@@ -230,57 +211,6 @@ class TestGrupos(unittest.TestCase):
         self.assertIn("(sem projeto)", resultado)
         self.assertEqual(len(resultado["(sem projeto)"]), 1)
 
-    def test_consolidacao_normaliza_e_preserva_o_lido(self):
-        leituras = [
-            self._leitura("a.jpg", "TEATRO DE SANTOS", arquiteto="OSWALDO CORREA GONCALVES"),
-            self._leitura("b.jpg", "TEATRO DE SANTOS", arquiteto="HOSWALDO CORREA GONCALVES"),
-        ]
-        canonico = {
-            "projeto": "TEATRO DE SANTOS",
-            "arquiteto": "OSWALDO CORRÊA GONÇALVES",
-            "cliente": "", "escritorio": "", "endereco": "", "cidade": "", "uf": "",
-            "ano_do_projeto": "1968",
-            "justificativa": "O H inicial é erro de leitura em uma prancha.",
-        }
-        grupos.consolidar(leituras, ClienteFalso([canonico]))
-        self.assertEqual(leituras[1].valores["arquiteto"], "OSWALDO CORRÊA GONÇALVES")
-        self.assertEqual(leituras[1].lidos_originais["arquiteto"], "HOSWALDO CORREA GONCALVES")
-        self.assertEqual(leituras[0].ano_do_projeto, "1968")
-
-
-    def test_consolidacao_nao_inventa_campo_que_ninguem_leu(self):
-        leituras = [
-            self._leitura("a.jpg", "TEATRO DE SANTOS"),
-            self._leitura("b.jpg", "TEATRO DE SANTOS"),
-        ]
-        canonico = {
-            "projeto": "TEATRO DE SANTOS",
-            "arquiteto": "",
-            "cliente": "",
-            "escritorio": "",
-            "endereco": "RUA QUE NINGUEM LEU, 100",  # invenção: nenhuma prancha trouxe
-            "cidade": "", "uf": "",
-            "ano_do_projeto": "",
-            "justificativa": "",
-        }
-        grupos.consolidar(leituras, ClienteFalso([canonico]))
-        self.assertEqual(leituras[0].valores.get("endereco", ""), "")
-
-    def test_valor_consolidado_herda_confianca_do_grupo(self):
-        boa = self._leitura("a.jpg", "TEATRO", cidade="SANTOS")
-        ruim = self._leitura("b.jpg", "TEATRO")
-        ruim.valores["cidade"] = ""
-        ruim.confiancas["cidade"] = 0.0
-        canonico = {
-            "projeto": "TEATRO", "arquiteto": "", "cliente": "", "escritorio": "",
-            "endereco": "", "cidade": "SANTOS", "uf": "",
-            "ano_do_projeto": "", "justificativa": "",
-        }
-        grupos.consolidar([boa, ruim], ClienteFalso([canonico]))
-        self.assertEqual(ruim.valores["cidade"], "SANTOS")
-        self.assertGreater(ruim.confiancas["cidade"], 0.6,
-                           "campo resolvido pela consolidação não pode ficar marcado como fraco")
-
 
 class TestPlanilha(unittest.TestCase):
     def _amostra(self) -> list[Leitura]:
@@ -357,7 +287,8 @@ class TestEsquema(unittest.TestCase):
     def test_ferramenta_exige_todos_os_campos(self):
         ferramenta = esquema_ferramenta()
         obrigatorios = set(ferramenta["input_schema"]["required"])
-        for campo_def in CAMPOS:
+        from nucleo.esquema import CAMPOS_DO_MODELO
+        for campo_def in CAMPOS_DO_MODELO:
             self.assertIn(campo_def.nome, obrigatorios)
 
     def test_confianca_media_ignora_campo_vazio(self):
@@ -415,163 +346,104 @@ class TestConfigExemplo(unittest.TestCase):
             self.assertEqual(Config.carregar(caminho).trabalhadores, 9)
 
 
-class TestCacheQueSeDesliga(unittest.TestCase):
-    """O cache de região tem que parar de custar quando não está poupando."""
+class TestMetodoDeLeitura(unittest.TestCase):
+    """Método de leitura (projeto Tainacam: claude/campvision-metodo-de-leitura.md)."""
 
-    def test_desliga_apos_as_falhas_toleradas(self):
-        from nucleo.lote import CacheDeRegiao
-
-        cache = CacheDeRegiao(falhas_toleradas=2)
-        cache.guardar((0.7, 0.8, 1.0, 1.0))
-        self.assertIsNotNone(cache.obter())
-        cache.registrar_falha()
-        self.assertIsNotNone(cache.obter(), "uma falha ainda não desliga")
-        cache.registrar_falha()
-        self.assertIsNone(cache.obter())
-        self.assertTrue(cache.desligado)
-
-    def test_desligado_nao_volta_a_guardar(self):
-        from nucleo.lote import CacheDeRegiao
-
-        cache = CacheDeRegiao(falhas_toleradas=1)
-        cache.registrar_falha()
-        cache.guardar((0.1, 0.1, 0.5, 0.5))
-        self.assertIsNone(cache.obter())
-
-    def test_lote_desliga_o_cache_e_para_de_gastar_chamada_extra(self):
+    def test_folha_inteira_uma_chamada_2000px(self):
+        import base64, io
         with TemporaryDirectory() as tmp:
-            pasta = Path(tmp)
-            for i in range(6):
-                prancha_falsa(pasta / f"p{i}.jpg", 3000, 2000)
-
-            # Resposta boa o bastante para guardar a região, mas o recorte
-            # do cache sempre volta fraco: é o caso do acervo real.
-            forte = resposta_padrao()
-            fraca = resposta_padrao(projeto=campo("BORRADO", 0.2), arquiteto=campo("", 0.0))
-
-            class ClienteAlternado:
-                def __init__(self):
-                    self.chamadas = []
-
-                def chamar(self, mensagens, ferramenta, sistema):
-                    self.chamadas.append(mensagens)
-                    # a 1ª chamada de cada prancha via cache manda o recorte:
-                    # devolve fraco para simular o cache que não serve
-                    texto = str(mensagens)
-                    return (fraca if "RECORTE" in texto.upper() else forte), 1000, 100
-
-            cliente = ClienteAlternado()
-            cfg = Config(trabalhadores=1, falhas_de_cache_toleradas=2,
-                         confianca_para_guardar_regiao=0.5)
-            resultado = lote.executar(pasta, cfg, cliente)
-            self.assertEqual(len(resultado.leituras), 6)
-            # Sem o desligamento seriam ~2 chamadas por prancha depois da 1ª.
-            # Com ele, as últimas pranchas gastam 1 chamada só.
-            self.assertLess(len(cliente.chamadas), 11,
-                            f"cache deveria ter se desligado; chamadas={len(cliente.chamadas)}")
-
-
-class TestGanhoDeResolucao(unittest.TestCase):
-    """O 2º passe só se paga quando o recorte fica mesmo mais nítido."""
-
-    def _leitor(self, **extra):
-        return LeitorDeCarimbo(Config(**extra), ClienteFalso([resposta_padrao()]))
-
-    def test_pagina_pequena_nao_ganha_nada(self):
-        img = Image.new("RGB", (1200, 900))
-        ganho = self._leitor()._ganho_de_resolucao(img, (0.7, 0.8, 1.0, 1.0))
-        self.assertAlmostEqual(ganho, 1.0, places=2)
-
-    def test_pagina_grande_ganha_muito(self):
-        img = Image.new("RGB", (9000, 6000))
-        ganho = self._leitor()._ganho_de_resolucao(img, (0.8, 0.85, 1.0, 1.0))
-        self.assertGreater(ganho, 3.0)
-
-    def _resposta_fraca(self) -> dict:
-        """Todos os campos fracos, para a média cair mesmo abaixo do limiar."""
-        return resposta_padrao(
-            projeto=campo("BORRADO", 0.3),
-            arquiteto=campo("ILEGIVEL", 0.3),
-            ano=campo("19??", 0.3),
-            folha=campo("0?", 0.3),
-        )
-
-    def test_nao_faz_segundo_passe_sem_ganho(self):
-        """Página pequena: o recorte já foi enviado na resolução máxima."""
-        with TemporaryDirectory() as tmp:
-            caminho = prancha_falsa(Path(tmp) / "pequena.jpg", 1200, 900)
-            cliente = ClienteFalso([self._resposta_fraca()])
-            leitura = LeitorDeCarimbo(Config(), cliente).ler(caminho)
-            self.assertLess(leitura.confianca_media, 0.75, "a média tem que estar baixa")
-            self.assertEqual(len(cliente.chamadas), 1,
-                             "reler o mesmo pixel não melhora nada")
-            self.assertEqual(leitura.passes, 1)
-
-    def test_faz_segundo_passe_quando_ha_ganho(self):
-        with TemporaryDirectory() as tmp:
-            caminho = prancha_falsa(Path(tmp) / "grande.jpg", 6000, 4000)
-            cliente = ClienteFalso([self._resposta_fraca(), resposta_padrao()])
+            caminho = prancha_falsa(Path(tmp) / "p1.jpg", 5000, 3500)
+            cliente = ClienteFalso([resposta_padrao(projeto=campo("X", 0.2))])
             LeitorDeCarimbo(Config(), cliente).ler(caminho)
-            self.assertEqual(len(cliente.chamadas), 2)
+            self.assertEqual(len(cliente.chamadas), 1, "nunca relê recorte, mesmo com confiança baixa")
+            dados = cliente.chamadas[0]["mensagens"][0]["content"][0]["source"]["data"]
+            enviada = Image.open(io.BytesIO(base64.b64decode(dados)))
+            self.assertEqual(max(enviada.size), 2000)
+            self.assertEqual(enviada.size, (2000, 1400), "página inteira, sem recorte")
 
+    def test_prompt_de_prancha_e_literal(self):
+        from nucleo import visao
+        texto = visao.INSTRUCOES
+        for regra in ("literalmente", "INTEIRA", "null", "alternativas", "conhecimento externo"):
+            self.assertIn(regra, texto)
 
-class TestMedicaoDoSegundoPasse(unittest.TestCase):
-    """O 2º passe dobra o custo da prancha; o relatório tem que medir o retorno."""
+    def test_campos_novos_do_esquema(self):
+        props = esquema_ferramenta()["input_schema"]["properties"]
+        for nome in ("escritorio", "codigo_serie", "revisao", "transcricao_integral",
+                     "materiais_citados", "anotacoes_manuscritas"):
+            self.assertIn(nome, props)
+        self.assertNotIn("tipo", props, "tipo de desenho é derivado em código, não pedido ao modelo")
+        self.assertNotIn("ano", props, "ano vem da data escrita, em código")
+        self.assertIn("alternativas", props["projeto"]["properties"])
+        self.assertIn("onde", props["projeto"]["properties"])
 
-    def _fraca(self, conf=0.3) -> dict:
-        return resposta_padrao(
-            projeto=campo("BORRADO", conf), arquiteto=campo("ILEGIVEL", conf),
-            ano=campo("19??", conf), folha=campo("0?", conf),
-        )
-
-    def test_registra_confianca_antes_e_ganho(self):
+    def test_alternativas_onde_e_derivacoes(self):
         with TemporaryDirectory() as tmp:
-            caminho = prancha_falsa(Path(tmp) / "g.jpg", 6000, 4000)
-            cliente = ClienteFalso([self._fraca(), resposta_padrao()])
+            caminho = prancha_falsa(Path(tmp) / "p1.jpg")
+            r = resposta_padrao(
+                data={"valor": "14.06.85", "confianca": 0.6, "alternativas": ["14.06.83"], "onde": "margem"},
+                titulo_prancha=campo("PLANTA DE SITUAÇÃO"),
+                transcricao_integral="PLANTA DE SITUAÇÃO 14.06.85",
+                materiais_citados=["Perstorp Berilo"],
+            )
+            leitura = LeitorDeCarimbo(Config(), ClienteFalso([r])).ler(caminho)
+            self.assertEqual(leitura.valores["ano"], "1985")
+            self.assertEqual(leitura.alternativas["ano"], ["1983"])
+            self.assertEqual(leitura.onde["data"], "margem")
+            self.assertEqual(leitura.valores["tipo"], "Implantação")
+            self.assertEqual(leitura.materiais_citados, ["Perstorp Berilo"])
+
+    def test_fotografia_usa_prompt_proprio(self):
+        with TemporaryDirectory() as tmp:
+            caminho = prancha_falsa(Path(tmp) / "F026-P0001-1975-S03-D00001.jpg")
+            foto = {"tipo_de_imagem": "fotografia", "assunto": "fachada", "enquadramento": "externa",
+                    "legenda_proposta": "Fachada principal", "confianca": 0.8,
+                    "texto_na_imagem": ["SESC"]}
+            cliente = ClienteFalso([foto])
             leitura = LeitorDeCarimbo(Config(), cliente).ler(caminho)
-            self.assertTrue(leitura.fez_segundo_passe)
-            self.assertAlmostEqual(leitura.confianca_antes_do_2o, 0.3, places=2)
-            self.assertGreater(leitura.ganho_de_resolucao, 1.3)
-            self.assertGreater(leitura.confianca_media, leitura.confianca_antes_do_2o)
+            self.assertEqual(cliente.chamadas[0]["ferramenta"], "registrar_fotografia")
+            self.assertEqual(leitura.modo, "fotografia")
+            self.assertEqual(leitura.valores["titulo_prancha"], "Fachada principal")
+            self.assertEqual(leitura.valores["tipo"], "Fotografia")
+            from nucleo import visao
+            self.assertIn("NÃO atribua autoria da fotografia", visao.INSTRUCOES_FOTO)
 
-    def test_sem_segundo_passe_nao_marca_nada(self):
-        with TemporaryDirectory() as tmp:
-            caminho = prancha_falsa(Path(tmp) / "g.jpg", 6000, 4000)
-            leitura = LeitorDeCarimbo(Config(), ClienteFalso([resposta_padrao()])).ler(caminho)
-            self.assertFalse(leitura.fez_segundo_passe)
 
-    def test_relatorio_mostra_o_rendimento(self):
-        boa = Leitura(arquivo="a.jpg", valores={"projeto": "X"}, confiancas={"projeto": 0.95},
-                      carimbo_encontrado=True, fez_segundo_passe=True,
-                      confianca_antes_do_2o=0.40, ganho_de_resolucao=2.4)
-        inutil = Leitura(arquivo="b.jpg", valores={"projeto": "Y"}, confiancas={"projeto": 0.42},
-                         carimbo_encontrado=True, fez_segundo_passe=True,
-                         confianca_antes_do_2o=0.41, ganho_de_resolucao=1.5)
-        with TemporaryDirectory() as tmp:
-            texto = planilha.escrever_relatorio(
-                [boa, inutil], Path(tmp) / "r.txt", 0.10
-            ).read_text()
-            self.assertIn("Segundo passe", texto)
-            self.assertIn("Pranchas que releram   2/2", texto)
-            self.assertIn("Melhoraram de fato     1", texto)
-            self.assertIn("1.9x", texto)  # (2.4 + 1.5) / 2
+class TestConsolidacaoEmCodigo(unittest.TestCase):
+    def _l(self, arquivo, projeto, **v):
+        valores = {"projeto": projeto, **v}
+        return Leitura(arquivo=arquivo, valores=valores, confiancas={k: 0.9 for k in valores},
+                       carimbo_encontrado=True)
 
-    def test_relatorio_sugere_baixar_o_limiar_quando_rende_pouco(self):
-        inuteis = [
-            Leitura(arquivo=f"{i}.jpg", valores={"projeto": "Y"},
-                    confiancas={"projeto": 0.42}, carimbo_encontrado=True,
-                    fez_segundo_passe=True, confianca_antes_do_2o=0.41,
-                    ganho_de_resolucao=2.0)
-            for i in range(5)
-        ]
-        with TemporaryDirectory() as tmp:
-            texto = planilha.escrever_relatorio(inuteis, Path(tmp) / "r.txt").read_text()
-            self.assertIn("rendendo pouco", texto)
-            self.assertIn("confianca_minima_para_aceitar", texto)
+    def test_moda_e_quarentena_hoswaldo_nao_sequestra(self):
+        ls = [self._l(f"{i}.jpg", "TEATRO", arquiteto="OSWALDO CORREA GONCALVES") for i in range(3)]
+        ls.append(self._l("x.jpg", "TEATRO", arquiteto="HOSWALDO CORREA GONCALVES"))
+        _, t_in, t_out = grupos.consolidar(ls)
+        self.assertEqual((t_in, t_out), (0, 0), "consolidação não chama modelo")
+        self.assertIn("arquiteto", ls[3].outliers)
+        self.assertEqual(ls[3].lidos_originais["arquiteto"], "HOSWALDO CORREA GONCALVES")
+        self.assertEqual(ls[3].valores["arquiteto"], "HOSWALDO CORREA GONCALVES",
+                         "autoria nunca é corrigida pelo consenso")
+        self.assertEqual(ls[0].valores["arquiteto"], "OSWALDO CORREA GONCALVES")
 
-    def test_sem_segundo_passe_o_relatorio_nao_fala_disso(self):
-        leitura = Leitura(arquivo="a.jpg", valores={"projeto": "X"},
-                          confiancas={"projeto": 0.9}, carimbo_encontrado=True)
-        with TemporaryDirectory() as tmp:
-            texto = planilha.escrever_relatorio([leitura], Path(tmp) / "r.txt").read_text()
-            self.assertNotIn("Segundo passe", texto)
+    def test_valor_isolado_nao_corrige_ninguem(self):
+        ls = [self._l("a.jpg", "TEATRO", cidade="SANTOS"), self._l("b.jpg", "TEATRO", cidade="SAO VICENTE")]
+        grupos.consolidar(ls)
+        self.assertEqual(ls[0].valores["cidade"], "SANTOS")
+        self.assertEqual(ls[1].valores["cidade"], "SAO VICENTE")
+
+    def test_ano_85_vira_ressalva_nao_correcao(self):
+        ls = [self._l(f"{i}.jpg", "McD-9", ano="1983") for i in range(4)]
+        duvida = self._l("z.jpg", "McD-9", ano="1985")
+        duvida.alternativas["ano"] = ["1983"]
+        ls.append(duvida)
+        grupos.consolidar(ls)
+        self.assertEqual(duvida.valores["ano"], "1985", "ano da prancha fica intacto")
+        self.assertEqual(duvida.ano_do_projeto, "1983")
+        self.assertTrue(duvida.ressalvas and "conferir no original" in duvida.ressalvas[0])
+
+    def test_revisao_separa_reforma(self):
+        ls = [self._l("a.jpg", "McD-1"), self._l("b.jpg", "McD-1", revisao="R-1")]
+        self.assertEqual(len(grupos.agrupar(ls)), 2)
+
+

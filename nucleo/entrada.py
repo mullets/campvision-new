@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import estrutura, formatos, fundos as mod_fundos, info_projeto as mod_info
+from . import preparo as mod_preparo
 from . import metadados as mod_metadados
 from .config import VERSAO_BUILD, Config
 from .esquema import CAMPOS
@@ -375,7 +376,39 @@ def conferir_exif(itens: list[tuple[Path, str]]) -> set[Path]:
 
 # ================================================================ erros
 
+def enriquecer(leituras: dict, preparos: dict, fundo) -> None:
+    """Preparo, duplicatas e autoria em cada leitura do projeto (método §2.3, §4.4, §8.1)."""
+    from .derivacao import autoria_divergente
+
+    ordem = sorted(leituras)
+    por_md5: dict[str, str] = {}
+    hashes: list[tuple[str, str]] = []
+    for codigo in ordem:
+        l = leituras[codigo]
+        p = preparos.get(codigo, {})
+        l.md5 = p.get("md5", "")
+        l.hash_perceptual = p.get("hash_perceptual", "")
+        l.rotacao_aplicada = int(p.get("rotacao", 0) or 0)
+        l.espelhada = bool(p.get("espelhada", False))
+        l.orientacao_incerta = bool(p.get("incerta", False))
+        l.duplicata_de, l.tipo_duplicata = "", ""
+        if l.md5 and l.md5 in por_md5:
+            l.duplicata_de, l.tipo_duplicata = por_md5[l.md5], "exata"
+        elif l.hash_perceptual:
+            for outro, h in hashes:
+                if mod_preparo.distancia(h, l.hash_perceptual) <= mod_preparo.DISTANCIA_PERCEPTUAL:
+                    l.duplicata_de, l.tipo_duplicata = outro, "perceptual"
+                    break
+        if l.md5:
+            por_md5.setdefault(l.md5, codigo)
+        if l.hash_perceptual and not l.duplicata_de:
+            hashes.append((codigo, l.hash_perceptual))
+        arquiteto = (l.lidos_originais or l.valores).get("arquiteto", "") or l.valores.get("arquiteto", "")
+        l.autoria_divergente = l.modo == "prancha" and autoria_divergente(arquiteto, fundo.autorizados)
+
+
 def erros_das_leituras(leituras) -> list[dict]:
+    """Erros por documento no vocabulário do painel (contrato item 4)."""
     erros: list[dict] = []
 
     def add(arquivo, categoria, gravidade, detalhe):
@@ -387,18 +420,80 @@ def erros_das_leituras(leituras) -> list[dict]:
         if l.erro:
             add(nome, "metadado", "corrigir", f"leitura falhou: {l.erro}")
             continue
-        if not l.carimbo_encontrado:
-            add(nome, "metadado", "aviso", "carimbo não encontrado")
-        autoria = [d for d in l.divergencias if d in ("arquiteto", "escritorio")]
-        if autoria:
+        if l.autoria_divergente:
             add(nome, "autoria divergente", "bloqueia",
-                "carimbo diz " + "; ".join(l.valores.get(d, "") for d in autoria))
-        if "projeto" in l.divergencias or l.suspeita_grupo:
-            add(nome, "projeto errado", "corrigir",
-                f"carimbo diz '{l.valores.get('projeto', '')}'")
-        if l.rotacao in (90, 180, 270):
-            add(nome, "orientação", "aviso", f"girar {l.rotacao}°")
+                f"carimbo diz '{(l.lidos_originais or l.valores).get('arquiteto', '')}' — "
+                "não é titular nem coautor do fundo; não publicar")
+        if l.duplicata_de:
+            add(nome, "duplicata", "corrigir", f"{l.tipo_duplicata} de {l.duplicata_de} — só a única publica")
+        if l.suspeita_grupo:
+            add(nome, "projeto errado", "corrigir", f"carimbo diz '{l.valores.get('projeto', '')}'")
+        if l.espelhada:
+            add(nome, "espelhado", "aviso", "folha digitalizada pelo verso — preview já corrigido")
+        if l.orientacao_incerta:
+            add(nome, "orientação", "aviso", "orientação incerta — conferir na folha de contatos")
+        if l.modo == "prancha" and not l.carimbo_encontrado:
+            add(nome, "metadado", "aviso", "carimbo não encontrado")
+        for campo in l.outliers:
+            if campo != "arquiteto":
+                add(nome, "metadado", "aviso", f"{campo} diverge do grupo (lido "
+                    f"'{(l.lidos_originais or {}).get(campo, l.valores.get(campo, ''))}')")
+        for ressalva in l.ressalvas:
+            add(nome, "metadado", "aviso", ressalva)
     return erros
+
+
+def pacote_tainacan(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: dict,
+                    raiz: Path) -> dict:
+    """Pacote para o painel/importador (§8.2). IDs de termo NÃO são inventados aqui:
+    o painel converte `serie`/`tipo` para o ID de taxonomia — sempre NÚMERO ({"values": 26})."""
+    arquivos_por_codigo: dict[str, list[str]] = {}
+    for item in mapa.values():
+        arquivos_por_codigo.setdefault(Path(item["destino"]).stem, []).append(item["destino"])
+    itens = []
+    for doc in sorted(leituras):
+        l = leituras[doc]
+        serie = doc.split("-")[3] if doc.count("-") >= 4 else ctx.serie
+        bloqueios = []
+        if l.autoria_divergente:
+            bloqueios.append("autoria divergente")
+        if l.duplicata_de:
+            bloqueios.append(f"duplicata de {l.duplicata_de}")
+        if l.e_documento:
+            bloqueios.append("ficha de documentação (não é obra)")
+        itens.append({
+            "codigo": doc, "projeto_codigo": codigo, "fundo_codigo": ctx.fundo.codigo,
+            "serie": serie, "modo": l.modo, "titulo": l.valores.get("titulo_prancha", ""),
+            "tipo_de_desenho": l.valores.get("tipo", ""),
+            "ano": l.valores.get("ano", ""), "ano_do_projeto": l.ano_do_projeto,
+            "metadados": {k: v for k, v in l.valores.items() if v},
+            "alternativas": l.alternativas, "onde": l.onde,
+            "transcricao_integral": l.transcricao_integral,
+            "materiais_citados": l.materiais_citados, "foto": l.foto,
+            "credito": ctx.fundo.credito,
+            "preview": preparos.get(doc, {}).get("preview", ""),
+            "arquivos": sorted(arquivos_por_codigo.get(doc, [])),
+            "publicavel": not bloqueios, "bloqueios": bloqueios, "ressalvas": l.ressalvas,
+        })
+    return {"versao": 1, "projeto_codigo": codigo, "projeto_nome": nome,
+            "fundo_codigo": ctx.fundo.codigo, "gerado_em": _agora(), "itens": itens}
+
+
+def checklist_aceite(por_codigo: dict, leituras: dict, erros: list[dict], lote: dict) -> dict:
+    """Checklist de aceite do lote (§10). Vai no JSON do lote; o painel decide publicar."""
+    do_lote = [leituras[c] for c in por_codigo if c in leituras]
+    exif = lote.get("exif", {})
+    itens = {
+        "contagem_origem_igual_saida": len(do_lote) == len(por_codigo),
+        "sem_autoria_divergente": not any(l.autoria_divergente for l in do_lote),
+        "duplicatas_marcadas": True,
+        "orientacao_incerta_zerada": not any(l.orientacao_incerta for l in do_lote),
+        "exif_conferido": exif.get("conferidos", 0) == exif.get("total", 0),
+        "relatorio_gerado": True,
+    }
+    itens["publicavel"] = all(itens.values())
+    itens["pendencias"] = [k for k, v in itens.items() if v is False]
+    return itens
 
 
 # ================================================================ o lote
@@ -607,12 +702,33 @@ class Recebedor:
         por_codigo: dict[str, list[Path]] = {}
         for _o, destino, codigo_doc, _s in arquivados:
             por_codigo.setdefault(codigo_doc, []).append(destino)
+        # Passada 1 — preparo (§2): imagem bruta → orientação pelo texto →
+        # leitura 2000 px + preview 3000 px já girados; md5 e hash perceptual.
+        bruta_dir = self.pasta_estado / "leitura_bruta" / codigo
+        preview_dir = self.raiz_final / "_campvision" / "preview" / codigo
+        preparo_caminho = catalogacao / "preparo.json"
+        preparos: dict = ler_json(preparo_caminho, {}) or {}
         for codigo_doc, versoes in por_codigo.items():
+            leitura_jpg = cache / f"{codigo_doc}.jpg"
+            if codigo_doc in preparos and leitura_jpg.exists():
+                continue
             melhor = formatos.Documento(codigo_doc, versoes).para_ler
-            if formatos.imagem_de_leitura(melhor, cache / f"{codigo_doc}.jpg") is None:
+            bruta = formatos.imagem_de_leitura(melhor, bruta_dir / f"{codigo_doc}.jpg")
+            if bruta is None:
                 erros_lote.append({"arquivo": codigo_doc, "categoria": "arquivo corrompido",
                                    "gravidade": "corrigir", "origem": "CAMP Vision",
                                    "detalhe": f"não abri {melhor.name} para leitura"})
+                continue
+            prep = mod_preparo.preparar(bruta, melhor, leitura_jpg, preview_dir / f"{codigo_doc}.jpg")
+            preparos[codigo_doc] = {
+                "md5": prep.md5, "hash_perceptual": prep.hash_perceptual,
+                "rotacao": prep.orientacao.rotacao, "espelhada": prep.orientacao.espelhada,
+                "incerta": prep.orientacao.incerta, "pontos": prep.orientacao.pontos,
+                "lido_de": melhor.name,
+                "preview": self._relativo(prep.preview) if prep.preview else "",
+            }
+            bruta.unlink(missing_ok=True)
+        gravar_json(preparo_caminho, preparos)
 
         from . import planilha as mod_planilha, vigia as mod_vigia
 
@@ -639,6 +755,11 @@ class Recebedor:
                                   codigo_documento=codigo_doc,
                                   detalhe="carimbo lido" if leituras[codigo_doc].carimbo_encontrado
                                   else "sem carimbo")
+
+        # Passada 3 complementos (§2.3, §4.4) — em código, sobre o projeto inteiro.
+        enriquecer(leituras, preparos, ctx.fundo)
+        mod_planilha.escrever_json(list(leituras.values()), catalogacao / "leituras.json")
+        mod_planilha.escrever_csv(list(leituras.values()), catalogacao / "catalogacao.csv")
 
         # ---- 6. EXIF/XMP completo em todas as versões
         itens = []
@@ -676,6 +797,9 @@ class Recebedor:
         todos_erros = erros_das_leituras(leituras.values()) + erros_lote
         self._erros(catalogacao, todos_erros)
         bloqueantes = sum(1 for e in todos_erros if e["gravidade"] == "bloqueia")
+        gravar_json(catalogacao / "pacote_tainacan.json",
+                    pacote_tainacan(codigo, nome, ctx, leituras, preparos, mapa, self.raiz_final))
+        lote["aceite"] = checklist_aceite(por_codigo, leituras, todos_erros, lote)
 
         # ---- 8. pronto (último), info, aviso
         documentos_projeto = len({Path(v["destino"]).stem for v in mapa.values()})

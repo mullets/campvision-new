@@ -120,11 +120,14 @@ desfazer() {
 "$REPO/.venv/bin/pip" install -q -r requirements.txt || desfazer "pip falhou"
 ok "dependências Python em dia"
 FALTAM=()
-for par in exiftool:libimage-exiftool-perl pdftoppm:poppler-utils mount.cifs:cifs-utils; do
+for par in exiftool:libimage-exiftool-perl pdftoppm:poppler-utils mount.cifs:cifs-utils tesseract:tesseract-ocr; do
   command -v "${par%%:*}" >/dev/null || FALTAM+=("${par##*:}")
 done
+if command -v tesseract >/dev/null && ! tesseract --list-langs 2>/dev/null | grep -qx por; then
+  FALTAM+=(tesseract-ocr-por)
+fi
 if [[ ${#FALTAM[@]} -gt 0 ]]; then
-  if [[ "$MODO" == "auto" ]]; then
+  if [[ "$MODO" == "auto" ]] && ! sudo -n true 2>/dev/null; then
     desfazer "faltam pacotes do sistema (${FALTAM[*]}) — rode ./atualizar.sh à mão"
   fi
   info "instalando pacotes do sistema: ${FALTAM[*]}"

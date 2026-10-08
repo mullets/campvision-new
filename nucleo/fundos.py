@@ -31,6 +31,13 @@ class Fundo:
     codigo: str
     sigla: str
     nome: str
+    # Coautores/sócios registrados (vêm do painel). Folha assinada por alguém
+    # fora de titular + coautores é autoria divergente (método §4.4).
+    coautores: tuple[str, ...] = ()
+
+    @property
+    def autorizados(self) -> list[str]:
+        return [self.nome, *self.coautores]
 
     @property
     def pasta(self) -> str:
@@ -142,10 +149,17 @@ def _de_json(dados) -> list[Fundo]:
             continue
         if item.get("ativo") is False:
             continue
+        coautores = item.get("coautores") or item.get("autores") or []
+        if isinstance(coautores, str):
+            coautores = [c.strip() for c in coautores.split(",") if c.strip()]
+        coautores = tuple(
+            str(c.get("nome") if isinstance(c, dict) else c) for c in coautores if c
+        )
         fundos.append(Fundo(
             codigo,
             str(item.get("sigla") or item.get("prefixo") or ""),
             str(item.get("nome") or item.get("titulo") or codigo),
+            coautores,
         ))
     return fundos
 

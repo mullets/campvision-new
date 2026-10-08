@@ -268,6 +268,47 @@ class TestPontaAPonta(Base):
         self.assertTrue(any("não suportado" in e["detalhe"] for e in erros))
 
 
+class TestMetodoNoRecebimento(Base):
+    def test_preparo_preview_pacote_e_autoria(self):
+        self.scan("F026 - Sami Bussab", "Desenhos", "Tarumã 1972", n=2, formatos=("jpg",))
+        r = self.recebedor()
+        r.cliente = ClienteFalso([resposta_padrao(arquiteto={"valor": "SALVADOR CANDIA", "confianca": 0.9})])
+        with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+            res = r.processar(r.pendentes()[0])
+        self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+        cat = res.pasta_projeto / "catalogacao"
+        preparos = json.loads((cat / "preparo.json").read_text())
+        self.assertEqual(len(preparos), 2)
+        primeiro = next(iter(preparos.values()))
+        self.assertEqual(len(primeiro["md5"]), 32)
+        self.assertEqual(len(primeiro["hash_perceptual"]), 16)
+        # preview 3000 px fora da pasta do projeto (o painel não conta como imagem do projeto)
+        preview = self.acervo / primeiro["preview"]
+        self.assertTrue(preview.exists())
+        self.assertIn("_campvision", primeiro["preview"])
+        self.assertEqual(list(res.pasta_projeto.rglob("*.jpg")).__len__(), 2 + 1,  # 2 docs + contatos
+                         "nenhuma imagem extra dentro do projeto")
+        # autoria de outro arquiteto bloqueia
+        erros = json.loads((cat / "erros.json").read_text())
+        self.assertTrue(any(e["categoria"] == "autoria divergente" and e["gravidade"] == "bloqueia" for e in erros))
+        pacote = json.loads((cat / "pacote_tainacan.json").read_text())
+        self.assertEqual(len(pacote["itens"]), 2)
+        self.assertFalse(pacote["itens"][0]["publicavel"])
+        self.assertIn("autoria divergente", pacote["itens"][0]["bloqueios"])
+        self.assertEqual(pacote["itens"][0]["credito"],
+                         "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista")
+        lote = json.loads(next((cat / "lotes").glob("*.json")).read_text())
+        self.assertFalse(lote["aceite"]["publicavel"])
+        self.assertIn("sem_autoria_divergente", lote["aceite"]["pendencias"])
+        status = json.loads((res.pasta_projeto / "status.json").read_text())
+        self.assertGreaterEqual(status["erros_bloqueantes"], 2)
+        # CSV com as colunas do método
+        cabecalho = (cat / "catalogacao.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+        for coluna in ("Autoria divergente", "Duplicata de", "Orientação incerta", "Transcrição integral"):
+            self.assertIn(coluna, cabecalho)
+
+
 class TestFalhasNaoApagam(Base):
     def test_api_recusou_nao_fica_pronto_nem_apaga(self):
         pasta = self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))

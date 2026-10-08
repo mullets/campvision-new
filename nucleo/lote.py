@@ -48,54 +48,6 @@ class ResultadoLote:
     cancelado: bool = False
 
 
-class CacheDeRegiao:
-    """Região do carimbo reaproveitada entre pranchas do mesmo projeto.
-
-    Quando funciona, poupa uma chamada por prancha. Quando não funciona, CUSTA
-    uma chamada por prancha — em acervo com formatos misturados o atalho erra,
-    cai para a página inteira e ainda faz o segundo passe: três chamadas para
-    uma prancha. Por isso ele conta as falhas e se desliga sozinho.
-    """
-
-    def __init__(self, falhas_toleradas: int = 2) -> None:
-        self._regiao: img_mod.Caixa | None = None
-        self._falhas = 0
-        self._desligado = False
-        self._falhas_toleradas = falhas_toleradas
-        self._trava = threading.Lock()
-
-    @property
-    def desligado(self) -> bool:
-        with self._trava:
-            return self._desligado
-
-    def obter(self) -> img_mod.Caixa | None:
-        with self._trava:
-            return None if self._desligado else self._regiao
-
-    def guardar(self, regiao: img_mod.Caixa | None) -> None:
-        if regiao is None:
-            return
-        with self._trava:
-            if not self._desligado:
-                self._regiao = regiao
-
-    def registrar_falha(self) -> None:
-        with self._trava:
-            if self._desligado:
-                return
-            self._falhas += 1
-            if self._falhas >= self._falhas_toleradas:
-                self._desligado = True
-                self._regiao = None
-                _log.info(
-                    "Cache de região desligado neste projeto após %d falha(s) — "
-                    "os formatos variam demais e o atalho estava custando uma "
-                    "chamada extra por prancha.",
-                    self._falhas,
-                )
-
-
 def _carregar_checkpoint(caminho: Path) -> dict[str, Leitura]:
     if not caminho.exists():
         return {}
@@ -154,22 +106,14 @@ def executar(
 
     _log.info("Lote iniciado: %d prancha(s) a ler de %d na pasta.", len(pendentes), len(arquivos))
     leitor = LeitorDeCarimbo(config, cliente)
-    cache = CacheDeRegiao(config.falhas_de_cache_toleradas)
     trava_arquivo = threading.Lock()
 
     def processar(caminho: Path) -> Leitura:
         if cancelar.is_set():
             return Leitura(arquivo=caminho.name, erro="cancelado")
         with arquivo_em_processamento(caminho.name):
-            leitura = leitor.ler(caminho, cache.obter())
-            if leitura.cache_falhou:
-                cache.registrar_falha()
-            elif (
-                leitura.carimbo_encontrado
-                and leitura.confianca_media >= config.confianca_para_guardar_regiao
-            ):
-                cache.guardar(leitura.regiao)
-            return leitura
+            # Uma chamada, folha inteira (método §0). Sem cache de região.
+            return leitor.ler(caminho)
 
     with ThreadPoolExecutor(max_workers=max(1, config.trabalhadores)) as executor:
         futuros = {executor.submit(processar, a): a for a in pendentes}

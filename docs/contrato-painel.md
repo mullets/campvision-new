@@ -244,3 +244,53 @@ número (e o lote **não** é copiado com código inventado).
 4. Desligar o painel, mandar outro lote: CV2 conclui; ao religar, o aviso
    pendente chega e o painel atualiza sem varredura completa.
 5. Lote com fundo `F099`: CV2 não copia, painel não vê nada, erro no heartbeat/log do CV2.
+
+## 9. Versão 2 — método de leitura (08/10/2026)
+
+Implementa o método `claude/campvision-metodo-de-leitura.md` (projeto Tainacam).
+O que muda para o painel:
+
+### 9.1 `/api/estacoes/contexto` — titular e coautores do fundo
+
+Para a checagem de **autoria divergente** (§4.4), cada fundo devolvido deve trazer
+os coautores/sócios registrados:
+
+```json
+{"fundos": [{"codigo": "F002", "sigla": "BSG", "nome": "Barretto Segnini",
+             "coautores": ["Joaquim Barretto", "Francisco Segnini Jr."]}]}
+```
+
+Sem `coautores`, o CV2 compara só com o nome do fundo. Período de atuação
+(fundos de família, F015 × F016) ainda não é usado — fica para a v3.
+
+### 9.2 Preview para o site
+
+`ACERVOS_CAMP/_campvision/preview/<F0xx-P000x>/<código do documento>.jpg` —
+~3000 px, JPEG 85, sRGB, **já girado/desespelhado**. Fica fora da pasta do
+projeto para não entrar na contagem de imagens.
+
+### 9.3 `catalogacao/pacote_tainacan.json`
+
+Um item por documento: `codigo`, `serie`, `modo` (prancha|fotografia), `titulo`,
+`tipo_de_desenho`, `ano`, `ano_do_projeto`, `metadados`, `alternativas`, `onde`,
+`transcricao_integral`, `materiais_citados`, `foto`, `credito`, `preview`,
+`arquivos`, `publicavel`, `bloqueios`, `ressalvas`.
+
+O CV2 **não** inventa ID de taxonomia: o painel converte `serie`/`tipo_de_desenho`
+no ID do Tainacan e grava como **número** (`{"values": 26}`; string ou lista dá 400).
+Publicar só itens com `publicavel: true`.
+
+### 9.4 Aceite do lote
+
+`catalogacao/lotes/<lote>.json` ganha `aceite`: `contagem_origem_igual_saida`,
+`sem_autoria_divergente`, `orientacao_incerta_zerada`, `exif_conferido`,
+`publicavel` e `pendencias`. O `status` continua `pronto` quando o trabalho do CV2
+acabou; o painel usa `aceite.publicavel` + `erros_bloqueantes` para liberar.
+
+### 9.5 Erros novos em `erros.json`
+
+`autoria divergente` (bloqueia, agora contra titular + coautores),
+`duplicata` (exata ou perceptual, corrigir), `espelhado` (aviso, preview já
+corrigido), `orientação` (aviso: orientação incerta, conferir na folha de
+contatos), `metadado` com ressalvas de leitura (ex.: "ano lido 1985, a série
+indica 1983 — conferir no original").
