@@ -626,6 +626,13 @@ class Recebedor:
         if evento.falha:
             return falhar(f"leitura falhou: {evento.falha}")
         leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
+        # Leitura que não aconteceu (chave inválida, sem crédito, rede) NÃO pode
+        # virar "pronto": o painel receberia pranchas sem catalogação e o
+        # original seria apagado. Fica em erro; --refazer-lote relê só essas.
+        falhas = [c for c in por_codigo if c not in leituras or leituras[c].erro]
+        if falhas:
+            exemplo = leituras[falhas[0]].erro if falhas[0] in leituras else "sem leitura"
+            return falhar(f"leitura falhou em {len(falhas)} de {len(por_codigo)} documento(s): {exemplo[:160]}")
         for codigo_doc in por_codigo:
             if codigo_doc in leituras:
                 self.livro.anotar("lido", lote_id=ctx.lote_id, codigo_projeto=codigo,

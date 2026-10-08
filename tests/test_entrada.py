@@ -269,6 +269,34 @@ class TestPontaAPonta(Base):
 
 
 class TestFalhasNaoApagam(Base):
+    def test_api_recusou_nao_fica_pronto_nem_apaga(self):
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
+
+        class ClienteSemChave:
+            def chamar(self, *a, **k):
+                raise RuntimeError("Error code: 401 - invalid x-api-key")
+
+        r = self.recebedor()
+        r.cliente = ClienteSemChave()
+        self.config.max_tentativas_api = 1
+        with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+            res = r.processar(r.pendentes()[0])
+        self.assertEqual(res.status, entrada.ERRO)
+        self.assertIn("401", res.motivo)
+        self.assertTrue((pasta / "JPG" / "scan 001.jpg").exists(), "original não pode ser apagado")
+        status = json.loads((res.pasta_projeto / "status.json").read_text())
+        self.assertEqual(status["status"], "erro")
+        # Com a chave certa, refazer termina: não copia de novo, só lê.
+        entrada.Estado(self.estado).anotar(str(Path("F026/Fotos/Tarumã")), "refazer")
+        r2 = self.recebedor()
+        with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+            res2 = r2.processar(r2.pendentes()[0])
+        self.assertEqual(res2.status, entrada.PRONTO, res2.motivo)
+        self.assertEqual(res2.copiados, 0)
+        self.assertFalse(pasta.exists())
+
     def test_sem_painel_projeto_novo_espera(self):
         self.painel.reservar_ok = False
         pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
