@@ -123,7 +123,8 @@ FALTAM=()
 for par in exiftool:libimage-exiftool-perl pdftoppm:poppler-utils mount.cifs:cifs-utils tesseract:tesseract-ocr; do
   command -v "${par%%:*}" >/dev/null || FALTAM+=("${par##*:}")
 done
-if command -v tesseract >/dev/null && ! tesseract --list-langs 2>/dev/null | grep -qx por; then
+# O português do tesseract é pacote à parte: sem ele a orientação fica sempre incerta.
+if ! { command -v tesseract >/dev/null && tesseract --list-langs 2>/dev/null | grep -qx por; }; then
   FALTAM+=(tesseract-ocr-por)
 fi
 if [[ ${#FALTAM[@]} -gt 0 ]]; then

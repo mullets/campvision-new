@@ -151,6 +151,22 @@ class TestContexto(Base):
         self.assertEqual((c.fundo.codigo, c.serie, c.projeto, c.operador),
                          ("F023", "S04", "Teatro de Santos", "Beatriz"))
 
+    def test_info_com_nome_abreviado_usa_o_codigo_da_pasta(self):
+        # Caso real (08/10): info_projeto.json com fundo "Marklen Slan", pasta "F022 - MSL - ..."
+        pasta = self.scan("F022 - MSL - Marklen Slan", "P0001 - EXPO Brasil 1978 Cingapura - 1978", n=1)
+        (pasta / "info_projeto.json").write_text(json.dumps({"fundo": "Marklen Slan"}), encoding="utf-8")
+        c = entrada.contexto(entrada.Unidade(pasta, pasta.relative_to(self.scanners)),
+                             fundos.Tabela(fundos.EMBUTIDA))
+        self.assertEqual(c.problemas, [])
+        self.assertEqual(c.fundo.codigo, "F022")
+
+    def test_info_e_pasta_em_conflito_param(self):
+        pasta = self.scan("F022 - MSL", "Casa", n=1)
+        (pasta / "info_projeto.json").write_text(json.dumps({"fundo_codigo": "F026"}), encoding="utf-8")
+        c = entrada.contexto(entrada.Unidade(pasta, pasta.relative_to(self.scanners)),
+                             fundos.Tabela(fundos.EMBUTIDA))
+        self.assertTrue(any("conflito" in p for p in c.problemas))
+
     def test_pasta_de_teste_e_marcada(self):
         self.assertTrue(self.ctx("F026", "teste", "Casa").teste)
 

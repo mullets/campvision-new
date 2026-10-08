@@ -226,18 +226,24 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela) -> Contexto:
     partes = [p for p in unidade.relativo.parts if not _e_pasta_de_formato(p)]
 
     # Fundo: código/fundo explícito do manifesto, senão o caminho, sempre pela tabela.
+    # Fundo: pela TABELA, nunca chutado. O caminho (F022 - MSL - ...) e o campo
+    # explícito do manifesto/info são duas fontes; se só uma identifica, vale ela;
+    # se as duas identificam fundos DIFERENTES, é conflito e o lote para.
     explicito = _texto(dados, "fundo_codigo", "fundo")
-    if explicito:
-        ctx.fundo = tabela.identificar(explicito)
-        if ctx.fundo is None:
-            ctx.problemas.append(f"fundo '{explicito}' não está na tabela de autoridade")
-    if ctx.fundo is None and not ctx.problemas:
-        for parte in partes:
-            ctx.fundo = tabela.identificar(parte)
-            if ctx.fundo:
-                break
-        if ctx.fundo is None:
-            ctx.problemas.append("não achei o fundo (código F000, sigla ou nome) no caminho")
+    pelo_explicito = tabela.identificar(explicito) if explicito else None
+    pelo_caminho = None
+    for parte in partes:
+        pelo_caminho = tabela.identificar(parte)
+        if pelo_caminho:
+            break
+    if pelo_explicito and pelo_caminho and pelo_explicito is not pelo_caminho:
+        ctx.problemas.append(f"conflito de fundo: info/manifesto diz '{explicito}' "
+                             f"({pelo_explicito.codigo}), a pasta diz {pelo_caminho.codigo}")
+    ctx.fundo = pelo_explicito or pelo_caminho
+    if ctx.fundo is None:
+        ctx.problemas.append(
+            f"fundo '{explicito}' não está na tabela de autoridade e a pasta não traz código F000"
+            if explicito else "não achei o fundo (código F000, sigla ou nome) no caminho")
 
     # Série: manifesto, senão a pasta de material no caminho.
     ctx.serie = _texto(dados, "serie").upper()
