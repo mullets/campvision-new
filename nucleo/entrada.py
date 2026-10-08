@@ -721,10 +721,14 @@ class Recebedor:
                 proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
             ) or ""
             if not codigo:
+                if getattr(self.painel, "pendente_decisao", None) is not None:   # espera, não falha: uma pessoa decide no painel
+                    return None, "", f"aguardando decisão no painel (decisão {self.painel.pendente_decisao}): já existe projeto parecido neste fundo"
                 return None, "", f"painel não reservou o projeto ({self.painel.ultimo_erro or 'sem resposta'})"
             # CV-27: número P nunca se reusa. Se o painel devolveu um P que já é de
             # OUTRA pasta no acervo, não mistura os dois projetos: espera correção.
-            if codigo.upper() in usados:
+            # EXCEÇÃO: o painel perguntou a uma pessoa e ela disse "é o mesmo projeto" (existente=true): o código É de um projeto que já
+            # existe, e é para o material entrar nele. A trava continua valendo para qualquer outra resposta.
+            if codigo.upper() in usados and not getattr(self.painel, "reserva_existente", False):
                 return None, "", (f"painel devolveu {codigo}, que já é outro projeto no acervo "
                                   f"(maior P local: P{maior:04d}) — corrigir a numeração no painel")
             self.estado.guardar_codigo(ctx.fundo.codigo, ctx.projeto, codigo)

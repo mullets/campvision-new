@@ -17,6 +17,7 @@ class _Servidor:
     def __init__(self):
         self.pedidos: list[tuple] = []
         self.aceitar_aviso = True
+        self.reserva = None          # None = 201 com um código novo; ou (status, corpo) para simular a pergunta do painel
         dono = self
 
         class H(BaseHTTPRequestHandler):
@@ -38,7 +39,10 @@ class _Servidor:
                 corpo = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 dono.pedidos.append(("POST", self.path, corpo))
                 if self.path.endswith("/reservar"):
-                    self._r(201, {"codigo": "F026-P0042"})
+                    if dono.reserva:
+                        self._r(*dono.reserva)
+                    else:
+                        self._r(201, {"codigo": "F026-P0042"})
                 elif self.path.endswith("/aviso") and not dono.aceitar_aviso:
                     self._r(503, {})
                 else:
@@ -72,6 +76,32 @@ class TestPainel(unittest.TestCase):
         self.assertEqual((corpo["fundo_codigo"], corpo["chave_reserva"], corpo["ano"]),
                          ("F026", "a" * 32, "1972"))
         self.assertTrue(self.p.heartbeat({"estacao_id": "campvision2"}))
+
+    def test_painel_pergunta_se_e_o_mesmo_projeto_o_cv2_espera_e_tenta_de_novo_com_a_mesma_chave(self):
+        self.srv.reserva = (202, {"pendente": True, "decisao_id": 7, "mensagem": "Aguardando decisão no painel"})
+        self.assertIsNone(self.p.reservar("F026", "Tarumã - Residência", "c" * 32))
+        self.assertEqual(self.p.pendente_decisao, 7)
+        self.assertIn("aguardando decisão", self.p.ultimo_erro)
+        self.assertFalse(self.p.reserva_existente)
+        self.assertIsNone(self.p.reservar("F026", "Tarumã - Residência", "c" * 32))          # ainda esperando
+        self.assertEqual([p[2]["chave_reserva"] for p in self.srv.pedidos if p[0] == "POST"], ["c" * 32, "c" * 32])   # a MESMA chave
+        # a pessoa decidiu "é o mesmo": o painel devolve o código de um projeto que JÁ existe
+        self.srv.reserva = (200, {"codigo": "F026-P0001", "existente": True, "decisao_id": 7})
+        self.assertEqual(self.p.reservar("F026", "Tarumã - Residência", "c" * 32), "F026-P0001")
+        self.assertIsNone(self.p.pendente_decisao)
+        self.assertTrue(self.p.reserva_existente)
+
+    def test_reserva_comum_limpa_o_estado_da_decisao(self):
+        self.srv.reserva = (202, {"pendente": True, "decisao_id": 3})
+        self.p.reservar("F026", "x", "d" * 32)
+        self.srv.reserva = None
+        self.assertEqual(self.p.reservar("F026", "y", "e" * 32), "F026-P0042")
+        self.assertEqual((self.p.pendente_decisao, self.p.reserva_existente), (None, False))
+
+    def test_202_sem_pendente_continua_sendo_so_uma_resposta_sem_codigo(self):
+        self.srv.reserva = (202, {"ok": True})
+        self.assertIsNone(self.p.reservar("F026", "x", "f" * 32))
+        self.assertIsNone(self.p.pendente_decisao)
 
     def test_aviso_perdido_e_reenviado(self):
         self.srv.aceitar_aviso = False

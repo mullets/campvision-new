@@ -24,13 +24,25 @@ class PainelFalso:
     url = "http://painel"
     ultimo_ok = ultimo_erro = ""
 
-    def __init__(self, reservar_ok: bool = True):
+    pendente_decisao = None
+    reserva_existente = False
+
+    def __init__(self, reservar_ok: bool = True, decisao: int | None = None, codigo_fixo: str = ""):
         self.reservar_ok = reservar_ok
+        self.decisao = decisao           # o painel perguntou a uma pessoa: devolve None e fica "aguardando decisão"
+        self.codigo_fixo = codigo_fixo   # a pessoa disse "é o mesmo": devolve o código de um projeto que JÁ existe
         self.reservas: dict[str, str] = {}
         self.avisos: list[tuple] = []
         self.heartbeats: list[dict] = []
 
     def reservar(self, fundo_codigo, titulo, chave_reserva, **extra):
+        self.pendente_decisao, self.reserva_existente = None, False
+        if self.decisao is not None:
+            self.pendente_decisao = self.decisao
+            return None
+        if self.codigo_fixo:
+            self.reserva_existente = True
+            return self.codigo_fixo
         if not self.reservar_ok:
             return None
         if chave_reserva not in self.reservas:
@@ -418,6 +430,31 @@ class TestFalhasNaoApagam(Base):
         self.assertEqual(r.status, entrada.AGUARDANDO)
         self.assertTrue((pasta / "JPG" / "scan 001.jpg").exists())
         self.assertEqual(list((self.acervo / "F026 - SBU Sami Bussab" / "01 - Projetos").iterdir()), [])
+
+    def test_painel_perguntando_se_e_o_mesmo_projeto_espera_com_motivo_claro_e_nao_cria_pasta(self):
+        self.painel.decisao = 7
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
+        [r] = self.rodar()
+        self.assertEqual(r.status, entrada.AGUARDANDO)
+        self.assertIn("aguardando decisão no painel (decisão 7)", r.motivo)
+        self.assertNotIn("não reservou", r.motivo)
+        self.assertTrue((pasta / "JPG" / "scan 001.jpg").exists())                      # nada foi apagado nem movido
+        self.assertEqual(list((self.acervo / "F026 - SBU Sami Bussab" / "01 - Projetos").iterdir()), [])
+
+    def test_decidido_que_e_o_mesmo_projeto_o_material_entra_na_pasta_que_ja_existe_sem_criar_outra(self):
+        self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
+        [r] = self.rodar()
+        self.assertEqual(r.status, entrada.PRONTO, r.motivo)
+        base = self.acervo / "F026 - SBU Sami Bussab" / "01 - Projetos"
+        [existente] = list(base.iterdir())                                              # "F026-P0001 - Tarumã"
+        # outro lote chega com NOME DIFERENTE; a pessoa decidiu "é o mesmo": o painel devolve o código do que já existe
+        self.painel.codigo_fixo = "F026-P0001"
+        self.scan("F026", "Fotos", "Taruma Residencia Familia", n=2, formatos=("jpg",))
+        [r2] = self.rodar()
+        self.assertEqual(r2.status, entrada.PRONTO, r2.motivo)
+        self.assertEqual(list(base.iterdir()), [existente])                             # UMA pasta só: nada de "F026-P0001 - Taruma Residencia..."
+        self.assertGreaterEqual(r2.copiados, 1)                                          # o lote novo copiou algo...
+        self.assertEqual(len([p for p in (existente / "03 - Fotografias").rglob("*.jpg")]), 1 + r2.copiados)   # ...e TUDO entrou na pasta que já existia
 
     def test_exif_nao_conferido_vira_erro_e_nao_apaga(self):
         pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))

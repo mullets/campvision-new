@@ -32,6 +32,11 @@ class Painel:
         self.fila = (pasta_estado / "painel_pendentes.json") if pasta_estado else None
         self.ultimo_erro = ""
         self.ultimo_ok: str = ""
+        # Resposta do /reservar (contrato: docs/contrato-painel.md do painel): o painel PERGUNTA a uma pessoa quando já existe projeto
+        # parecido no fundo. `pendente_decisao` = número da decisão enquanto espera (None quando não); `reserva_existente` = a pessoa
+        # disse "é o mesmo" e o código devolvido é de um projeto que JÁ existe.
+        self.pendente_decisao: int | None = None
+        self.reserva_existente: bool = False
 
     @property
     def ligado(self) -> bool:
@@ -82,6 +87,13 @@ class Painel:
         corpo = {"fundo_codigo": fundo_codigo, "titulo": titulo, "chave_reserva": chave_reserva}
         corpo.update({k: v for k, v in extra.items() if v not in (None, "")})
         status, dados = self._chamar("POST", "/api/estacoes/projetos/reservar", corpo)
+        self.pendente_decisao, self.reserva_existente = None, False
+        if status == 202 and isinstance(dados, dict) and dados.get("pendente"):
+            # NÃO é erro: o painel achou projeto parecido no mesmo fundo e abriu uma decisão. Espera e tenta de novo com a MESMA chave.
+            self.pendente_decisao = int(dados.get("decisao_id") or 0)
+            self.ultimo_erro = "aguardando decisão no painel: já existe projeto parecido neste fundo"
+            _log.info("Reserva aguardando decisão no painel (decisão %s)", self.pendente_decisao)
+            return None
         if status not in (200, 201) or not isinstance(dados, dict):
             if status:
                 _log.warning("Reserva recusada (%s): %s", status, dados)
@@ -89,6 +101,9 @@ class Painel:
         codigo = dados.get("codigo") or (dados.get("projeto") or {}).get("codigo")
         if not codigo and dados.get("numero"):
             codigo = f"{fundo_codigo}-P{int(dados['numero']):04d}"
+        if codigo and dados.get("existente"):
+            self.reserva_existente = True
+            _log.info("Painel: %s já existia (decisão %s): o material entra nele", codigo, dados.get("decisao_id"))
         return str(codigo) if codigo else None
 
     def heartbeat(self, dados: dict) -> bool:
