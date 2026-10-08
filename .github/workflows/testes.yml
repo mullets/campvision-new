@@ -15,20 +15,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Instalar programas do sistema (os mesmos do instalar.sh do servidor)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils libimage-exiftool-perl
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
           pip install Pillow openpyxl
       - name: Rodar os testes
-        run: |
-          set +e
-          python -m unittest discover -s tests -t . -v > saida.txt 2>&1
-          codigo=$?
-          if [ $codigo -ne 0 ]; then
-            resumo=$(grep -n -E "^(FAIL|ERROR):|Error|Traceback|File \"/home/runner" saida.txt | head -40 | cut -c1-220 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-            echo "::error title=falhas::$resumo"
-            fim=$(tail -30 saida.txt | cut -c1-220 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-            echo "::error title=fim do log::$fim"
-          fi
-          tail -5 saida.txt
-          exit $codigo
+        run: python -m unittest discover -s tests -t . -v
