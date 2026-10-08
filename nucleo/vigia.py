@@ -731,7 +731,22 @@ class Vigia:
             self.estado.situacao = "processando"
             self.estado.projeto_atual = str(unidade.relativo)
             comeco = time.monotonic()
-            r = recebedor.processar(unidade, self.estado, self.cancelar)
+            try:
+                r = recebedor.processar(unidade, self.estado, self.cancelar)
+            except OSError as erro:
+                # QNAP somente leitura, cheio ou caído: não derruba o serviço
+                # (antes reiniciava em loop). Para a rodada e tenta de novo depois.
+                self.estado.situacao = "QNAP com problema"
+                self.estado.anotar(f"{unidade.relativo}: {erro}"[:120])
+                _log.error("Disco/rede ao processar %s: %s — rodada interrompida, nada apagado.",
+                           unidade.relativo, erro)
+                break
+            except Exception as erro:  # noqa: BLE001 - um lote ruim não pode derrubar o vigia
+                _log.exception("Lote %s falhou: %s", unidade.relativo, erro)
+                from . import entrada as _e
+                _e.Estado(self.pasta_estado).anotar(unidade.chave, _e.ERRO, motivo=str(erro)[:300],
+                                                   assinatura=unidade.assinatura())
+                continue
             self.estado.fila = max(0, self.estado.fila - 1)
             if r.status == mod_entrada.AGUARDANDO:
                 continue

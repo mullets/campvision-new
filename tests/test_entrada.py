@@ -421,6 +421,17 @@ class TestVigia(Base):
         self.assertTrue((self.estado / "estado.json").exists())
         self.assertEqual(json.loads((self.estado / "estado.json").read_text())["projetos_hoje"], 1)
 
+    def test_qnap_somente_leitura_nao_derruba_o_servico(self):
+        self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
+        v = vigia.Vigia(self.config, ClienteFalso([resposta_padrao()]), self.estado, painel=self.painel)
+        erro = OSError(30, "Read-only file system")
+        with mock.patch.object(entrada.estrutura, "garantir_fundo", side_effect=erro), \
+                mock.patch.object(entrada.mod_fundos, "carregar", return_value=fundos.Tabela(fundos.EMBUTIDA)):
+            self.assertEqual(v.uma_rodada(), 0)  # não levanta
+        self.assertEqual(v.estado.situacao, "vigiando")
+        self.assertIn("Read-only", " ".join(v.estado.ultimas_linhas))
+        self.assertTrue((self.scanners / "F026" / "Fotos" / "Tarumã" / "JPG" / "scan 001.jpg").exists())
+
     def test_varredura_antiga_desligada_quando_ha_entrada(self):
         self.assertFalse(self.config.varre_pasta_vigiada)
         self.assertTrue(Config(pasta_vigiada="/x").varre_pasta_vigiada)
