@@ -133,7 +133,7 @@ class TestContexto(Base):
     def test_padrao_da_estacao_windows(self):
         c = self.ctx("F010 - Francisco Segnini Jr", "FSJ-AAbreuChacaraAnaliaFranco-1989")
         self.assertEqual((c.fundo.codigo, c.projeto, c.ano), ("F010", "AAbreuChacaraAnaliaFranco", "1989"))
-        self.assertEqual(c.serie, "S99")  # sem pasta de material: não identificado
+        self.assertEqual(c.serie, "S01")  # sem pasta de material: padrão desenhos e pranchas
 
     def test_codigo_e_nome_em_conflito_nao_chuta(self):
         c = self.ctx("F005 - Chu Ming", "Casa")  # o certo é F006
@@ -271,7 +271,7 @@ class TestPontaAPonta(Base):
         [r] = self.rodar()
         self.assertEqual(r.status, entrada.PRONTO, r.motivo)
         projeto = r.pasta_projeto
-        self.assertTrue((projeto / "02 - Documentos textuais" / "F026-P0001-0000-S02-D00001.pdf").exists())
+        self.assertEqual(len(list((projeto / "02 - Documentos textuais").glob("F026-P0001-*-S02-D00001.pdf"))), 1)
 
     def test_formato_desconhecido_fica_na_entrada(self):
         pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
@@ -323,6 +323,38 @@ class TestMetodoNoRecebimento(Base):
         cabecalho = (cat / "catalogacao.csv").read_text(encoding="utf-8-sig").splitlines()[0]
         for coluna in ("Autoria divergente", "Duplicata de", "Orientação incerta", "Transcrição integral"):
             self.assertIn(coluna, cabecalho)
+
+
+class TestSerieEAno(Base):
+    def test_sem_pasta_de_material_vai_para_desenhos_e_pranchas(self):
+        c_pasta = self.scan("F026 - Sami Bussab", "T011_Clube Esportivo Sirio", n=1)
+        c = entrada.contexto(entrada.Unidade(c_pasta, c_pasta.relative_to(self.scanners)),
+                             fundos.Tabela(fundos.EMBUTIDA))
+        self.assertEqual((c.serie, c.serie_deduzida), ("S01", True))
+
+    def test_ano_0000_vira_o_ano_lido_e_reclassificar_troca_serie(self):
+        pasta = self.scan("F026", "Clube Sirio", n=2, formatos=("tif", "jpg"))
+        r = self.recebedor()
+        r.cliente = ClienteFalso([resposta_padrao(data={"valor": "14.06.75", "confianca": 0.9})])
+        with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+            res = r.processar(r.pendentes()[0])
+        self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+        nomes = sorted(p.name for p in (res.pasta_projeto / "01 - Desenhos e pranchas").iterdir())
+        self.assertEqual(nomes[0], "F026-P0001-1975-S01-D00001.jpg", nomes)
+        mapa = (res.pasta_projeto / "catalogacao" / "mapa_origem.json").read_text()
+        self.assertNotIn("-0000-", mapa)
+        self.assertIn("1975", (res.pasta_projeto / "catalogacao" / "pacote_tainacan.json").read_text())
+        self.assertTrue(any(l["acao"] == "refeito" for l in Livro(self.acervo).todas()))
+        # À mão: manda tudo para fotografias e volta
+        from nucleo import renomear
+        n = renomear.reclassificar(self.acervo, self.estado, "F026-P0001", serie="S03",
+                                   livro=Livro(self.acervo))
+        self.assertEqual(n, 4)
+        self.assertTrue((res.pasta_projeto / "03 - Fotografias" / "F026-P0001-1975-S03-D00002.tif").exists())
+        self.assertFalse(any((res.pasta_projeto / "01 - Desenhos e pranchas").iterdir()))
+        leituras = json.loads((res.pasta_projeto / "catalogacao" / "leituras.json").read_text())
+        self.assertTrue(all("-S03-" in l["arquivo"] for l in leituras))
 
 
 class TestFalhasNaoApagam(Base):

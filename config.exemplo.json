@@ -46,6 +46,7 @@
   "pasta_entrada": "",
   "pasta_acervo_final": "",
   "entrada_quieto_minutos": 10,
+  "serie_padrao": "S01",
   "entrada_exigir_exif": true,
   "apagar_original_apos_pronto": true,
   "processar_pasta_vigiada": null,

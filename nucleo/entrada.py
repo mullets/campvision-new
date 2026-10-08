@@ -199,6 +199,7 @@ class Contexto:
     enviado_em: str = ""
     lote_id: str = ""
     teste: bool = False
+    serie_deduzida: bool = False
     problemas: list[str] = field(default_factory=list)
 
     def como_dict(self) -> dict:
@@ -215,7 +216,7 @@ def _texto(dados: dict, *chaves: str) -> str:
     return ""
 
 
-def contexto(unidade: Unidade, tabela: mod_fundos.Tabela) -> Contexto:
+def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S01") -> Contexto:
     """Monta o contexto: manifesto/info da estação > caminho da pasta."""
     ctx = Contexto()
     manifesto = ler_json(unidade.pasta / "manifesto.json", {}) or {}
@@ -260,7 +261,12 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela) -> Contexto:
             continue
         restantes.append(parte)
     if not ctx.serie:
-        ctx.serie = "S99"
+        # Sem pasta de material nem manifesto: a estação de fotografia/VueScan
+        # manda foto; o resto (Contex, Universal) manda prancha. "99 - Não
+        # identificado" só se o config pedir — mandava tudo para lá.
+        estacao = estrutura.normalizar(f"{_texto(dados, 'tipo_estacao')} {_texto(dados, 'estacao')}")
+        ctx.serie = "S03" if re.search(r"\b(foto|vuescan|camera)", estacao) else serie_padrao
+        ctx.serie_deduzida = True
 
     # Projeto: código explícito, nome do manifesto/info, senão a pasta mais funda.
     ctx.codigo = _texto(dados, "codigo", "projeto_codigo").upper()
@@ -597,7 +603,7 @@ class Recebedor:
         assinatura = unidade.assinatura()
         origem_rel = lambda p: str(Path("100 - Scanners") / unidade.relativo / p.relative_to(unidade.pasta))  # noqa: E731
 
-        ctx = contexto(unidade, self.tabela)
+        ctx = contexto(unidade, self.tabela, self.config.serie_padrao)
         if ctx.problemas:
             motivo = "; ".join(ctx.problemas)
             self.livro.anotar("erro", arquivo_origem=str(unidade.relativo), detalhe=motivo)
@@ -647,6 +653,11 @@ class Recebedor:
                 lote["nao_suportados"].append(origem_rel(a))
                 erros_lote.append({"arquivo": a.name, "categoria": "metadado", "gravidade": "aviso",
                                    "origem": "CAMP Vision", "detalhe": "formato não suportado — ficou na entrada"})
+        if ctx.serie_deduzida:
+            erros_lote.append({"arquivo": "", "categoria": "metadado", "gravidade": "aviso",
+                               "origem": "CAMP Vision",
+                               "detalhe": f"sem pasta de material: série {ctx.serie} deduzida "
+                                          f"({estrutura.SERIES[ctx.serie]}); corrigir com --reclassificar"})
         documentos = formatos.agrupar(suportados)
         proximo = estrutura.proximo_documento(pasta)
         pasta_serie = pasta / estrutura.SERIES[ctx.serie]
@@ -766,6 +777,34 @@ class Recebedor:
         enriquecer(leituras, preparos, ctx.fundo)
         mod_planilha.escrever_json(list(leituras.values()), catalogacao / "leituras.json")
         mod_planilha.escrever_csv(list(leituras.values()), catalogacao / "catalogacao.csv")
+
+        # Ano 0000 no código porque a pasta não dizia; a leitura achou o ano do
+        # projeto (moda das datas escritas, §4.2) → renomeia o projeto inteiro.
+        from collections import Counter
+
+        from . import renomear as mod_renomear
+
+        anos = Counter(l.ano_do_projeto for l in leituras.values() if l.ano_do_projeto)
+        if not anos:  # sem consolidação: a mesma regra (moda confirmada) sobre o ano lido
+            anos = Counter(l.valores.get("ano") for l in leituras.values()
+                           if re.fullmatch(r"\d{4}", l.valores.get("ano") or ""))
+        ano_grupo = ""
+        if anos:
+            valor, vezes = anos.most_common(1)[0]
+            if vezes >= 2 or len(anos) == 1:
+                ano_grupo = valor
+        codigos = {Path(v["destino"]).stem for v in mapa.values()}
+        trocas = {c: mod_renomear.novo_codigo(c, ano=ano_grupo) for c in codigos if "-0000-" in c}
+        if ano_grupo and trocas:
+            gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)  # o renomear reescreve
+            movidos = mod_renomear.renomear(pasta, self.raiz_final, self.pasta_estado, trocas,
+                                            self.livro, f"ano do projeto {ano_grupo} lido nas pranchas")
+            arquivados = [(o, movidos.get(d, d), trocas.get(c, c), sh) for o, d, c, sh in arquivados]
+            por_codigo = {trocas.get(c, c): [movidos.get(v, v) for v in vs] for c, vs in por_codigo.items()}
+            mapa = ler_json(mapa_caminho, {}) or {}
+            preparos = ler_json(preparo_caminho, {}) or {}
+            leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
+            lote = ler_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
 
         # ---- 6. EXIF/XMP completo em todas as versões
         itens = []

@@ -459,6 +459,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="Onde estão os leituras.json (padrão: acervo final)")
     p.add_argument("--reconferir-tipo", action="store_true",
                    help="Recalcula o tipo de desenho e compara com o gravado (método §9.2)")
+    p.add_argument("--reclassificar", metavar="F0xx-P000x",
+                   help="Troca a série (--serie) e/ou o ano (--ano) dos documentos de um projeto")
+    p.add_argument("--serie", metavar="S01", help="Série nova para --reclassificar")
+    p.add_argument("--de", metavar="S99", help="Só os documentos desta série (padrão: todos)")
+    p.add_argument("--ano", metavar="AAAA", help="Ano novo para --reclassificar")
     p.add_argument("--livro-legado", action="store_true",
                    help="Leva o histórico antigo (eventos.jsonl) para o livro de registro")
     p.add_argument("--monitor", action="store_true",
@@ -514,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -554,6 +559,19 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_historico(config, args.historico)
     if args.livro_legado:
         return _comando_livro_legado(config)
+    if args.reclassificar:
+        from nucleo import renomear as mod_renomear
+        from nucleo.livro import Livro
+
+        try:
+            n = mod_renomear.reclassificar(
+                Path(config.raiz_final), PASTA_ESTADO, args.reclassificar, args.serie, args.de,
+                args.ano, Livro(Path(config.raiz_final)))
+        except (OSError, ValueError) as erro:
+            print(f"Não reclassifiquei: {erro}", file=sys.stderr)
+            return 1
+        print(f"{n} arquivo(s) renomeado(s) em {args.reclassificar}.")
+        return 0
     if args.backtest or args.reconferir_tipo:
         return _comando_backtest(config, args.backtest, args.contra, args.reconferir_tipo)
     if args.refazer_lote:

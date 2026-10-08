@@ -15,7 +15,7 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-10-08-01"
+VERSAO_BUILD = "2026-10-08-02"
 
 _log = logging.getLogger("cv2.config")
 
@@ -137,6 +137,9 @@ class Config:
     # Pasta só é considerada completa depois de este tempo sem mudança — a
     # menos que traga manifesto.json ou status.json "enviado_windows".
     entrada_quieto_minutos: int = 10
+    # Série quando a pasta do scanner não diz o material: S01 (desenhos e
+    # pranchas), que é o grosso do acervo. Estação de foto vira S03 sozinha.
+    serie_padrao: str = "S01"
     # Lote só vira "pronto" com o EXIF conferido em TODAS as cópias.
     entrada_exigir_exif: bool = True
     # Depois de "pronto" (cópia conferida por hash + EXIF), apaga o original
