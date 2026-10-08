@@ -218,8 +218,10 @@ class TestPontaAPonta(Base):
         for nome in estrutura.SERIES.values():
             self.assertTrue((projeto / nome).is_dir(), nome)
         self.assertTrue((projeto / "README.md").exists())
-        # Nomenclatura CAMP, TIF e JPG irmãos com o mesmo código
-        nomes = sorted(p.name for p in serie.iterdir())
+        # Nomenclatura CAMP: mesmo código, TIF e JPG em subpastas por formato
+        self.assertEqual(sorted(p.name for p in serie.iterdir()), ["JPG", "TIF"])
+        self.assertTrue((serie / "TIF" / "F026-P0001-1972-S01-D00001.tif").exists())
+        nomes = sorted(p.name for p in serie.rglob("*") if p.is_file())
         self.assertEqual(nomes, [
             "F026-P0001-1972-S01-D00001.jpg", "F026-P0001-1972-S01-D00001.tif",
             "F026-P0001-1972-S01-D00002.jpg", "F026-P0001-1972-S01-D00002.tif",
@@ -260,7 +262,7 @@ class TestPontaAPonta(Base):
         self.assertEqual(r.status, entrada.PRONTO, r.motivo)
         self.assertEqual(len(self.painel.reservas), 1)
         projeto = next((self.acervo / "F026 - SBU Sami Bussab" / "01 - Projetos").iterdir())
-        self.assertTrue((projeto / "04 - Negativos" / "F026-P0001-0000-S04-D00003.dng").exists())
+        self.assertTrue((projeto / "04 - Negativos" / "DNG" / "F026-P0001-0000-S04-D00003.dng").exists())
         status = json.loads((projeto / "status.json").read_text())
         self.assertEqual(status["folhas"], 3)
         self.assertEqual(len(status["lotes_prontos"]), 2)
@@ -273,7 +275,7 @@ class TestPontaAPonta(Base):
         [r] = self.rodar()
         self.assertEqual(r.copiados, 0)  # mesmo conteúdo: já está no acervo
         projeto = next((self.acervo / "F026 - SBU Sami Bussab" / "01 - Projetos").iterdir())
-        self.assertEqual(len(list((projeto / "03 - Fotografias").iterdir())), 2)
+        self.assertEqual(len([p for p in (projeto / "03 - Fotografias").rglob("*") if p.is_file()]), 2)
 
     def test_pdf_e_lido_e_vira_documento(self):
         pasta = self.scanners / "F026" / "Documentos" / "Tarumã"
@@ -282,7 +284,7 @@ class TestPontaAPonta(Base):
         [r] = self.rodar()
         self.assertEqual(r.status, entrada.PRONTO, r.motivo)
         projeto = r.pasta_projeto
-        self.assertEqual(len(list((projeto / "02 - Documentos textuais").glob("F026-P0001-*-S02-D00001.pdf"))), 1)
+        self.assertEqual(len(list((projeto / "02 - Documentos textuais" / "PDF").glob("F026-P0001-*-S02-D00001.pdf"))), 1)
 
     def test_formato_desconhecido_fica_na_entrada(self):
         pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
@@ -353,7 +355,7 @@ class TestSerieEAno(Base):
                 mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
             res = r.processar(r.pendentes()[0])
         self.assertEqual(res.status, entrada.PRONTO, res.motivo)
-        nomes = sorted(p.name for p in (res.pasta_projeto / "01 - Desenhos e pranchas").iterdir())
+        nomes = sorted(p.name for p in (res.pasta_projeto / "01 - Desenhos e pranchas").rglob("*") if p.is_file())
         self.assertEqual(nomes[0], "F026-P0001-1975-S01-D00001.jpg", nomes)
         mapa = (res.pasta_projeto / "catalogacao" / "mapa_origem.json").read_text()
         self.assertNotIn("-0000-", mapa)
@@ -364,15 +366,15 @@ class TestSerieEAno(Base):
         n = renomear.reclassificar(self.acervo, self.estado, "F026-P0001", serie="S03",
                                    livro=Livro(self.acervo))
         self.assertEqual(n, 4)
-        self.assertTrue((res.pasta_projeto / "03 - Fotografias" / "F026-P0001-1975-S03-D00002.tif").exists())
-        self.assertFalse(any((res.pasta_projeto / "01 - Desenhos e pranchas").iterdir()))
+        self.assertTrue((res.pasta_projeto / "03 - Fotografias" / "TIF" / "F026-P0001-1975-S03-D00002.tif").exists())
+        self.assertFalse(any(p.is_file() for p in (res.pasta_projeto / "01 - Desenhos e pranchas").rglob("*")))
         leituras = json.loads((res.pasta_projeto / "catalogacao" / "leituras.json").read_text())
         self.assertTrue(all("-S03-" in l["arquivo"] for l in leituras))
         # Código e nome do projeto (caso F022-P0007 "P0001" → F022-P0001 "EXPO Brasil")
         renomear.reclassificar(self.acervo, self.estado, "F026-P0001", codigo_novo="F026-P0009",
                                nome_novo="Clube Sírio", livro=Livro(self.acervo))
         nova = res.pasta_projeto.parent / "F026-P0009 - Clube Sírio"
-        self.assertTrue((nova / "03 - Fotografias" / "F026-P0009-1975-S03-D00001.jpg").exists())
+        self.assertTrue((nova / "03 - Fotografias" / "JPG" / "F026-P0009-1975-S03-D00001.jpg").exists())
         self.assertFalse(res.pasta_projeto.exists())
         self.assertIn('"F026-P0009"', (nova / "status.json").read_text())
         self.assertIn("F026-P0009", (nova / "info_projeto.json").read_text())
@@ -450,7 +452,7 @@ class TestExifDeVerdade(Base):
         self.assertEqual(r.status, entrada.PRONTO, r.motivo)
         # EXIF muda o hash da cópia; o original mesmo assim tem que ser apagado
         self.assertFalse(pasta.exists(), "original deveria ter sido apagado")
-        arquivos = sorted((r.pasta_projeto / "01 - Desenhos e pranchas").iterdir())
+        arquivos = sorted(p for p in (r.pasta_projeto / "01 - Desenhos e pranchas").rglob("*") if p.is_file())
         self.assertEqual({a.suffix for a in arquivos}, {".jpg", ".tif", ".pdf"})
         for arquivo in arquivos:
             dados = json.loads(subprocess.run(

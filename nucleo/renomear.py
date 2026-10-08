@@ -66,7 +66,7 @@ def renomear(pasta_projeto: Path, raiz_final: Path, pasta_estado: Path,
         if not novo:
             continue
         serie = novo.split("-")[3]
-        destino = pasta_projeto / estrutura.SERIES.get(serie, arquivo.parent.name) / f"{novo}{arquivo.suffix}"
+        destino = estrutura.destino_documento(pasta_projeto, serie, novo, arquivo.suffix)
         if destino.exists():
             raise FileExistsError(f"{destino.name} já existe — renomeação abortada")
         destino.parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +119,54 @@ def renomear(pasta_projeto: Path, raiz_final: Path, pasta_estado: Path,
                          nome_original=antigo.name, detalhe=motivo)
     _log.info("Projeto %s: %d arquivo(s) renomeado(s) (%s).", codigo_projeto, len(movidos), motivo)
     return movidos
+
+
+def organizar_formatos(raiz_final: Path, pasta_estado: Path, livro=None) -> int:
+    """Move os arquivos já no acervo para <série>/<FORMATO>/ (TIF/, JPG/...).
+
+    Mesmo código, só muda a pasta; catalogacao/ e status são reescritos. Nada é apagado.
+    """
+    total = 0
+    for fundo in sorted(raiz_final.iterdir()) if raiz_final.is_dir() else []:
+        projetos = fundo / estrutura.PASTA_PROJETOS
+        if not projetos.is_dir():
+            continue
+        for pasta in sorted(p for p in projetos.iterdir() if p.is_dir()):
+            movidos: dict[Path, Path] = {}
+            for arquivo in sorted(pasta.rglob("*")):
+                if not arquivo.is_file() or "catalogacao" in arquivo.relative_to(pasta).parts:
+                    continue
+                achado = estrutura.CODIGO_DOCUMENTO.match(arquivo.stem)
+                if not achado:
+                    continue
+                destino = estrutura.destino_documento(pasta, achado.group(4).upper(), arquivo.stem, arquivo.suffix)
+                if destino == arquivo or destino.exists():
+                    continue
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(arquivo, destino)
+                movidos[arquivo] = destino
+            if not movidos:
+                continue
+
+            def rel(p: Path) -> str:
+                try:
+                    return str(p.relative_to(raiz_final))
+                except ValueError:
+                    return str(p)
+
+            trocas = [(rel(a), rel(b)) for a, b in movidos.items()]
+            for arquivo in [*(pasta / "catalogacao").rglob("*"), pasta / "campvision2_checkpoint.jsonl",
+                            pasta / "status.json"]:
+                if arquivo.is_file() and arquivo.suffix in (".json", ".jsonl", ".csv", ".txt"):
+                    _trocar_texto(arquivo, trocas)
+            if livro is not None:
+                codigo_projeto = estrutura.codigo_da_pasta(pasta)
+                for antigo, atual in movidos.items():
+                    livro.anotar("refeito", codigo_projeto=codigo_projeto, codigo_documento=atual.stem,
+                                 arquivo_origem=rel(antigo), arquivo_destino=rel(atual),
+                                 nome_original=antigo.name, detalhe="separado por formato")
+            total += len(movidos)
+    return total
 
 
 def achar_projeto(raiz_final: Path, codigo: str) -> Path | None:

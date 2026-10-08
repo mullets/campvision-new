@@ -518,6 +518,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--proximo-p", metavar="F0xx", help="Mostra o próximo número P livre no acervo")
     p.add_argument("--backtest-programa", metavar="CURADO.csv",
                    help="Back-test das sugestões de programa/natureza (colunas titulo, programa, natureza)")
+    p.add_argument("--organizar-formatos", action="store_true",
+                   help="Move o que já está no acervo para <série>/TIF, JPG, DNG… (sem apagar nada)")
     p.add_argument("--livro-legado", action="store_true",
                    help="Leva o histórico antigo (eventos.jsonl) para o livro de registro")
     p.add_argument("--monitor", action="store_true",
@@ -573,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -613,6 +615,13 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_historico(config, args.historico)
     if args.livro_legado:
         return _comando_livro_legado(config)
+    if args.organizar_formatos:
+        from nucleo import renomear as _ren
+        from nucleo.livro import Livro
+
+        n = _ren.organizar_formatos(Path(config.raiz_final), PASTA_ESTADO, Livro(Path(config.raiz_final)))
+        print(f"{n} arquivo(s) movido(s) para a subpasta do formato (TIF/, JPG/...). Nada foi apagado.")
+        return 0
     if args.decisao:
         return _comando_decisao(config, args)
     if args.proximo_p:

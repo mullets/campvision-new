@@ -812,7 +812,6 @@ class Recebedor:
                           f"e há {livre / 2**30:.1f} GB livres")
         documentos = formatos.agrupar(suportados)
         proximo = estrutura.proximo_documento(pasta)
-        pasta_serie = pasta / estrutura.SERIES[ctx.serie]
         arquivados: list[tuple[Path, Path, str, str]] = []  # (origem, destino, código, sha)
         vistos_sha: dict[str, str] = {}
         try:
@@ -834,7 +833,8 @@ class Recebedor:
                         if destino.exists():
                             arquivados.append((versao, destino, codigo_doc, soma))
                             continue
-                    destino = pasta_serie / f"{codigo_doc}{versao.suffix.lower()}"
+                    destino = estrutura.destino_documento(pasta, ctx.serie, codigo_doc, versao.suffix)
+                    destino.parent.mkdir(parents=True, exist_ok=True)
                     if destino.exists() and sha256(destino) != soma:
                         return falhar(f"{destino.name} já existe com outro conteúdo")
                     if not destino.exists():

@@ -179,3 +179,24 @@ class TestRelatorioEContagem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOrganizarFormatos(unittest.TestCase):
+    def test_move_arquivos_soltos_para_subpasta_do_formato(self):
+        from nucleo import renomear
+
+        with TemporaryDirectory() as t:
+            raiz = Path(t)
+            serie = raiz / "F000 - X" / estrutura.PASTA_PROJETOS / "F000-P0001 - Obra" / "01 - Desenhos e pranchas"
+            serie.mkdir(parents=True)
+            for ext in ("tif", "jpg"):
+                (serie / f"F000-P0001-1970-S01-D00001.{ext}").write_bytes(b"x")
+            cat = serie.parent / "catalogacao"
+            cat.mkdir()
+            (cat / "mapa_origem.json").write_text(json.dumps(
+                {"a": {"destino": "F000 - X/01 - Projetos/F000-P0001 - Obra/01 - Desenhos e pranchas/F000-P0001-1970-S01-D00001.tif"}}))
+            self.assertEqual(renomear.organizar_formatos(raiz, raiz / "estado"), 2)
+            self.assertTrue((serie / "TIF" / "F000-P0001-1970-S01-D00001.tif").exists())
+            self.assertTrue((serie / "JPG" / "F000-P0001-1970-S01-D00001.jpg").exists())
+            self.assertIn("/TIF/", (cat / "mapa_origem.json").read_text())
+            self.assertEqual(renomear.organizar_formatos(raiz, raiz / "estado"), 0)  # idempotente

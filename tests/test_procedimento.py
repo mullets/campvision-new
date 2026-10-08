@@ -115,7 +115,7 @@ class TestRecebimentoComProcedimento(Base):
         foto_falsa(pasta / "JPG" / "scan 003.jpg")
         res = self._processar(self.recebedor())
         self.assertEqual(res.status, entrada.PRONTO, res.motivo)
-        fotos = list((res.pasta_projeto / "03 - Fotografias").glob("*-S03-D00003.jpg"))
+        fotos = list((res.pasta_projeto / "03 - Fotografias" / "JPG").glob("*-S03-D00003.jpg"))
         self.assertEqual(len(fotos), 1, list(res.pasta_projeto.rglob("*.jpg")))
         cat = res.pasta_projeto / "catalogacao"
         rel = (cat / "relatorio.txt").read_text()

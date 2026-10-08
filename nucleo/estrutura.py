@@ -6,6 +6,7 @@ Segue o MODELO de pastas da CAMP:
       01 - Projetos/
         <F002-P0002 - Nome>/
           01 - Desenhos e pranchas … 07 - Publicações, 99 - Não identificado
+            TIF/ JPG/ DNG/ PDF/ …   (uma subpasta por formato, mesmo código)
           README.md
       02 - Obras e documentação de obra … 09 - Publicações, 99 - Não identificado
       README.md
@@ -33,6 +34,25 @@ SERIES: dict[str, str] = {
     "S07": "07 - Publicações",
     "S99": "99 - Não identificado",
 }
+
+# Dentro de cada série, uma subpasta por formato: o mesmo documento em TIF e
+# JPG tem o mesmo código, mas fica em TIF/ e JPG/ (pedido do Rafa, 08/10).
+FORMATOS_PASTA: dict[str, str] = {
+    ".tif": "TIF", ".tiff": "TIF", ".jpg": "JPG", ".jpeg": "JPG", ".png": "PNG",
+    ".dng": "DNG", ".nef": "NEF", ".pdf": "PDF", ".cdr": "CDR", ".plt": "PLT",
+}
+
+
+def pasta_formato(extensao: str) -> str:
+    ext = extensao.lower() if extensao.startswith(".") else f".{extensao.lower()}"
+    return FORMATOS_PASTA.get(ext, ext.lstrip(".").upper() or "OUTROS")
+
+
+def destino_documento(pasta_projeto: Path, serie: str, codigo: str, extensao: str) -> Path:
+    """<projeto>/<série>/<FORMATO>/<código><ext>."""
+    ext = extensao.lower()
+    return pasta_projeto / SERIES.get(serie, SERIES["S99"]) / pasta_formato(ext) / f"{codigo}{ext}"
+
 
 PASTAS_DO_FUNDO = (
     PASTA_PROJETOS,
