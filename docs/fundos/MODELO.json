@@ -1,0 +1,12 @@
+{
+  "codigo": "F000",
+  "periodo_atuacao": {"de": 1900, "ate": 2000},
+  "fundos_relacionados": [
+    {"codigo": "F000", "nome": "Nome do sócio ou coautor", "relacao": "sócio"}
+  ],
+  "chaves_de_identidade": [
+    {"pessoa": "Nome da pessoa A", "sinal": "barba, bigode e óculos"},
+    {"pessoa": "Nome da pessoa B", "sinal": "só bigode"}
+  ],
+  "observacoes": ["Texto livre, para quem cataloga ler."]
+}

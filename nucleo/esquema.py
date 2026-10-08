@@ -32,7 +32,7 @@ CAMPOS: tuple[Campo, ...] = (
     Campo("cliente", "Cliente", "Proprietário ou contratante.", True),
     Campo("arquiteto", "Arquiteto", "Autor do projeto (pessoa física), como escrito.", True),
     Campo("escritorio", "Escritório", "Escritório/empresa responsável, SEPARADO do arquiteto. "
-                                      "Ex.: 'BELLUCCI arquitetura SC'.", True),
+                                      "Ex.: 'XYZ Arquitetos Associados S/C'.", True),
     Campo("endereco", "Endereço", "Endereço da obra, com número se houver.", True),
     Campo("cidade", "Cidade", "Município da obra.", True),
     Campo("uf", "UF", "Sigla do estado, 2 letras.", True),
@@ -41,7 +41,7 @@ CAMPOS: tuple[Campo, ...] = (
     Campo("titulo_prancha", "Título da prancha", "Nome/título desta prancha, literal.", False),
     Campo("folha", "Folha", "Número da folha, onde estiver (carimbo ou contorno): '03', 'F.34'.", False),
     Campo("total_folhas", "Total de folhas", "Total de folhas do conjunto, se indicado.", False),
-    Campo("codigo_serie", "Código de série", "Código da série/folha, ex.: 'FL 1/6', 'McD-9/JK'.", False),
+    Campo("codigo_serie", "Código de série", "Código da série/folha, ex.: 'FL 1/6', 'C-3/12', 'ABC-2/R-1'.", False),
     Campo("revisao", "Revisão", "Indicação de revisão/reforma, ex.: 'R-1', 'REV. A'.", False),
     Campo("ano", "Ano", "Ano de 4 dígitos derivado da data lida.", False, do_modelo=False),
     Campo("tipo", "Tipo", "Tipo de desenho, derivado do título por regra (§5.2).", False, do_modelo=False),

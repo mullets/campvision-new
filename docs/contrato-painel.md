@@ -309,4 +309,4 @@ Novidades no `pacote_tainacan.json`, por item:
 
 Novos arquivos em `catalogacao/`: `relatorio.txt` (as 8 partes da etapa 8), `orientacao.txt` (giro aplicado folha por folha) e `catalogacao_ERRO.txt` (só quando o lote falha).
 
-Os parâmetros por fundo são escritos por humano em `ACERVOS_CAMP/_campvision/fundos/F0xx.json`; o modelo está em `docs/fundos/F002.json`. O painel também pode mandar `periodo_atuacao` e `chaves_de_identidade` em `/api/estacoes/contexto`.
+Os parâmetros por fundo são escritos por humano em `ACERVOS_CAMP/_campvision/fundos/F0xx.json`; o modelo em branco está em `docs/fundos/MODELO.json` (copie com o código do fundo no nome: `F007.json`). O painel também pode mandar `periodo_atuacao` e `chaves_de_identidade` em `/api/estacoes/contexto`.
