@@ -34,6 +34,17 @@ class Fundo:
     # Coautores/sócios registrados (vêm do painel). Folha assinada por alguém
     # fora de titular + coautores é autoria divergente (método §4.4).
     coautores: tuple[str, ...] = ()
+    # Parâmetros por fundo escritos por humano (procedimento padrão, etapa 0):
+    # período de atuação (ano fora → aviso) e chaves de identidade das pessoas
+    # (("Francisco Segnini Jr.", "barba, bigode e óculos"), ...).
+    periodo: tuple[int, int] | None = None
+    chaves_de_identidade: tuple[tuple[str, str], ...] = ()
+    observacoes: tuple[str, ...] = ()
+
+    def fora_do_periodo(self, ano: str) -> bool:
+        if not self.periodo or not re.fullmatch(r"\d{4}", ano or ""):
+            return False
+        return not (self.periodo[0] <= int(ano) <= self.periodo[1])
 
     @property
     def autorizados(self) -> list[str]:
@@ -160,8 +171,62 @@ def _de_json(dados) -> list[Fundo]:
             str(item.get("sigla") or item.get("prefixo") or ""),
             str(item.get("nome") or item.get("titulo") or codigo),
             coautores,
+            **_parametros(item),
         ))
     return fundos
+
+
+def _parametros(item: dict) -> dict:
+    """periodo_atuacao / chaves_de_identidade / observacoes, no formato do procedimento."""
+    saida: dict = {}
+    periodo = item.get("periodo_atuacao") or item.get("periodo")
+    if isinstance(periodo, dict):
+        try:
+            de, ate = int(periodo.get("de")), int(periodo.get("ate"))
+            saida["periodo"] = (min(de, ate), max(de, ate))
+        except (TypeError, ValueError):
+            pass
+    chaves = []
+    for c in item.get("chaves_de_identidade") or []:
+        if isinstance(c, dict) and c.get("pessoa") and c.get("sinal"):
+            chaves.append((str(c["pessoa"]), str(c["sinal"])))
+    if chaves:
+        saida["chaves_de_identidade"] = tuple(chaves)
+    obs = item.get("observacoes")
+    if isinstance(obs, list):
+        saida["observacoes"] = tuple(str(o) for o in obs if o)
+    return saida
+
+
+def com_parametros(tabela: Tabela, raiz_final: Path) -> Tabela:
+    """Aplica `ACERVOS_CAMP/_campvision/fundos/F0xx.json` (escrito por humano) sobre a tabela.
+
+    O arquivo segue o JSON de "Parâmetros por fundo" do procedimento padrão. Só
+    acrescenta período, chaves e observações (e coautores, se houver); código e
+    nome continuam vindo do painel/tabela de autoridade.
+    """
+    pasta = raiz_final / "_campvision" / "fundos"
+    if not pasta.is_dir():
+        return tabela
+    from dataclasses import replace
+
+    fundos = dict(tabela.por_codigo)
+    for arquivo in sorted(pasta.glob("F[0-9][0-9][0-9].json")):
+        fundo = fundos.get(arquivo.stem.upper())
+        if fundo is None:
+            continue
+        try:
+            dados = json.loads(arquivo.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as erro:
+            _log.warning("Parâmetros de %s ilegíveis: %s", arquivo.name, erro)
+            continue
+        extra = _parametros(dados) if isinstance(dados, dict) else {}
+        relacionados = tuple(str(r.get("nome")) for r in (dados.get("fundos_relacionados") or [])
+                             if isinstance(r, dict) and r.get("nome"))
+        if relacionados:
+            extra["coautores"] = tuple(dict.fromkeys((*fundo.coautores, *relacionados)))
+        fundos[fundo.codigo] = replace(fundo, **extra)
+    return Tabela(list(fundos.values()), tabela.origem)
 
 
 def caminho_cache(pasta_estado: Path) -> Path:

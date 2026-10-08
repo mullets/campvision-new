@@ -110,3 +110,50 @@ def autoria_divergente(arquiteto_lido: str, autorizados: list[str]) -> bool:
         if lidos & _tokens_nome(nome):
             return False
     return True
+
+
+# ---------------------------------------------------------------- chaves de identidade
+# Procedimento padrão, etapa 0: o modelo só diz os TRAÇOS visíveis de cada pessoa
+# (barba, bigode, óculos); quem casa traço com nome é este código, a partir do
+# sinal escrito por humano no registro do fundo. Sem chave, ou com mais de uma
+# pessoa servindo, ninguém é nomeado.
+TRACOS = ("barba", "bigode", "oculos")
+
+
+def _sem_acento(texto: str) -> str:
+    import unicodedata
+
+    return "".join(c for c in unicodedata.normalize("NFD", (texto or "").lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def tracos_do_sinal(sinal: str) -> dict[str, bool]:
+    """'barba, bigode e óculos' → os três True; 'só bigode' → bigode True e os outros False.
+
+    Sem "só"/"apenas", traço não citado fica indeterminado (não entra no dict).
+    """
+    texto = _sem_acento(sinal)
+    citados = {t: True for t in TRACOS if t in texto}
+    if re.search(r"\b(so|apenas|somente)\b", texto) or re.search(r"\bsem\b", texto):
+        for t in TRACOS:
+            if t not in citados:
+                citados[t] = False
+        for negado in re.findall(r"\bsem\s+(\w+)", texto):
+            if negado in TRACOS:
+                citados[negado] = False
+    return citados
+
+
+def identificar_pessoas(pessoas: list[dict], chaves) -> list[str]:
+    """Nome de cada pessoa da foto que casa com UMA chave só; vazio se alguma ficar ambígua."""
+    if not pessoas or not chaves:
+        return []
+    regras = [(nome, tracos_do_sinal(sinal)) for nome, sinal in chaves]
+    nomes: list[str] = []
+    for pessoa in pessoas:
+        servem = [nome for nome, regra in regras
+                  if regra and all(bool(pessoa.get(t)) == v for t, v in regra.items())]
+        if len(servem) != 1 or servem[0] in nomes:
+            return []
+        nomes.append(servem[0])
+    return nomes

@@ -294,3 +294,19 @@ acabou; o painel usa `aceite.publicavel` + `erros_bloqueantes` para liberar.
 corrigido), `orientação` (aviso: orientação incerta, conferir na folha de
 contatos), `metadado` com ressalvas de leitura (ex.: "ano lido 1985, a série
 indica 1983 — conferir no original").
+
+## 10. Procedimento padrão (versão 2026-10-08-05)
+
+Novidades no `pacote_tainacan.json`, por item:
+
+- `arquivo_origem`: lista `{arquivo_origem, nome_original}` (pasta + nome original de cada versão). É a chave para reler sem pagar de novo.
+- `origem_formato`: formato de onde a leitura saiu (`tif`, `jpg`, `pdf`, `dng`, `nef`, `cdr`).
+- `serie_incerta`: a triagem não decidiu a série; olhar na folha de contatos.
+- `pessoas_identificadas`: nomes vindos só das `chaves_de_identidade` do fundo, aplicadas por código.
+- `textual`: na série S02, tipo documental, remetente, destinatário, data e assunto.
+- `fora_do_periodo`: o ano cai fora do período de atuação do fundo.
+- `bloqueios` agora inclui `projeto divergente`.
+
+Novos arquivos em `catalogacao/`: `relatorio.txt` (as 8 partes da etapa 8), `orientacao.txt` (giro aplicado folha por folha) e `catalogacao_ERRO.txt` (só quando o lote falha).
+
+Os parâmetros por fundo são escritos por humano em `ACERVOS_CAMP/_campvision/fundos/F0xx.json`; o modelo está em `docs/fundos/F002.json`. O painel também pode mandar `periodo_atuacao` e `chaves_de_identidade` em `/api/estacoes/contexto`.

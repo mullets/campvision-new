@@ -26,9 +26,17 @@ from PIL import Image
 
 _log = logging.getLogger("cv2.formatos")
 
-EXTENSOES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".pdf")
+EXTENSOES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".nef", ".pdf", ".cdr")
 # Ordem de preferência para LER (a mais leve primeiro).
-PREFERENCIA = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".pdf")
+PREFERENCIA = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".nef", ".pdf", ".cdr")
+# Formatos em que o exiftool não grava metadado: vão para o acervo como estão,
+# o EXIF fica só nas outras versões e no catalogacao/ (procedimento, etapa 1).
+SEM_EXIF = (".cdr", ".nef")
+
+
+def origem_formato(caminho: Path) -> str:
+    """`origem_formato` do procedimento (etapa 1): de que formato a leitura saiu."""
+    return {".jpeg": "jpg", ".tiff": "tif"}.get(caminho.suffix.lower(), caminho.suffix.lower().lstrip("."))
 LADO_LEITURA = 3000  # bruta: daqui saem a leitura (2000) e o preview (3000)
 
 
@@ -122,6 +130,25 @@ def _pdf(origem: Path, temporario: Path) -> Image.Image | None:
         return None
 
 
+def _cdr(origem: Path, temporario: Path) -> Image.Image | None:
+    """CorelDRAW → PDF (LibreOffice headless) → JPG pela mesma rota do PDF."""
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        _log.warning("%s: CDR precisa do LibreOffice (soffice) para ler.", origem.name)
+        return None
+    pasta = temporario.parent / f".cdr-{temporario.stem}"
+    pasta.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", str(pasta), str(origem)],
+                       capture_output=True, timeout=300)
+        pdf = pasta / f"{origem.stem}.pdf"
+        return _pdf(pdf, temporario) if pdf.exists() else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
 def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
     """Gera o JPG de leitura em `destino`. None se não deu para abrir."""
     if destino.exists() and destino.stat().st_mtime >= origem.stat().st_mtime:
@@ -130,8 +157,10 @@ def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
     destino.parent.mkdir(parents=True, exist_ok=True)  # o pdftoppm grava direto aqui
     img: Image.Image | None = None
     try:
-        if ext == ".dng":
+        if ext in (".dng", ".nef"):
             img = _dng(origem)
+        elif ext == ".cdr":
+            img = _cdr(origem, destino)
         elif ext == ".pdf":
             img = _pdf(origem, destino)
         else:

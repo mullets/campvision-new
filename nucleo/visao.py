@@ -22,7 +22,7 @@ from PIL import Image
 
 from . import imagem as img_mod
 from .config import Config
-from .esquema import CAMPOS_DO_MODELO, Leitura, esquema_ferramenta, esquema_fotografia
+from .esquema import CAMPOS_DO_MODELO, Leitura, esquema_ferramenta, esquema_fotografia, esquema_textual
 
 _log = logging.getLogger("cv2.visao")
 
@@ -68,15 +68,36 @@ REGRAS
 5. Se a imagem for um negativo, verso, cartela de teste ou folha de contato,
    diga isso em "tipo_de_imagem" e não descreva como se fosse a obra.
 
-Devolva chamando a ferramenta registrar_fotografia."""
+Devolva chamando a ferramenta registrar_fotografia.
+
+6. Em "pessoas", para cada pessoa visível diga só os traços: barba, bigode,
+   óculos. Nunca escreva nome, mesmo que reconheça a pessoa."""
+
+INSTRUCOES_TEXTO = """Você vai TRANSCREVER UM documento textual de acervo de arquitetura
+(carta, memorial, programa do cliente, planilha, ficha, anotação manuscrita).
+
+REGRAS
+
+1. Transcreva o texto integral, literal: grafia, abreviações e erros como estão.
+2. Remetente, destinatário, data e assunto: só o que está ESCRITO. Ilegível ou
+   ausente fica null.
+3. NÃO resuma, NÃO interprete, NÃO use conhecimento externo.
+4. "projeto_citado" é o nome de obra/projeto que o texto menciona, literal.
+
+Devolva chamando a ferramenta registrar_documento."""
 
 # Série pelo código do documento: S03 fotografias, S04 negativos, S05 slides.
 SERIES_FOTO = ("S03", "S04", "S05")
+SERIES_TEXTO = ("S02",)
 
 
 def modo_do_arquivo(nome: str) -> str:
     achado = re.search(r"-(S\d{2})-D\d{5}", nome)
-    return "fotografia" if achado and achado.group(1) in SERIES_FOTO else "prancha"
+    if achado and achado.group(1) in SERIES_FOTO:
+        return "fotografia"
+    if achado and achado.group(1) in SERIES_TEXTO:
+        return "textual"
+    return "prancha"
 
 
 class ClienteAPI(Protocol):
@@ -252,6 +273,7 @@ def _para_foto(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
         "elementos_visiveis": _lista(entrada.get("elementos_visiveis")),
         "texto_na_imagem": _lista(entrada.get("texto_na_imagem")),
         "legenda_proposta": _texto(entrada.get("legenda_proposta")),
+        "pessoas": [p for p in (entrada.get("pessoas") or []) if isinstance(p, dict)],
     }
     try:
         confianca = max(0.0, min(1.0, float(entrada.get("confianca", 0.0) or 0.0)))
@@ -266,6 +288,31 @@ def _para_foto(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
     return leitura
 
 
+def _para_textual(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
+    leitura.modo = "textual"
+    leitura.carimbo_encontrado = False
+    doc = {k: _texto(entrada.get(k)) for k in
+           ("tipo_documental", "remetente", "destinatario", "data", "ano", "assunto", "projeto_citado")}
+    leitura.textual = doc
+    leitura.legivel = bool(entrada.get("legivel", True))
+    leitura.transcricao_integral = _texto(entrada.get("transcricao"))
+    try:
+        confianca = max(0.0, min(1.0, float(entrada.get("confianca", 0.0) or 0.0)))
+    except (TypeError, ValueError):
+        confianca = 0.0
+    tipo = doc["tipo_documental"] or "documento"
+    titulo = " — ".join(x for x in (tipo.capitalize(), doc["assunto"]) if x)
+    if doc["remetente"] and tipo == "carta":
+        titulo += f" ({doc['remetente']}" + (f", {doc['data']})" if doc["data"] else ")")
+    leitura.valores.update({"titulo_prancha": titulo, "tipo": "Documento textual",
+                            "projeto": doc["projeto_citado"], "data": doc["data"],
+                            "ano": doc["ano"] if re.fullmatch(r"\d{4}", doc["ano"] or "") else ""})
+    for campo in ("titulo_prancha", "projeto", "data", "ano"):
+        leitura.confiancas[campo] = confianca if leitura.valores.get(campo) else 0.0
+    leitura.confiancas["tipo"] = 1.0
+    return leitura
+
+
 class LeitorDeCarimbo:
     """Uma chamada por folha, página inteira. Nome mantido por compatibilidade."""
 
@@ -274,6 +321,7 @@ class LeitorDeCarimbo:
         self.cliente = cliente
         self.ferramenta = esquema_ferramenta()
         self.ferramenta_foto = esquema_fotografia()
+        self.ferramenta_texto = esquema_textual()
 
     def ler(self, caminho: Path, regiao_sugerida=None, modo: str | None = None) -> Leitura:
         resultado = Leitura(arquivo=caminho.name)
@@ -286,15 +334,14 @@ class LeitorDeCarimbo:
             return resultado
         try:
             env = img_mod.para_envio(original, LADO_ENVIO, QUALIDADE_ENVIO)
-            foto = modo == "fotografia"
-            texto = "Descreva esta fotografia." if foto else "Transcreva esta prancha."
-            mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": texto}]}]
-            entrada, t_in, t_out = self.cliente.chamar(
-                mensagens, self.ferramenta_foto if foto else self.ferramenta,
-                INSTRUCOES_FOTO if foto else INSTRUCOES,
-            )
+            pedido, ferramenta, instrucoes, converter = {
+                "fotografia": ("Descreva esta fotografia.", self.ferramenta_foto, INSTRUCOES_FOTO, _para_foto),
+                "textual": ("Transcreva este documento.", self.ferramenta_texto, INSTRUCOES_TEXTO, _para_textual),
+            }.get(modo, ("Transcreva esta prancha.", self.ferramenta, INSTRUCOES, _para_leitura))
+            mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": pedido}]}]
+            entrada, t_in, t_out = self.cliente.chamar(mensagens, ferramenta, instrucoes)
             resultado.tokens_entrada, resultado.tokens_saida, resultado.passes = t_in, t_out, 1
-            return _para_foto(entrada, resultado) if foto else _para_leitura(entrada, resultado)
+            return converter(entrada, resultado)
         except Exception as erro:  # noqa: BLE001
             resultado.erro = str(erro)
             _log.error("%s: %s", caminho.name, erro)

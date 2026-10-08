@@ -1,0 +1,18 @@
+{
+  "codigo": "F002",
+  "sigla": "BSG",
+  "nome_oficial": "Segnini Barretto Arquitetos S/C",
+  "periodo_atuacao": {"de": 1966, "ate": 1981},
+  "tainacan": {"fundo_term": 30, "arquiteto_term": 288},
+  "fundos_relacionados": [
+    {"codigo": "F010", "nome": "Francisco Segnini Jr.", "term": 39, "relacao": "sócio"},
+    {"codigo": "F014", "nome": "Joaquim Barretto", "term": 289, "relacao": "sócio"}
+  ],
+  "chaves_de_identidade": [
+    {"pessoa": "Francisco Segnini Jr.", "sinal": "barba, bigode e óculos"},
+    {"pessoa": "Joaquim Barretto", "sinal": "só bigode"}
+  ],
+  "observacoes": [
+    "Agência Banespa (1982) e Safra Mooca (1982-83) estavam nesta pasta mas são do F014: a parceria acabou em 1981"
+  ]
+}

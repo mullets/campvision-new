@@ -34,6 +34,7 @@ from pathlib import Path
 
 from . import estrutura, formatos, fundos as mod_fundos, info_projeto as mod_info
 from . import preparo as mod_preparo
+from . import triagem as mod_triagem
 from . import metadados as mod_metadados
 from .config import VERSAO_BUILD, Config
 from .esquema import CAMPOS
@@ -403,7 +404,7 @@ def conferir_exif(itens: list[tuple[Path, str]]) -> set[Path]:
 
 def enriquecer(leituras: dict, preparos: dict, fundo) -> None:
     """Preparo, duplicatas e autoria em cada leitura do projeto (método §2.3, §4.4, §8.1)."""
-    from .derivacao import autoria_divergente
+    from .derivacao import autoria_divergente, identificar_pessoas
 
     ordem = sorted(leituras)
     por_md5: dict[str, str] = {}
@@ -416,6 +417,24 @@ def enriquecer(leituras: dict, preparos: dict, fundo) -> None:
         l.rotacao_aplicada = int(p.get("rotacao", 0) or 0)
         l.espelhada = bool(p.get("espelhada", False))
         l.orientacao_incerta = bool(p.get("incerta", False))
+        l.origem_formato = p.get("origem_formato", "") or l.origem_formato
+        tri = p.get("triagem") or {}
+        l.triagem = tri
+        l.serie_incerta = bool(tri.get("incerta"))
+        ano = l.ano_do_projeto or l.valores.get("ano", "")
+        l.fora_do_periodo = fundo.fora_do_periodo(ano)
+        if l.modo == "fotografia":
+            l.pessoas_identificadas = identificar_pessoas((l.foto or {}).get("pessoas") or [],
+                                                          fundo.chaves_de_identidade)
+            if l.pessoas_identificadas:
+                nomes = " e ".join(l.pessoas_identificadas) if len(l.pessoas_identificadas) <= 2 \
+                    else ", ".join(l.pessoas_identificadas[:-1]) + " e " + l.pessoas_identificadas[-1]
+                legenda = l.valores.get("titulo_prancha", "")
+                if not legenda.startswith(nomes):
+                    l.valores["titulo_prancha"] = f"{nomes} — {legenda}" if legenda else nomes
+                nota = "pessoas nomeadas pelas chaves de identidade do fundo (não pelo modelo)"
+                if nota not in l.ressalvas:
+                    l.ressalvas.append(nota)
         l.duplicata_de, l.tipo_duplicata = "", ""
         if l.md5 and l.md5 in por_md5:
             l.duplicata_de, l.tipo_duplicata = por_md5[l.md5], "exata"
@@ -452,7 +471,14 @@ def erros_das_leituras(leituras) -> list[dict]:
         if l.duplicata_de:
             add(nome, "duplicata", "corrigir", f"{l.tipo_duplicata} de {l.duplicata_de} — só a única publica")
         if l.suspeita_grupo:
-            add(nome, "projeto errado", "corrigir", f"carimbo diz '{l.valores.get('projeto', '')}'")
+            add(nome, "projeto errado", "corrigir",
+                f"projeto divergente: carimbo diz '{l.valores.get('projeto', '')}'")
+        if l.serie_incerta:
+            add(nome, "série", "aviso", "série incerta na triagem — "
+                f"{(l.triagem or {}).get('motivo', '')}; conferir na folha de contatos")
+        if l.fora_do_periodo:
+            add(nome, "metadado", "aviso", f"ano {l.ano_do_projeto or l.valores.get('ano', '')} "
+                "fora do período de atuação do fundo — conferir autoria/fundo")
         if l.espelhada:
             add(nome, "espelhado", "aviso", "folha digitalizada pelo verso — preview já corrigido")
         if l.orientacao_incerta:
@@ -473,8 +499,11 @@ def pacote_tainacan(codigo: str, nome: str, ctx, leituras: dict, preparos: dict,
     """Pacote para o painel/importador (§8.2). IDs de termo NÃO são inventados aqui:
     o painel converte `serie`/`tipo` para o ID de taxonomia — sempre NÚMERO ({"values": 26})."""
     arquivos_por_codigo: dict[str, list[str]] = {}
+    origem_por_codigo: dict[str, list[dict]] = {}
     for item in mapa.values():
         arquivos_por_codigo.setdefault(Path(item["destino"]).stem, []).append(item["destino"])
+        origem_por_codigo.setdefault(Path(item["destino"]).stem, []).append(
+            {"arquivo_origem": item.get("origem", ""), "nome_original": item.get("nome_original", "")})
     itens = []
     for doc in sorted(leituras):
         l = leituras[doc]
@@ -486,6 +515,8 @@ def pacote_tainacan(codigo: str, nome: str, ctx, leituras: dict, preparos: dict,
             bloqueios.append(f"duplicata de {l.duplicata_de}")
         if l.e_documento:
             bloqueios.append("ficha de documentação (não é obra)")
+        if l.suspeita_grupo:
+            bloqueios.append("projeto divergente")
         itens.append({
             "codigo": doc, "projeto_codigo": codigo, "fundo_codigo": ctx.fundo.codigo,
             "serie": serie, "modo": l.modo, "titulo": l.valores.get("titulo_prancha", ""),
@@ -498,10 +529,98 @@ def pacote_tainacan(codigo: str, nome: str, ctx, leituras: dict, preparos: dict,
             "credito": ctx.fundo.credito,
             "preview": preparos.get(doc, {}).get("preview", ""),
             "arquivos": sorted(arquivos_por_codigo.get(doc, [])),
+            # Pasta + nome original de cada versão: a chave para reler sem pagar de novo.
+            "arquivo_origem": origem_por_codigo.get(doc, []),
+            "origem_formato": l.origem_formato, "serie_incerta": l.serie_incerta,
+            "pessoas_identificadas": l.pessoas_identificadas, "textual": l.textual,
+            "fora_do_periodo": l.fora_do_periodo,
             "publicavel": not bloqueios, "bloqueios": bloqueios, "ressalvas": l.ressalvas,
         })
     return {"versao": 1, "projeto_codigo": codigo, "projeto_nome": nome,
             "fundo_codigo": ctx.fundo.codigo, "gerado_em": _agora(), "itens": itens}
+
+
+def _d(codigo: str) -> str:
+    """F002-P0002-1972-S01-D00004 → D4 (como no registro da Paróquia)."""
+    achado = re.search(r"-D(\d+)$", codigo)
+    return f"D{int(achado.group(1))}" if achado else codigo
+
+
+def log_orientacao(leituras: dict) -> str:
+    """Trilha de auditoria da orientação, folha por folha (procedimento, etapa 5).
+
+    Formato: `90° horário: D2, D8, D10 · sem giro: D5, D6, D7`.
+    """
+    grupos: dict[str, list[str]] = {}
+    for codigo in sorted(leituras):
+        l = leituras[codigo]
+        giro = {0: "sem giro", 90: "90° horário", 180: "180°", 270: "90° anti-horário"}.get(
+            l.rotacao_aplicada % 360, f"{l.rotacao_aplicada}°")
+        if l.espelhada:
+            giro += " + espelhada"
+        grupos.setdefault(giro, []).append(_d(codigo))
+    linha = " · ".join(f"{g}: {', '.join(ds)}" for g, ds in grupos.items())
+    incertas = [_d(c) for c in sorted(leituras) if leituras[c].orientacao_incerta]
+    texto = f"Orientação aplicada (gerado em {_agora()})\n{linha}\n"
+    if incertas:
+        texto += f"incerta — conferir na folha de contatos: {', '.join(incertas)}\n"
+    return texto
+
+
+def relatorio_lote(codigo: str, nome: str, lote: dict, leituras: dict, por_codigo: dict,
+                   erros: list[dict]) -> str:
+    """Relatório final do lote, sempre nas 8 partes e nesta ordem (procedimento, etapa 8)."""
+    from collections import Counter
+
+    do_lote = {c: leituras[c] for c in por_codigo if c in leituras}
+    linhas = [f"Relatório do lote {lote.get('lote_id', '')} — {codigo} {nome}",
+              f"origem: {lote.get('origem', '')}", ""]
+
+    def secao(n: int, titulo: str, itens: list[str]) -> None:
+        linhas.append(f"{n}. {titulo}")
+        linhas.extend(f"   {i}" for i in itens) if itens else linhas.append("   nenhum")
+        linhas.append("")
+
+    arquivos = len(lote.get("arquivos", []))
+    secao(1, "Arquivos na origem × registros na saída", [
+        f"{arquivos + len(lote.get('nao_suportados', []))} arquivo(s) na origem, "
+        f"{arquivos} arquivado(s), {len(por_codigo)} documento(s), {len(do_lote)} com leitura"])
+    series = Counter(c.split("-")[3] for c in por_codigo if c.count("-") >= 4)
+    from .estrutura import SERIES
+    secao(2, "Distribuição por série", [f"{s} {SERIES.get(s, '')}: {n}" for s, n in sorted(series.items())])
+    secao(3, "Duplicatas (publica só a única)", [
+        f"{c} é {l.tipo_duplicata} de {l.duplicata_de} — publicar {l.duplicata_de}"
+        for c, l in sorted(do_lote.items()) if l.duplicata_de])
+    secao(4, "Autoria divergente e projeto divergente (não publicar)", [
+        *(f"{c}: autoria divergente — carimbo '{(l.lidos_originais or l.valores).get('arquiteto', '')}'"
+          for c, l in sorted(do_lote.items()) if l.autoria_divergente),
+        *(f"{c}: projeto divergente — carimbo '{l.valores.get('projeto', '')}'"
+          for c, l in sorted(do_lote.items()) if l.suspeita_grupo)])
+    secao(5, "Precisa de olho humano (orientação e série incertas)", [
+        *(f"{c}: orientação incerta" for c, l in sorted(do_lote.items()) if l.orientacao_incerta),
+        *(f"{c}: série incerta — {(l.triagem or {}).get('motivo', '')}"
+          for c, l in sorted(do_lote.items()) if l.serie_incerta)])
+    faltam = []
+    por_total: dict[str, set[int]] = {}
+    for l in do_lote.values():
+        total, folha = l.valores.get("total_folhas", ""), l.valores.get("folha", "")
+        n_folha = re.search(r"(\d+)\s*/\s*(\d+)", folha or "")
+        if n_folha and not total:
+            folha, total = n_folha.group(1), n_folha.group(2)
+        if re.fullmatch(r"\d{1,3}", (total or "").strip()) and re.search(r"\d+", folha or ""):
+            por_total.setdefault(total.strip(), set()).add(int(re.search(r"\d+", folha).group()))
+    for total, vistas in por_total.items():
+        ausentes = sorted(set(range(1, int(total) + 1)) - vistas)
+        if ausentes and int(total) <= 300:
+            faltam.append(f"conjunto de {total} folhas: faltam {', '.join(map(str, ausentes))}")
+    secao(6, "Folhas esperadas que faltam (pelo total do carimbo)", faltam)
+    secao(7, "Campos vazios por decisão e ressalvas", [
+        f"{c}: {r}" for c, l in sorted(do_lote.items()) for r in l.ressalvas])
+    secao(8, "Retirado / não arquivado", [
+        f"{a} — formato não suportado, ficou na entrada" for a in lote.get("nao_suportados", [])])
+    bloqueia = [e for e in erros if e.get("gravidade") == "bloqueia"]
+    linhas.append(f"Erros: {len(erros)} ({len(bloqueia)} bloqueiam). Detalhe em erros.json.")
+    return "\n".join(linhas) + "\n"
 
 
 def checklist_aceite(por_codigo: dict, leituras: dict, erros: list[dict], lote: dict) -> dict:
@@ -513,6 +632,7 @@ def checklist_aceite(por_codigo: dict, leituras: dict, erros: list[dict], lote: 
         "sem_autoria_divergente": not any(l.autoria_divergente for l in do_lote),
         "duplicatas_marcadas": True,
         "orientacao_incerta_zerada": not any(l.orientacao_incerta for l in do_lote),
+        "serie_incerta_zerada": not any(l.serie_incerta for l in do_lote),
         "exif_conferido": exif.get("conferidos", 0) == exif.get("total", 0),
         "relatorio_gerado": True,
     }
@@ -543,9 +663,10 @@ class Recebedor:
         self.livro = livro
         self.pasta_estado = pasta_estado
         self.estado = Estado(pasta_estado)
-        self.tabela = tabela or mod_fundos.carregar(pasta_estado, painel if painel.ligado else None)
         self.raiz_entrada = Path(config.pasta_entrada)
         self.raiz_final = Path(config.raiz_final)
+        self.tabela = mod_fundos.com_parametros(
+            tabela or mod_fundos.carregar(pasta_estado, painel if painel.ligado else None), self.raiz_final)
 
     # ------------------------------------------------------------ fila
     def pendentes(self) -> list[Unidade]:
@@ -646,6 +767,13 @@ class Recebedor:
                                "origem": "CAMP Vision", "detalhe": motivo})
             lote["status"] = ERRO
             gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+            # Um lote nunca termina sem catalogação (etapa 8): ou sai o relatório, ou o motivo.
+            try:
+                (catalogacao / "catalogacao_ERRO.txt").write_text(
+                    f"{_agora()}  lote {ctx.lote_id}  {codigo}\n{motivo}\n"
+                    f"origem: {lote['origem']}\n", encoding="utf-8")
+            except OSError:
+                pass
             self._erros(catalogacao, erros_lote)
             self._status(pasta, codigo, ERRO, ctx, motivo=motivo)
             self.livro.anotar("erro", lote_id=ctx.lote_id, codigo_projeto=codigo,
@@ -671,6 +799,15 @@ class Recebedor:
                                "origem": "CAMP Vision",
                                "detalhe": f"sem pasta de material: série {ctx.serie} deduzida "
                                           f"({estrutura.SERIES[ctx.serie]}); corrigir com --reclassificar"})
+        # Espaço antes de começar: lote que enche o disco no meio termina sem nada (etapa 8).
+        try:
+            precisa = sum(a.stat().st_size for a in suportados)
+            livre = shutil.disk_usage(pasta).free
+        except OSError:
+            precisa, livre = 0, 1
+        if precisa and livre < precisa * 1.1 + 200 * 1024 * 1024:
+            return falhar(f"espaço insuficiente no destino: o lote precisa de {precisa / 2**30:.1f} GB "
+                          f"e há {livre / 2**30:.1f} GB livres")
         documentos = formatos.agrupar(suportados)
         proximo = estrutura.proximo_documento(pasta)
         pasta_serie = pasta / estrutura.SERIES[ctx.serie]
@@ -713,7 +850,8 @@ class Recebedor:
                             operador=ctx.operador, estacao=ctx.estacao)
                         resultado.copiados += 1
                     mapa[soma] = {"destino": self._relativo(destino), "origem": origem_rel(versao),
-                                  "nome_original": versao.name, "lote_id": ctx.lote_id}
+                                  "nome_original": versao.name, "lote_id": ctx.lote_id,
+                                  "origem_formato": formatos.origem_formato(versao)}
                     arquivados.append((versao, destino, codigo_doc, soma))
                     lote["arquivos"].append({"origem": origem_rel(versao), "nome_original": versao.name,
                                              "destino": self._relativo(destino), "codigo": codigo_doc,
@@ -725,6 +863,8 @@ class Recebedor:
 
         if cancelar is not None and cancelar.is_set():
             return falhar("cancelado antes da leitura")
+
+        from . import renomear as mod_renomear
 
         # ---- 5. leitura: imagem leve por documento, cache fora do acervo
         cache = self.pasta_estado / "leitura" / codigo
@@ -754,11 +894,37 @@ class Recebedor:
                 "md5": prep.md5, "hash_perceptual": prep.hash_perceptual,
                 "rotacao": prep.orientacao.rotacao, "espelhada": prep.orientacao.espelhada,
                 "incerta": prep.orientacao.incerta, "pontos": prep.orientacao.pontos,
-                "lido_de": melhor.name,
+                "lido_de": melhor.name, "origem_formato": formatos.origem_formato(melhor),
                 "preview": self._relativo(prep.preview) if prep.preview else "",
             }
             bruta.unlink(missing_ok=True)
         gravar_json(preparo_caminho, preparos)
+
+        # Triagem por série (procedimento, etapa 2): só quando a estação não disse a
+        # série (sem pasta de material). Carta não é lida com prompt de prancha.
+        if ctx.serie_deduzida:
+            trocas_serie: dict[str, str] = {}
+            for codigo_doc in list(por_codigo):
+                prep = preparos.get(codigo_doc)
+                if not prep or prep.get("triagem"):
+                    continue
+                tri = mod_triagem.triar(cache / f"{codigo_doc}.jpg", prep.get("pontos"), ctx.serie)
+                prep["triagem"] = tri.como_dict()
+                atual = codigo_doc.split("-")[3] if codigo_doc.count("-") >= 4 else ctx.serie
+                if tri.serie != atual:
+                    trocas_serie[codigo_doc] = mod_renomear.novo_codigo(codigo_doc, serie=tri.serie)
+            gravar_json(preparo_caminho, preparos)
+            if trocas_serie:
+                gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+                movidos = mod_renomear.renomear(pasta, self.raiz_final, self.pasta_estado, trocas_serie,
+                                                self.livro, "série decidida na triagem")
+                arquivados = [(o, movidos.get(d, d), trocas_serie.get(c, c), sh) for o, d, c, sh in arquivados]
+                por_codigo = {trocas_serie.get(c, c): [movidos.get(v, v) for v in vs]
+                              for c, vs in por_codigo.items()}
+                mapa = ler_json(mapa_caminho, {}) or {}
+                preparos = ler_json(preparo_caminho, {}) or {}
+                lote = ler_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+                erros_lote = lote.setdefault("erros", erros_lote)
 
         from . import planilha as mod_planilha, vigia as mod_vigia
 
@@ -795,8 +961,6 @@ class Recebedor:
         # projeto (moda das datas escritas, §4.2) → renomeia o projeto inteiro.
         from collections import Counter
 
-        from . import renomear as mod_renomear
-
         anos = Counter(l.ano_do_projeto for l in leituras.values() if l.ano_do_projeto)
         if not anos:  # sem consolidação: a mesma regra (moda confirmada) sobre o ano lido
             anos = Counter(l.valores.get("ano") for l in leituras.values()
@@ -823,7 +987,7 @@ class Recebedor:
         itens = []
         ja_vistos: set[Path] = set()
         for origem, destino, codigo_doc, _s in arquivados:
-            if destino in ja_vistos:
+            if destino in ja_vistos or destino.suffix.lower() in formatos.SEM_EXIF:
                 continue
             ja_vistos.add(destino)
             leitura = leituras.get(codigo_doc)
@@ -854,6 +1018,7 @@ class Recebedor:
             [(c, cache / f"{c}.jpg") for c in sorted(leituras)][:1000], catalogacao / "contatos.jpg")
         todos_erros = erros_das_leituras(leituras.values()) + erros_lote
         self._erros(catalogacao, todos_erros)
+        (catalogacao / "orientacao.txt").write_text(log_orientacao(leituras), encoding="utf-8")
         bloqueantes = sum(1 for e in todos_erros if e["gravidade"] == "bloqueia")
         gravar_json(catalogacao / "pacote_tainacan.json",
                     pacote_tainacan(codigo, nome, ctx, leituras, preparos, mapa, self.raiz_final))
@@ -870,6 +1035,9 @@ class Recebedor:
                                                       and leituras[c].carimbo_encontrado),
                                    "erros": len(todos_erros), "bloqueantes": bloqueantes}})
         gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+        (catalogacao / "relatorio.txt").write_text(
+            relatorio_lote(codigo, nome, lote, leituras, por_codigo, todos_erros), encoding="utf-8")
+        (catalogacao / "catalogacao_ERRO.txt").unlink(missing_ok=True)
         prontos = (ler_json(pasta / "status.json", {}) or {}).get("lotes_prontos", [])
         self._status(
             pasta, codigo, PRONTO, ctx,

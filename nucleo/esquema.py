@@ -114,6 +114,14 @@ class Leitura:
     outliers: list[str] = field(default_factory=list)
     ressalvas: list[str] = field(default_factory=list)
     e_documento: bool = False
+    # Procedimento padrão: triagem por série (etapa 2), formato de origem
+    # (etapa 1), pessoas pelas chaves de identidade (etapa 0), período do fundo.
+    serie_incerta: bool = False
+    triagem: dict[str, Any] = field(default_factory=dict)
+    origem_formato: str = ""
+    pessoas_identificadas: list[str] = field(default_factory=list)
+    fora_do_periodo: bool = False
+    textual: dict[str, Any] = field(default_factory=dict)
 
     @property
     def confianca_media(self) -> float:
@@ -206,9 +214,46 @@ def esquema_fotografia() -> dict[str, Any]:
                                   "enum": ["externa", "interna", "detalhe", "aérea", "maquete", "pessoas"]},
                 "elementos_visiveis": {"type": "array", "items": {"type": "string"}},
                 "texto_na_imagem": {"type": "array", "items": {"type": "string"}},
+                "pessoas": {
+                    "type": "array",
+                    "description": "Cada pessoa visível, da esquerda para a direita: só traços "
+                                   "visíveis, NUNCA nome.",
+                    "items": {"type": "object", "properties": {
+                        "posicao": {"type": "string"},
+                        "barba": {"type": "boolean"}, "bigode": {"type": "boolean"},
+                        "oculos": {"type": "boolean"},
+                        "outros_tracos": {"type": "string"}}},
+                },
                 "legenda_proposta": {"type": "string"},
                 "confianca": {"type": "number"},
             },
             "required": ["tipo_de_imagem", "assunto", "legenda_proposta", "confianca"],
+        },
+    }
+
+
+def esquema_textual() -> dict[str, Any]:
+    """Esquema do DOCUMENTO TEXTUAL, série S02 (procedimento padrão, etapa 3)."""
+    return {
+        "name": "registrar_documento",
+        "description": "Transcreve um documento textual (carta, memorial, ficha, planilha, anotação).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tipo_documental": {"type": "string",
+                                    "enum": ["carta", "memorial", "programa", "planilha", "ficha",
+                                             "contrato", "orçamento", "anotação", "outro"]},
+                "remetente": {"type": ["string", "null"]},
+                "destinatario": {"type": ["string", "null"]},
+                "data": {"type": ["string", "null"], "description": "Como está escrita."},
+                "ano": {"type": ["string", "null"], "description": "Quatro dígitos, só se escrito."},
+                "assunto": {"type": ["string", "null"],
+                            "description": "Assunto ESCRITO no documento (ref., assunto, título)."},
+                "projeto_citado": {"type": ["string", "null"]},
+                "transcricao": {"type": "string", "description": "Texto integral, literal."},
+                "legivel": {"type": "boolean"},
+                "confianca": {"type": "number"},
+            },
+            "required": ["tipo_documental", "transcricao", "legivel", "confianca"],
         },
     }
