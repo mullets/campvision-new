@@ -26,12 +26,12 @@ from PIL import Image
 
 _log = logging.getLogger("cv2.formatos")
 
-EXTENSOES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".nef", ".pdf", ".cdr")
+EXTENSOES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".nef", ".pdf", ".cdr", ".plt")
 # Ordem de preferência para LER (a mais leve primeiro).
-PREFERENCIA = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".nef", ".pdf", ".cdr")
+PREFERENCIA = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".nef", ".pdf", ".cdr", ".plt")
 # Formatos em que o exiftool não grava metadado: vão para o acervo como estão,
 # o EXIF fica só nas outras versões e no catalogacao/ (procedimento, etapa 1).
-SEM_EXIF = (".cdr", ".nef")
+SEM_EXIF = (".cdr", ".nef", ".plt")
 
 
 def origem_formato(caminho: Path) -> str:
@@ -161,6 +161,10 @@ def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
             img = _dng(origem)
         elif ext == ".cdr":
             img = _cdr(origem, destino)
+        elif ext == ".plt":
+            from .hpgl import renderizar
+
+            img = renderizar(origem)
         elif ext == ".pdf":
             img = _pdf(origem, destino)
         else:

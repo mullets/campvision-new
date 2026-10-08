@@ -81,7 +81,7 @@ def tipo_de_desenho(titulo: str) -> str:
 
 
 TERMOS_DOCUMENTO = re.compile(
-    r"\b(documento\w*|curriculo\w*|caderno\w*|pasta\w*|recortes?|correspondenc\w*|memorial\w*|contrato\w*)\b")
+    r"\b(documento\w*|curriculo\w*|caderno\w*|pasta\w*|recortes?|correspondenc\w*|memorial\w*|contrato\w*|oficios?)\b")
 
 
 def e_documento(titulo: str) -> bool:

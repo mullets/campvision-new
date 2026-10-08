@@ -320,10 +320,12 @@ class TestMetodoNoRecebimento(Base):
         erros = json.loads((cat / "erros.json").read_text())
         self.assertTrue(any(e["categoria"] == "autoria divergente" and e["gravidade"] == "bloqueia" for e in erros))
         pacote = json.loads((cat / "pacote_tainacan.json").read_text())
-        self.assertEqual(len(pacote["itens"]), 2)
-        self.assertFalse(pacote["itens"][0]["publicavel"])
-        self.assertIn("autoria divergente", pacote["itens"][0]["bloqueios"])
-        self.assertEqual(pacote["itens"][0]["credito"],
+        # CV-06: autoria divergente sai do pacote de publicação e vai para "retirados".
+        self.assertEqual(len(pacote["documentos"]), 0)
+        self.assertEqual(len(pacote["retirados"]), 2)
+        self.assertFalse(pacote["retirados"][0]["publicavel"])
+        self.assertIn("autoria divergente", pacote["retirados"][0]["bloqueios"])
+        self.assertEqual(pacote["retirados"][0]["credito"],
                          "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista")
         lote = json.loads(next((cat / "lotes").glob("*.json")).read_text())
         self.assertFalse(lote["aceite"]["publicavel"])

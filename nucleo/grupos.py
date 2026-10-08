@@ -35,14 +35,46 @@ _log = logging.getLogger("cv2.grupos")
 LIMIAR_SIMILARIDADE = 0.82
 
 
+# Abreviações expandidas ANTES de comparar (CV-16): "MAL. FLORIANO" = "MARECHAL FLORIANO".
+ABREVIACOES = (
+    (r"\bmal\b|\bmar\b|\bmrl\b|\bmlr\b", "marechal"), (r"\bcap\b", "capitao"),
+    (r"\bcel\b", "coronel"), (r"\bgal\b|\bgen\b", "general"), (r"\bdr\b", "doutor"),
+    (r"\bprof\b", "professor"), (r"\bpres\b", "presidente"), (r"\bsta\b", "santa"),
+    (r"\bsto\b", "santo"), (r"\br\b", "rua"), (r"\bav\b", "avenida"), (r"\bal\b", "alameda"),
+    (r"\bpca\b", "praca"), (r"\bestr\b", "estrada"), (r"\brod\b", "rodovia"),
+    (r"\besq\b|\bx\b", "esquina com"), (r"\bn\b|\bno\b|\bnum\b", ""),
+)
+
+
 def normalizar(texto: str) -> str:
-    """Minúsculas, sem acento, sem pontuação, espaços colapsados."""
+    """Minúsculas, sem acento, sem pontuação, abreviações expandidas, espaços colapsados."""
     if not texto:
         return ""
     sem_acento = "".join(
         c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn"
     )
-    return re.sub(r"[^a-z0-9 ]+", " ", sem_acento.lower()).strip()
+    base = re.sub(r"[^a-z0-9 ]+", " ", sem_acento.lower())
+    for padrao, troca in ABREVIACOES:
+        base = re.sub(padrao, troca, base)
+    return re.sub(r"\s+", " ", base).strip()
+
+
+def unidade_e_revisao(leitura: Leitura) -> tuple[str, str]:
+    """('ABC-1', 'R-1') a partir de codigo_unidade/revisao/codigo_serie (CV-08)."""
+    v = leitura.valores
+    bruto = (v.get("codigo_unidade") or "").strip()
+    revisao = (v.get("revisao") or "").strip()
+    achado = re.search(r"/\s*(R-?\s*\d+)\b", bruto, re.IGNORECASE)
+    if achado:
+        revisao = revisao or achado.group(1).upper().replace(" ", "")
+        bruto = bruto[:achado.start()].strip()
+    if not revisao:
+        texto = " ".join(v.get(c, "") or "" for c in ("codigo_serie", "titulo_prancha"))
+        achado = re.search(r"/\s*R-?\s*(\d+)\b|\bREV\.?\s*([A-Z0-9]{1,3})\b|\b(\d+)\s*[ªa]\s*revis",
+                           texto, re.IGNORECASE)
+        if achado:
+            revisao = "R-" + next(g for g in achado.groups() if g).upper()
+    return bruto, revisao
 
 
 def _similares(a: str, b: str) -> bool:
@@ -64,8 +96,11 @@ def agrupar(leituras: list[Leitura]) -> dict[str, list[Leitura]]:
     chaves_rev: dict[str, str] = {}
 
     for leitura in leituras:
-        bruto = (leitura.valores.get("projeto") or "").strip()
-        revisao = (leitura.valores.get("revisao") or "").strip()
+        unidade, revisao = unidade_e_revisao(leitura)
+        if revisao and not leitura.valores.get("revisao"):
+            leitura.valores["revisao"] = revisao
+        # Código de unidade escrito na folha separa obras melhor que o nome (CV-08).
+        bruto = unidade or (leitura.valores.get("projeto") or "").strip()
         if bruto and revisao:  # McD-1 e McD-1/R-1 são obras diferentes (§3.2)
             bruto = f"{bruto} [{revisao}]"
         if not bruto:
@@ -99,6 +134,22 @@ def _consenso(valores: list[str]) -> tuple[str, str]:
     grafias = Counter(v for v in valores if normalizar(v) == vencedor)
     canonica = max(grafias, key=lambda g: (grafias[g], len(g)))
     return vencedor, canonica
+
+
+def data_iso(data: str) -> str:
+    """'14.10.83' → '1983-10-14'; '08/82' → '1982-08'; '1975' → '1975'. Sem chute."""
+    d = (data or "").strip()
+    achado = re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4})\b", d)
+    if achado:
+        dia, mes, ano = achado.groups()
+        ano = ano if len(ano) == 4 else f"19{ano}"
+        if 1 <= int(mes) <= 12 and 1 <= int(dia) <= 31:
+            return f"{ano}-{int(mes):02d}-{int(dia):02d}"
+    achado = re.search(r"\b(\d{1,2})[./-](\d{2}|\d{4})\b", d)
+    if achado and 1 <= int(achado.group(1)) <= 12:
+        ano = achado.group(2) if len(achado.group(2)) == 4 else f"19{achado.group(2)}"
+        return f"{ano}-{int(achado.group(1)):02d}"
+    return _ano(d)
 
 
 def _ano(valor: str) -> str:
@@ -152,6 +203,17 @@ def consolidar(
                 leitura.valores[campo] = canonica
                 leitura.confiancas[campo] = max(leitura.confiancas.get(campo, 0.0), melhor_conf)
 
+        # Endereço: variantes e conflito de verdade (rua ou número diferentes) — CV-16.
+        enderecos = [l.lidos_originais.get("endereco", "") for l in itens if l.lidos_originais.get("endereco")]
+        variantes = sorted(set(enderecos))
+        nums = {tuple(re.findall(r"\d+", normalizar(e))) for e in enderecos}
+        ruas = {re.sub(r"\d+", "", normalizar(e)).strip() for e in enderecos}
+        conflito = len(variantes) > 1 and (len(nums) > 1 or not all(
+            _similares(a, b) for a in ruas for b in ruas))
+        for leitura in itens:
+            leitura.endereco_variantes = variantes if len(variantes) > 1 else []
+            leitura.conflito_endereco = conflito
+
         anos = [_ano(l.valores.get("ano", "")) for l in itens]
         anos = [a for a in anos if a]
         if anos:
@@ -163,6 +225,18 @@ def consolidar(
         for leitura in itens:
             leitura.ano_do_projeto = ano_grupo
             proprio = _ano(leitura.valores.get("ano", ""))
+            leitura.data_lida = leitura.data_lida or leitura.lidos_originais.get("data", "") \
+                or leitura.valores.get("data", "")
+            leitura.data_iso = data_iso(leitura.data_lida)
+            if ano_grupo and proprio and abs(int(proprio) - int(ano_grupo)) >= 2:
+                # CV-12: lida preservada, sugerida = ano do grupo, ressalva em português.
+                leitura.data_outlier = True
+                leitura.data_sugerida = ano_grupo
+                nota = (f"data lida '{leitura.data_lida or proprio}' destoa do conjunto ({ano_grupo}); "
+                        f"leitura mais provável {ano_grupo} — conferir no original antes de publicar "
+                        f"qualquer data de {proprio}")
+                if nota not in leitura.ressalvas:
+                    leitura.ressalvas.append(nota)
             if ano_grupo and proprio and proprio != ano_grupo:
                 leitura.outliers.append("ano")
                 alternativas = " ".join(leitura.alternativas.get("data", []) + leitura.alternativas.get("ano", []))

@@ -42,6 +42,9 @@ CAMPOS: tuple[Campo, ...] = (
     Campo("folha", "Folha", "Número da folha, onde estiver (carimbo ou contorno): '03', 'F.34'.", False),
     Campo("total_folhas", "Total de folhas", "Total de folhas do conjunto, se indicado.", False),
     Campo("codigo_serie", "Código de série", "Código da série/folha, ex.: 'FL 1/6', 'C-3/12', 'ABC-2/R-1'.", False),
+    Campo("codigo_unidade", "Código de unidade",
+          "Código que identifica a obra/unidade escrito nas folhas (sigla + número, ex.: 'ABC-1', "
+          "'ABC-1/R-1'), quando houver. Não confundir com número de folha.", False),
     Campo("revisao", "Revisão", "Indicação de revisão/reforma, ex.: 'R-1', 'REV. A'.", False),
     Campo("ano", "Ano", "Ano de 4 dígitos derivado da data lida.", False, do_modelo=False),
     Campo("tipo", "Tipo", "Tipo de desenho, derivado do título por regra (§5.2).", False, do_modelo=False),
@@ -122,6 +125,16 @@ class Leitura:
     pessoas_identificadas: list[str] = field(default_factory=list)
     fora_do_periodo: bool = False
     textual: dict[str, Any] = field(default_factory=dict)
+    # Tickets CV-01/08/09/12/16/21.
+    arquivo_origem: str = ""
+    data_lida: str = ""
+    data_iso: str = ""
+    data_sugerida: str = ""
+    data_outlier: bool = False
+    endereco_variantes: list[str] = field(default_factory=list)
+    conflito_endereco: bool = False
+    confianca_rotacao: float = 0.0
+    titulo_publicacao: str = ""
 
     @property
     def confianca_media(self) -> float:

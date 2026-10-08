@@ -34,7 +34,9 @@ def _colunas() -> list[str]:
     metodo = ["Modo", "Autoria divergente", "Duplicata de", "Tipo de duplicata",
               "Rotação aplicada", "Espelhada", "Orientação incerta", "Outliers", "Ressalvas",
               "Documento (não obra)", "Materiais citados", "Anotações manuscritas",
-              "Onde", "Alternativas", "Transcrição integral", "md5", "Hash perceptual"]
+              "Onde", "Alternativas", "Transcrição integral", "md5", "Hash perceptual",
+              "Arquivo de origem", "Título para publicar", "Data lida", "Data ISO", "Data sugerida",
+              "Confiança da rotação", "Série incerta", "Variantes de endereço"]
     return (
         fixas + campos + da_pasta + metodo
         + ["Rotação", "Passes", "Nota da IA", "Erro"] + espelho + lidos
@@ -92,6 +94,9 @@ def _linha(leitura: Leitura) -> list[object]:
         "; ".join(f"{k}={v}" for k, v in leitura.onde.items()),
         "; ".join(f"{k}={'/'.join(v)}" for k, v in leitura.alternativas.items()),
         leitura.transcricao_integral, leitura.md5, leitura.hash_perceptual,
+        leitura.arquivo_origem, leitura.titulo_publicacao, leitura.data_lida, leitura.data_iso,
+        leitura.data_sugerida, leitura.confianca_rotacao, sim(leitura.serie_incerta),
+        " | ".join(leitura.endereco_variantes),
     ]
     extras: list[object] = [
         leitura.rotacao,

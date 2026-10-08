@@ -81,7 +81,9 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
                 return valor
         return ""
 
-    autor = pega("Arquiteto", "Escritório")
+    # Copyright = autor da obra / CAMP. Sem arquiteto lido, o titular do fundo —
+    # nunca o cliente (CV-10).
+    autor = pega("Arquiteto", "Escritório") or str(extras.get("_autor") or "")
     titulo = pega("Título da prancha", "Tipo", "Projeto")
     projeto = pega("Projeto")
     ano = pega("Ano")

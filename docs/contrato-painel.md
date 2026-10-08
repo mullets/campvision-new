@@ -310,3 +310,24 @@ Novidades no `pacote_tainacan.json`, por item:
 Novos arquivos em `catalogacao/`: `relatorio.txt` (as 8 partes da etapa 8), `orientacao.txt` (giro aplicado folha por folha) e `catalogacao_ERRO.txt` (só quando o lote falha).
 
 Os parâmetros por fundo são escritos por humano em `ACERVOS_CAMP/_campvision/fundos/F0xx.json`; o modelo em branco está em `docs/fundos/MODELO.json` (copie com o código do fundo no nome: `F007.json`). O painel também pode mandar `periodo_atuacao` e `chaves_de_identidade` em `/api/estacoes/contexto`.
+
+## 11. Tickets CV (versão 2026-10-08-07): pacote_tainacan v2
+
+O `pacote_tainacan.json` passa a seguir o esquema D.3, com `"versao": 2`.
+
+- `fundo`: código, sigla, nome, coautores e período de atuação.
+- `projeto`: título, ano, cidade, UF, cliente e endereço.
+  - `fontes` guarda o valor de cada fonte (pasta, info_projeto, carimbo).
+  - `lacunas`: quando as fontes discordam, o campo fica vazio e o motivo vai aqui (CV-13).
+  - `programa_sugerido`, `natureza_sugerida` e `sugestao`: são sempre sugestões; quem grava é gente.
+  - `capa_sugerida`.
+- `documentos` (o antigo `itens` continua igual): `titulo` já limpo (CV-21) e `titulo_lido` literal; `codigo_unidade`, `revisao`; `data_lida`, `data_iso`, `data_sugerida`, `data_outlier`; `rastreio` (de onde veio cada campo); `fotografo` (do `info_projeto.json`, senão "fotógrafo não identificado"); `confianca_rotacao`; `projeto_divergente`; `decisao`.
+- `retirados`: folhas com autoria divergente ou retiradas por decisão humana. Não entram em `documentos` (CV-06 e CV-25).
+- `propostas`: obras distintas na pasta pelo código de unidade (CV-08) e fotos sem obra agrupadas por semelhança (CV-22). A mesma coisa vai em `catalogacao/propostas.json`.
+- `teste: true`: lote de teste; nenhum documento é publicável.
+
+Em `catalogacao/`, `decisoes.json` é gravado por `vigia.py --decisao CODIGO --acao retirar|publicar|nota --motivo "..." --por NOME`. A decisão entra no livro como `decisao`, e nada é apagado.
+
+**Lado do site (CV-01):** criar na coleção Documentos (8013) um metadado de texto "Arquivo de origem" e gravar nele `documentos[].arquivo_origem` (pasta + nome original). O CV2 já manda esse dado; falta o importador do painel gravar.
+
+`reservar` agora envia `proximo_p_local` (o maior P no acervo + 1). Se o painel devolver um P que já é de outra pasta, o lote espera (CV-27).

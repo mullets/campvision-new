@@ -181,3 +181,19 @@ def proximo_documento(pasta_projeto: Path) -> int:
 def codigo_documento(codigo_projeto: str, ano: str, serie: str, numero: int) -> str:
     ano = ano if re.fullmatch(r"\d{4}", ano or "") else "0000"
     return f"{codigo_projeto.upper()}-{ano}-{serie}-D{numero:05d}"
+
+
+def numeros_p(raiz_final: Path, fundo_codigo: str) -> tuple[int, set[str]]:
+    """(maior número P, códigos em uso) do fundo no acervo — CV-27: nunca reusar."""
+    usados: set[str] = set()
+    fundo_codigo = fundo_codigo.upper()
+    for pasta_fundo in raiz_final.glob(f"{fundo_codigo}*"):
+        projetos = pasta_fundo / PASTA_PROJETOS
+        if not projetos.is_dir():
+            continue
+        for pasta in projetos.iterdir():
+            codigo = codigo_da_pasta(pasta) if pasta.is_dir() else ""
+            if codigo.startswith(fundo_codigo + "-"):
+                usados.add(codigo)
+    maior = max((int(c.split("-P")[1]) for c in usados), default=0)
+    return maior, usados

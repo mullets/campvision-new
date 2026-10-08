@@ -389,6 +389,50 @@ def _comando_backtest(config: Config, curado: str | None, contra: str | None,
     return codigo
 
 
+def _comando_decisao(config: Config, args) -> int:
+    from nucleo import estrutura as _est, projeto as _proj, renomear as _ren
+    from nucleo.livro import Livro
+
+    codigo = args.decisao.upper()
+    achado = _est.CODIGO_DOCUMENTO.match(codigo)
+    if not achado or not (args.acao and args.motivo and args.por):
+        print("Uso: --decisao F0xx-P000x-AAAA-S0x-DNNNNN --acao retirar|publicar|nota "
+              "--motivo \"...\" --por NOME", file=sys.stderr)
+        return 2
+    projeto = f"{achado.group(1)}-{achado.group(2)}".upper()
+    pasta = _ren.achar_projeto(Path(config.raiz_final), projeto)
+    if pasta is None:
+        print(f"Projeto {projeto} não encontrado.", file=sys.stderr)
+        return 1
+    try:
+        r = _proj.registrar_decisao(pasta / "catalogacao", codigo, args.acao, args.motivo, args.por,
+                                    Livro(Path(config.raiz_final)), projeto)
+    except ValueError as erro:
+        print(f"Não registrei: {erro}", file=sys.stderr)
+        return 1
+    print(f"Decisão registrada: {r['codigo']} → {r['acao']} ({r['motivo']}, por {r['por']}, {r['em']}).")
+    print("Nada foi apagado. O pacote do Tainacan respeita a decisão no próximo --refazer-lote.")
+    return 0
+
+
+def _comando_backtest_programa(caminho: str) -> int:
+    import csv as _csv
+
+    from nucleo import programa as _prog
+
+    texto = Path(caminho).read_text(encoding="utf-8-sig")
+    linhas = list(_csv.DictReader(texto.splitlines(), dialect=_csv.Sniffer().sniff(texto[:2000], ";,\t")))
+    res = _prog.backtest(linhas)
+    codigo = 0
+    for campo, r in res.items():
+        estado = "LIBERADO" if r["liberado"] else "NÃO LIBERADO"
+        print(f"{campo:<10} {r['taxa']:6.1%} exato ({r['exatos']}/{r['total']}; {r['sem_regra']} sem regra)  {estado}")
+        for titulo, cur, sug in r["divergentes"]:
+            print(f"   examinar: {titulo!r} — curado {cur}, sugerido {sug}")
+        codigo = codigo or (0 if r["liberado"] else 1)
+    return codigo
+
+
 def _comando_monitor() -> int:
     """Tela do servidor: desenha o estado do serviço, sem rodar outra instância."""
     import json as _json
@@ -466,6 +510,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ano", metavar="AAAA", help="Ano novo para --reclassificar")
     p.add_argument("--codigo-novo", metavar="F0xx-P000x", help="Código novo do projeto para --reclassificar")
     p.add_argument("--nome-novo", metavar="NOME", help="Nome novo do projeto para --reclassificar")
+    p.add_argument("--decisao", metavar="F0xx-P000x-AAAA-S0x-DNNNNN",
+                   help="Registra decisão humana sobre um documento (com --acao, --motivo, --por)")
+    p.add_argument("--acao", choices=("retirar", "publicar", "nota"), help="Ação da --decisao")
+    p.add_argument("--motivo", metavar="TEXTO", help="Motivo da --decisao")
+    p.add_argument("--por", metavar="NOME", help="Quem decidiu (--decisao)")
+    p.add_argument("--proximo-p", metavar="F0xx", help="Mostra o próximo número P livre no acervo")
+    p.add_argument("--backtest-programa", metavar="CURADO.csv",
+                   help="Back-test das sugestões de programa/natureza (colunas titulo, programa, natureza)")
     p.add_argument("--livro-legado", action="store_true",
                    help="Leva o histórico antigo (eventos.jsonl) para o livro de registro")
     p.add_argument("--monitor", action="store_true",
@@ -521,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -561,6 +613,18 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_historico(config, args.historico)
     if args.livro_legado:
         return _comando_livro_legado(config)
+    if args.decisao:
+        return _comando_decisao(config, args)
+    if args.proximo_p:
+        from nucleo import estrutura as _est
+
+        raiz = Path(config.raiz_final)
+        maior, usados = _est.numeros_p(raiz, args.proximo_p)
+        print(f"{args.proximo_p.upper()}: maior P no acervo = P{maior:04d}; próximo livre = P{maior + 1:04d}"
+              f" ({len(usados)} número(s) em uso; nunca reusar)")
+        return 0
+    if args.backtest_programa:
+        return _comando_backtest_programa(args.backtest_programa)
     if args.reclassificar:
         from nucleo import renomear as mod_renomear
         from nucleo.livro import Livro

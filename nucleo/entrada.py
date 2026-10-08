@@ -417,6 +417,9 @@ def enriquecer(leituras: dict, preparos: dict, fundo) -> None:
         l.rotacao_aplicada = int(p.get("rotacao", 0) or 0)
         l.espelhada = bool(p.get("espelhada", False))
         l.orientacao_incerta = bool(p.get("incerta", False))
+        pts = sorted((float(v) for v in (p.get("pontos") or {}).values()), reverse=True)
+        l.confianca_rotacao = round((pts[0] - (pts[1] if len(pts) > 1 else 0.0)) / pts[0], 2) \
+            if pts and pts[0] > 0 else 0.0
         l.origem_formato = p.get("origem_formato", "") or l.origem_formato
         tri = p.get("triagem") or {}
         l.triagem = tri
@@ -441,7 +444,7 @@ def enriquecer(leituras: dict, preparos: dict, fundo) -> None:
         elif l.hash_perceptual:
             for outro, h in hashes:
                 if mod_preparo.distancia(h, l.hash_perceptual) <= mod_preparo.DISTANCIA_PERCEPTUAL:
-                    l.duplicata_de, l.tipo_duplicata = outro, "perceptual"
+                    l.duplicata_de, l.tipo_duplicata = outro, "quase"
                     break
         if l.md5:
             por_md5.setdefault(l.md5, codigo)
@@ -495,49 +498,13 @@ def erros_das_leituras(leituras) -> list[dict]:
 
 
 def pacote_tainacan(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: dict,
-                    raiz: Path) -> dict:
-    """Pacote para o painel/importador (§8.2). IDs de termo NÃO são inventados aqui:
-    o painel converte `serie`/`tipo` para o ID de taxonomia — sempre NÚMERO ({"values": 26})."""
-    arquivos_por_codigo: dict[str, list[str]] = {}
-    origem_por_codigo: dict[str, list[dict]] = {}
-    for item in mapa.values():
-        arquivos_por_codigo.setdefault(Path(item["destino"]).stem, []).append(item["destino"])
-        origem_por_codigo.setdefault(Path(item["destino"]).stem, []).append(
-            {"arquivo_origem": item.get("origem", ""), "nome_original": item.get("nome_original", "")})
-    itens = []
-    for doc in sorted(leituras):
-        l = leituras[doc]
-        serie = doc.split("-")[3] if doc.count("-") >= 4 else ctx.serie
-        bloqueios = []
-        if l.autoria_divergente:
-            bloqueios.append("autoria divergente")
-        if l.duplicata_de:
-            bloqueios.append(f"duplicata de {l.duplicata_de}")
-        if l.e_documento:
-            bloqueios.append("ficha de documentação (não é obra)")
-        if l.suspeita_grupo:
-            bloqueios.append("projeto divergente")
-        itens.append({
-            "codigo": doc, "projeto_codigo": codigo, "fundo_codigo": ctx.fundo.codigo,
-            "serie": serie, "modo": l.modo, "titulo": l.valores.get("titulo_prancha", ""),
-            "tipo_de_desenho": l.valores.get("tipo", ""),
-            "ano": l.valores.get("ano", ""), "ano_do_projeto": l.ano_do_projeto,
-            "metadados": {k: v for k, v in l.valores.items() if v},
-            "alternativas": l.alternativas, "onde": l.onde,
-            "transcricao_integral": l.transcricao_integral,
-            "materiais_citados": l.materiais_citados, "foto": l.foto,
-            "credito": ctx.fundo.credito,
-            "preview": preparos.get(doc, {}).get("preview", ""),
-            "arquivos": sorted(arquivos_por_codigo.get(doc, [])),
-            # Pasta + nome original de cada versão: a chave para reler sem pagar de novo.
-            "arquivo_origem": origem_por_codigo.get(doc, []),
-            "origem_formato": l.origem_formato, "serie_incerta": l.serie_incerta,
-            "pessoas_identificadas": l.pessoas_identificadas, "textual": l.textual,
-            "fora_do_periodo": l.fora_do_periodo,
-            "publicavel": not bloqueios, "bloqueios": bloqueios, "ressalvas": l.ressalvas,
-        })
-    return {"versao": 1, "projeto_codigo": codigo, "projeto_nome": nome,
-            "fundo_codigo": ctx.fundo.codigo, "gerado_em": _agora(), "itens": itens}
+                    raiz: Path, catalogacao: Path | None = None, info: dict | None = None,
+                    nome_pasta: str = "") -> dict:
+    """Pacote para o painel/importador (Anexo D.3). Montado em nucleo/projeto.py."""
+    from . import projeto as mod_projeto
+
+    return mod_projeto.pacote(codigo, nome, ctx, leituras, preparos, mapa,
+                              catalogacao or Path("/nao-existe"), info, nome_pasta)
 
 
 def _d(codigo: str) -> str:
@@ -567,8 +534,40 @@ def log_orientacao(leituras: dict) -> str:
     return texto
 
 
+FOLHA_DE_N = re.compile(r"(?:^|[^A-Za-z0-9])([A-Z]{1,3})?\s*[-.]?\s*(\d{1,3})\s*/\s*(\d{1,3})\b")
+
+
+def folhas_faltantes(leituras) -> list[str]:
+    """Pelo total escrito na folha (C-3/12, A 2/13, FL 1/6, folha 3 + total 12) — CV-18."""
+    vistas: dict[tuple[str, int], set[int]] = {}
+    for l in leituras:
+        achou = False
+        for campo in ("codigo_serie", "folha"):
+            m = FOLHA_DE_N.search(" " + (l.valores.get(campo) or ""))
+            if m:
+                prefixo = (m.group(1) or "").upper()
+                prefixo = "" if prefixo in ("FL", "F", "FLS") else prefixo
+                vistas.setdefault((prefixo, int(m.group(3))), set()).add(int(m.group(2)))
+                achou = True
+                break
+        if not achou:
+            total = (l.valores.get("total_folhas") or "").strip()
+            numero = re.search(r"\d+", l.valores.get("folha") or "")
+            if re.fullmatch(r"\d{1,3}", total) and numero:
+                vistas.setdefault(("", int(total)), set()).add(int(numero.group()))
+    saida = []
+    for (prefixo, total), numeros in sorted(vistas.items()):
+        ausentes = sorted(set(range(1, total + 1)) - numeros)
+        if ausentes and total <= 300:
+            nomes = [f"{prefixo}-{n}" if prefixo else str(n) for n in ausentes]
+            rotulo = f"série {prefixo} de {total}" if prefixo else f"conjunto de {total} folhas"
+            saida.append(f"{rotulo}: faltam {', '.join(nomes)}")
+    return saida
+
+
 def relatorio_lote(codigo: str, nome: str, lote: dict, leituras: dict, por_codigo: dict,
-                   erros: list[dict]) -> str:
+                   erros: list[dict], esperado: int | None = None,
+                   catalogacao: Path | None = None) -> str:
     """Relatório final do lote, sempre nas 8 partes e nesta ordem (procedimento, etapa 8)."""
     from collections import Counter
 
@@ -601,22 +600,18 @@ def relatorio_lote(codigo: str, nome: str, lote: dict, leituras: dict, por_codig
         *(f"{c}: série incerta — {(l.triagem or {}).get('motivo', '')}"
           for c, l in sorted(do_lote.items()) if l.serie_incerta)])
     faltam = []
-    por_total: dict[str, set[int]] = {}
-    for l in do_lote.values():
-        total, folha = l.valores.get("total_folhas", ""), l.valores.get("folha", "")
-        n_folha = re.search(r"(\d+)\s*/\s*(\d+)", folha or "")
-        if n_folha and not total:
-            folha, total = n_folha.group(1), n_folha.group(2)
-        if re.fullmatch(r"\d{1,3}", (total or "").strip()) and re.search(r"\d+", folha or ""):
-            por_total.setdefault(total.strip(), set()).add(int(re.search(r"\d+", folha).group()))
-    for total, vistas in por_total.items():
-        ausentes = sorted(set(range(1, int(total) + 1)) - vistas)
-        if ausentes and int(total) <= 300:
-            faltam.append(f"conjunto de {total} folhas: faltam {', '.join(map(str, ausentes))}")
+    if esperado and esperado > len(por_codigo):
+        faltam.append(f"info_projeto diz {esperado} documento(s); chegaram {len(por_codigo)}")
+    faltam += folhas_faltantes(do_lote.values())
     secao(6, "Folhas esperadas que faltam (pelo total do carimbo)", faltam)
     secao(7, "Campos vazios por decisão e ressalvas", [
         f"{c}: {r}" for c, l in sorted(do_lote.items()) for r in l.ressalvas])
-    secao(8, "Retirado / não arquivado", [
+    from .projeto import decisoes as _decisoes
+
+    cat = catalogacao
+    retirados = [f"{c} — retirado por {d['por']} em {d['em'][:10]}: {d['motivo']}"
+                 for c, d in (_decisoes(cat).items() if cat else []) if d.get("acao") == "retirar"]
+    secao(8, "Retirado / não arquivado", retirados + [
         f"{a} — formato não suportado, ficou na entrada" for a in lote.get("nao_suportados", [])])
     bloqueia = [e for e in erros if e.get("gravidade") == "bloqueia"]
     linhas.append(f"Erros: {len(erros)} ({len(bloqueia)} bloqueiam). Detalhe em erros.json.")
@@ -719,12 +714,19 @@ class Recebedor:
             if not self.painel.ligado:
                 return None, "", "painel não configurado: não há como numerar projeto novo"
             chave = self.estado.chave_reserva(ctx.fundo.codigo, ctx.projeto)
+            maior, usados = estrutura.numeros_p(self.raiz_final, ctx.fundo.codigo)
             codigo = self.painel.reservar(
                 ctx.fundo.codigo, ctx.projeto, chave, ano=ctx.ano, cidade=ctx.cidade,
                 identificacao_original=ctx.projeto, operador=ctx.operador,
+                proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
             ) or ""
             if not codigo:
                 return None, "", f"painel não reservou o projeto ({self.painel.ultimo_erro or 'sem resposta'})"
+            # CV-27: número P nunca se reusa. Se o painel devolveu um P que já é de
+            # OUTRA pasta no acervo, não mistura os dois projetos: espera correção.
+            if codigo.upper() in usados:
+                return None, "", (f"painel devolveu {codigo}, que já é outro projeto no acervo "
+                                  f"(maior P local: P{maior:04d}) — corrigir a numeração no painel")
             self.estado.guardar_codigo(ctx.fundo.codigo, ctx.projeto, codigo)
         nome = ctx.projeto or codigo
         return estrutura.garantir_projeto(pasta_fundo, codigo, nome, ctx.fundo), codigo, nome
@@ -895,6 +897,7 @@ class Recebedor:
                 "rotacao": prep.orientacao.rotacao, "espelhada": prep.orientacao.espelhada,
                 "incerta": prep.orientacao.incerta, "pontos": prep.orientacao.pontos,
                 "lido_de": melhor.name, "origem_formato": formatos.origem_formato(melhor),
+                "tamanho": max((v.stat().st_size for v in versoes if v.exists()), default=0),
                 "preview": self._relativo(prep.preview) if prep.preview else "",
             }
             bruta.unlink(missing_ok=True)
@@ -954,6 +957,17 @@ class Recebedor:
 
         # Passada 3 complementos (§2.3, §4.4) — em código, sobre o projeto inteiro.
         enriquecer(leituras, preparos, ctx.fundo)
+        from . import projeto as mod_projeto
+
+        mod_projeto.melhor_versao(leituras, preparos)
+        for aviso in mod_projeto.congelar_canonicas(leituras, ctx.fundo.codigo, self.pasta_estado):
+            _log.warning(aviso)
+        origem_doc: dict[str, list[str]] = {}
+        for item in mapa.values():
+            origem_doc.setdefault(Path(item["destino"]).stem, []).append(item.get("origem", ""))
+        for c, l in leituras.items():
+            l.arquivo_origem = " | ".join(sorted(origem_doc.get(c, [])))
+            l.titulo_publicacao = mod_projeto.titulo_publicacao(l, nome, str(unidade.relativo.name))
         mod_planilha.escrever_json(list(leituras.values()), catalogacao / "leituras.json")
         mod_planilha.escrever_csv(list(leituras.values()), catalogacao / "catalogacao.csv")
 
@@ -971,11 +985,19 @@ class Recebedor:
             if vezes >= 2 or len(anos) == 1:
                 ano_grupo = valor
         codigos = {Path(v["destino"]).stem for v in mapa.values()}
-        trocas = {c: mod_renomear.novo_codigo(c, ano=ano_grupo) for c in codigos if "-0000-" in c}
-        if ano_grupo and trocas:
+        # CV-14: título que descreve documento, numa pasta sem série declarada, vai para S02.
+        documentos_s02 = {c for c, l in leituras.items()
+                          if ctx.serie_deduzida and l.e_documento and "-S01-" in c}
+        trocas = {c: mod_renomear.novo_codigo(c, ano=ano_grupo if "-0000-" in c and ano_grupo else None,
+                                              serie="S02" if c in documentos_s02 else None)
+                  for c in codigos if ("-0000-" in c and ano_grupo) or c in documentos_s02}
+        trocas = {a: b for a, b in trocas.items() if a != b}
+        if trocas:
             gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)  # o renomear reescreve
-            movidos = mod_renomear.renomear(pasta, self.raiz_final, self.pasta_estado, trocas,
-                                            self.livro, f"ano do projeto {ano_grupo} lido nas pranchas")
+            movidos = mod_renomear.renomear(
+                pasta, self.raiz_final, self.pasta_estado, trocas, self.livro,
+                "; ".join(m for m in (f"ano do projeto {ano_grupo} lido nas pranchas" if ano_grupo else "",
+                                      "documento textual pelo título (CV-14)" if documentos_s02 else "") if m))
             arquivados = [(o, movidos.get(d, d), trocas.get(c, c), sh) for o, d, c, sh in arquivados]
             por_codigo = {trocas.get(c, c): [movidos.get(v, v) for v in vs] for c, vs in por_codigo.items()}
             mapa = ler_json(mapa_caminho, {}) or {}
@@ -994,6 +1016,7 @@ class Recebedor:
             campos = {c.rotulo: (leitura.valores.get(c.nome, "") if leitura else "") for c in CAMPOS}
             campos.update({
                 "_credito": ctx.fundo.credito, "_codigo": codigo_doc, "_fundo": ctx.fundo.codigo,
+                "_autor": ctx.fundo.nome,
                 "_serie": ctx.serie, "_operador": ctx.operador, "_estacao": ctx.estacao,
                 "_digitalizado_em": ctx.enviado_em, "_nome_original": origem.name,
             })
@@ -1021,7 +1044,13 @@ class Recebedor:
         (catalogacao / "orientacao.txt").write_text(log_orientacao(leituras), encoding="utf-8")
         bloqueantes = sum(1 for e in todos_erros if e["gravidade"] == "bloqueia")
         gravar_json(catalogacao / "pacote_tainacan.json",
-                    pacote_tainacan(codigo, nome, ctx, leituras, preparos, mapa, self.raiz_final))
+                    pacote_tainacan(codigo, nome, ctx, leituras, preparos, mapa, self.raiz_final,
+                                    catalogacao, ler_json(unidade.pasta / "info_projeto.json", {})
+                                    or ler_json(pasta / "info_projeto.json", {}) or {},
+                                    unidade.relativo.name))
+        propostas = ler_json(catalogacao / "pacote_tainacan.json", {}).get("propostas") or {}
+        if propostas.get("obras_na_pasta") or propostas.get("fotos_sem_obra"):
+            gravar_json(catalogacao / "propostas.json", propostas)
         lote["aceite"] = checklist_aceite(por_codigo, leituras, todos_erros, lote)
 
         # ---- 8. pronto (último), info, aviso
@@ -1036,7 +1065,8 @@ class Recebedor:
                                    "erros": len(todos_erros), "bloqueantes": bloqueantes}})
         gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
         (catalogacao / "relatorio.txt").write_text(
-            relatorio_lote(codigo, nome, lote, leituras, por_codigo, todos_erros), encoding="utf-8")
+            relatorio_lote(codigo, nome, lote, leituras, por_codigo, todos_erros,
+                           _contagem_esperada(unidade), catalogacao), encoding="utf-8")
         (catalogacao / "catalogacao_ERRO.txt").unlink(missing_ok=True)
         prontos = (ler_json(pasta / "status.json", {}) or {}).get("lotes_prontos", [])
         self._status(
