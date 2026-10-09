@@ -40,6 +40,8 @@ class _Servidor:
                 dono.pedidos.append(("POST", self.path, corpo))
                 if self.path.endswith("/reservar"):
                     self._r(*dono.resposta_reserva)
+                elif self.path.endswith("/iniciado") and getattr(dono, "encerrado", False):
+                    self._r(409, {"detail": "Pedido já encerrado"})
                 elif self.path.endswith("/aviso") and not dono.aceitar_aviso:
                     self._r(503, {})
                 else:
@@ -86,6 +88,13 @@ class TestPainel(unittest.TestCase):
         self.srv.resposta_reserva = (200, {"codigo": "F026-P0043"})
         self.p.reservar("F026", "Outro", "b" * 32)
         self.assertFalse(self.p.ultima_reserva["existente"])
+
+    def test_releitura_contrato_do_painel(self):
+        self.assertTrue(self.p.releitura_iniciada(5, "campvision2"))
+        self.assertEqual(self.srv.pedidos[-1][2], {"estacao": "campvision2"})
+        self.srv.encerrado = True
+        self.assertFalse(self.p.releitura_iniciada(5, "campvision2"))
+        self.assertEqual(self.p.pedidos_releitura("campvision2"), [])  # GET devolve fundos, não pedidos
 
     def test_aviso_perdido_e_reenviado(self):
         self.srv.aceitar_aviso = False

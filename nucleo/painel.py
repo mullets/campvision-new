@@ -106,15 +106,24 @@ class Painel:
 
     def pedidos_releitura(self, estacao_id: str) -> list[dict]:
         """Pedidos de releitura abertos no painel. Painel sem o recurso (404) = lista vazia."""
-        status, dados = self._chamar("GET", f"/api/estacoes/pedidos-releitura?estacao_id={estacao_id}")
+        status, dados = self._chamar(
+            "GET", f"/api/estacoes/pedidos-releitura?estacao={estacao_id}&estacao_id={estacao_id}")
         if status != 200:
             return []
         if isinstance(dados, dict):
             dados = dados.get("pedidos") or []
         return [d for d in dados if isinstance(d, dict) and d.get("id")] if isinstance(dados, list) else []
 
+    def releitura_iniciada(self, pedido_id, estacao_id: str) -> bool:
+        """True = pode ler. 409 = pedido já encerrado (cancelado): NÃO ler."""
+        status, _ = self._chamar("POST", f"/api/estacoes/pedidos-releitura/{pedido_id}/iniciado",
+                                 {"estacao": estacao_id})
+        if status == 409:
+            return False
+        return True  # painel antigo sem a rota (404) ou fora do ar: lê assim mesmo
+
     def releitura_concluida(self, pedido_id, resumo: dict, ok: bool = True, mensagem: str = "") -> bool:
-        corpo = {"ok": ok, "mensagem": mensagem, **resumo}
+        corpo = {"ok": ok, "mensagem": (mensagem or "")[:500], **resumo}
         status, _ = self._chamar("POST", f"/api/estacoes/pedidos-releitura/{pedido_id}/concluido", corpo)
         return 200 <= status < 300
 

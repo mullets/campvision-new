@@ -776,14 +776,23 @@ class Vigia:
         feitos = 0
         for pedido in self.painel.pedidos_releitura(self.config.estacao_id):
             codigo = str(pedido.get("projeto_codigo") or "")
+            if not self.painel.releitura_iniciada(pedido["id"], self.config.estacao_id):
+                continue  # cancelado no painel
             self.estado.situacao = "relendo"
             self.estado.projeto_atual = codigo
+            escopo = str(pedido.get("escopo") or "vazios")
+            documentos = pedido.get("documentos") or ([pedido["item_codigo"]] if pedido.get("item_codigo") else None)
             try:
                 resumo = mod_releitura.reler(
                     Path(self.config.raiz_final), self.pasta_estado, self.config, self.cliente, codigo,
-                    str(pedido.get("escopo") or "vazios"), pedido.get("documentos") or None,
-                    str(pedido.get("motivo") or ""), str(pedido.get("pedido_por") or ""), self.livro)
-                self.painel.releitura_concluida(pedido["id"], resumo)
+                    escopo, documentos, str(pedido.get("motivo") or ""), str(pedido.get("pedido_por") or ""),
+                    self.livro)
+                ok = resumo["relidos"] > 0 and not (resumo["falhas"] and not resumo["regravados"])
+                mensagem = (f"{resumo['relidos']} folha(s) relida(s), {resumo['com_mudanca']} com mudança, "
+                            f"{resumo['campos_preenchidos']} campo(s) preenchido(s); US$ {resumo['custo_usd']:.2f}"
+                            + (f"; falhas: {'; '.join(resumo['falhas'])[:200]}" if resumo["falhas"] else "")
+                            if resumo["relidos"] else "nenhuma folha encontrada para o escopo pedido")
+                self.painel.releitura_concluida(pedido["id"], resumo, ok=ok, mensagem=mensagem)
                 self.painel.aviso(codigo, resumo.get("pasta", ""), "pronto")
                 feitos += 1
             except Exception as erro:  # noqa: BLE001 - pedido ruim não derruba o vigia

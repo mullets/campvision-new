@@ -280,13 +280,19 @@ class TestReleitura(unittest.TestCase):
                                      "projeto", motivo="teste", pedido_por="Rafa",
                                      livro=Livro(caso.acervo), leitor=LeitorNovo())
             self.assertEqual(resumo["relidos"], 2)
-            self.assertEqual((res.pasta_projeto / "catalogacao" / "leituras.json").read_text(), principal)
+            # Contrato §14 do painel: regrava leituras/pacote; o antes fica guardado ao lado.
+            self.assertEqual(resumo["regravados"], 2)
+            self.assertEqual((caso.acervo / resumo["pasta"] / "antes_leituras.json").read_text(), principal)
+            self.assertIn("Clube Novo", (res.pasta_projeto / "catalogacao" / "leituras.json").read_text())
+            self.assertIn("Clube Novo", (res.pasta_projeto / "catalogacao" / "pacote_tainacan.json").read_text())
             comp = json.loads((caso.acervo / resumo["pasta"] / "comparacao.json").read_text())
             doc = next(iter(comp["documentos"].values()))
             self.assertEqual(doc["mudou"]["cliente"]["agora"], "Clube Novo")
             self.assertTrue(any(l["acao"] == "relido" for l in Livro(caso.acervo).todas()))
             with self.assertRaises(ValueError):
                 releitura.alvos(res.pasta_projeto, "tudo")
+            um = releitura.alvos(res.pasta_projeto, "folha", ["F026-P0001-1968-S01-D00002"])
+            self.assertEqual(len(um), 1 if any("D00002" in c for c in releitura.alvos(res.pasta_projeto, "projeto")) else 0)
         finally:
             caso.tearDown()
 

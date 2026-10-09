@@ -5,11 +5,13 @@ O fluxo continua de mão única: o painel REGISTRA o pedido e o CV2 PERGUNTA
 resultado AO LADO do que existe e responde (POST .../{id}/concluido).
 
 Regras:
-- a releitura NUNCA sobrescreve catalogacao/leituras.json nem o que foi
-  revisado: o resultado vai para catalogacao/releituras/<quando>/ com
-  `leituras.json` e `comparacao.json` (campo a campo: antes × agora). Quem
-  escolhe é o revisor;
-- escopo: "projeto" (todas as folhas), "documentos" (lista de códigos) ou
+- contrato do painel (docs/campvision.md §14 do camp-painel): o CV2 regrava
+  `catalogacao/leituras.json`, o CSV e o `pacote_tainacan.json` só para as
+  folhas relidas, e o painel reimporta protegendo o que gente já revisou;
+- antes de regravar, a versão anterior fica em catalogacao/releituras/<quando>/
+  (`antes_leituras.json`, `antes_pacote.json`) junto com `leituras.json` novo e
+  `comparacao.json` (campo a campo: antes × agora) — nada se perde;
+- escopo: "projeto" (todas as folhas), "folha"/"documentos" (códigos) ou
   "vazios" (folhas com erro, sem carimbo, ou com campo do modelo vazio);
 - sem a imagem de leitura em cache, ela é refeita a partir do master no acervo
   (mesmo preparo: orientação pelo texto, 2000 px).
@@ -26,7 +28,7 @@ from . import formatos, planilha as mod_planilha, preparo as mod_preparo, renome
 from .esquema import CAMPOS_DO_MODELO, Leitura
 
 _log = logging.getLogger("cv2.releitura")
-ESCOPOS = ("projeto", "documentos", "vazios")
+ESCOPOS = ("projeto", "documentos", "folha", "vazios")
 
 
 def _agora() -> str:
@@ -59,7 +61,7 @@ def alvos(pasta_projeto: Path, escopo: str, documentos: list[str] | None = None)
     todos = sorted(_masters(pasta_projeto))
     if escopo == "projeto":
         return todos
-    if escopo == "documentos":
+    if escopo in ("documentos", "folha"):
         pedidos = {d.upper() for d in documentos or []}
         return [c for c in todos if c.upper() in pedidos]
     atuais = {Path(l.arquivo).stem: l for l in
@@ -82,7 +84,7 @@ def _imagem(codigo_doc: str, versoes: list[Path], cache: Path, pasta_estado: Pat
 
 def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto: str,
           escopo: str = "vazios", documentos: list[str] | None = None, motivo: str = "",
-          pedido_por: str = "", livro=None, leitor=None) -> dict:
+          pedido_por: str = "", livro=None, leitor=None, tabela=None, regravar: bool = True) -> dict:
     """Relê e grava ao lado. Devolve o resumo (vai na resposta ao painel)."""
     pasta = mod_renomear.achar_projeto(raiz_final, codigo_projeto)
     if pasta is None:
@@ -129,13 +131,16 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
     destino = pasta / "catalogacao" / "releituras" / quando
     destino.mkdir(parents=True, exist_ok=True)
     mod_planilha.escrever_json(novas, destino / "leituras.json")
+    regravados = 0
+    if regravar and novas:
+        regravados = _regravar(pasta, raiz_final, pasta_estado, destino, atuais, novas, tabela)
     custo = round(config.custo_estimado_usd(t_in, t_out), 4) if hasattr(config, "custo_estimado_usd") else 0.0
     resumo = {
         "projeto_codigo": codigo, "escopo": escopo, "motivo": motivo, "pedido_por": pedido_por,
         "relido_em": _agora(), "documentos": escolhidos, "relidos": len(novas),
         "com_mudanca": sum(1 for c in comparacao.values() if c["mudou"]),
         "campos_preenchidos": sum(len(c["preencheu"]) for c in comparacao.values()),
-        "falhas": falhas, "custo_usd": custo,
+        "falhas": falhas, "custo_usd": custo, "regravados": regravados,
         "pasta": str(destino.relative_to(raiz_final)) if destino.is_relative_to(raiz_final) else str(destino),
     }
     (destino / "comparacao.json").write_text(
@@ -147,3 +152,57 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
     _log.info("Releitura %s (%s): %d folha(s), %d com mudança, US$ %.2f.",
               codigo, escopo, len(novas), resumo["com_mudanca"], custo)
     return resumo
+
+
+def _regravar(pasta: Path, raiz_final: Path, pasta_estado: Path, destino: Path, atuais: dict,
+              novas: list[Leitura], tabela=None) -> int:
+    """Troca as folhas relidas em leituras.json/CSV/pacote, guardando o antes ao lado."""
+    import shutil
+    from types import SimpleNamespace
+
+    from . import entrada as mod_entrada, fundos as mod_fundos, grupos, projeto as mod_projeto
+
+    cat = pasta / "catalogacao"
+    for nome, copia in (("leituras.json", "antes_leituras.json"), ("pacote_tainacan.json", "antes_pacote.json"),
+                        ("catalogacao.csv", "antes_catalogacao.csv")):
+        if (cat / nome).exists():
+            shutil.copy2(cat / nome, destino / copia)
+    leituras = dict(atuais)
+    trocadas = 0
+    for nova in novas:
+        codigo = Path(nova.arquivo).stem
+        if nova.erro:
+            continue  # leitura que falhou não substitui a que existe
+        leituras[codigo] = nova
+        trocadas += 1
+    if not trocadas:
+        return 0
+    lista = [leituras[c] for c in sorted(leituras)]
+    for l in lista:  # consolidação do grupo refeita do zero, sem herdar outliers velhos
+        if l.lidos_originais:
+            l.valores.update(l.lidos_originais)
+        l.lidos_originais, l.outliers, l.grupo = {}, [], ""
+        l.ressalvas = [r for r in l.ressalvas if "grupo" not in r and "conjunto" not in r and "série indica" not in r]
+    grupos.consolidar(lista)
+    pacote_antigo = mod_entrada.ler_json(cat / "pacote_tainacan.json", {}) or {}
+    preparos = mod_entrada.ler_json(cat / "preparo.json", {}) or {}
+    mapa = mod_entrada.ler_json(cat / "mapa_origem.json", {}) or {}
+    codigo_projeto = pacote_antigo.get("projeto_codigo") or pasta.name.split(" - ")[0]
+    nome = pacote_antigo.get("projeto_nome") or (pasta.name.split(" - ", 1) + [""])[1]
+    tabela = tabela or mod_fundos.com_parametros(mod_fundos.carregar(pasta_estado), raiz_final)
+    fundo = tabela.get(codigo_projeto[:4]) or mod_fundos.Fundo(codigo_projeto[:4], "", codigo_projeto[:4])
+    mod_entrada.enriquecer(leituras, preparos, fundo)
+    mod_projeto.melhor_versao(leituras, preparos)
+    for l in leituras.values():
+        l.titulo_publicacao = mod_projeto.titulo_publicacao(l, nome)
+    mod_planilha.escrever_json(lista, cat / "leituras.json")
+    mod_planilha.escrever_csv(lista, cat / "catalogacao.csv")
+    ano = codigo_projeto and next((c.split("-")[2] for c in leituras if c.count("-") >= 4), "0000")
+    ctx = SimpleNamespace(fundo=fundo, serie="S01", ano=ano, projeto=nome,
+                          teste=bool(pacote_antigo.get("teste")))
+    info = mod_entrada.ler_json(pasta / "info_projeto.json", {}) or {}
+    novo = mod_entrada.pacote_tainacan(codigo_projeto, nome, ctx, leituras, preparos, mapa, raiz_final,
+                                       cat, info, "")
+    mod_entrada.gravar_json(cat / "pacote_tainacan.json", novo)
+    mod_entrada.gravar_json(cat / "erros.json", mod_entrada.erros_das_leituras(leituras.values()))
+    return trocadas
