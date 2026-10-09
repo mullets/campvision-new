@@ -724,7 +724,10 @@ class Recebedor:
                 return None, "", f"painel não reservou o projeto ({self.painel.ultimo_erro or 'sem resposta'})"
             # CV-27: número P nunca se reusa. Se o painel devolveu um P que já é de
             # OUTRA pasta no acervo, não mistura os dois projetos: espera correção.
-            if codigo.upper() in usados:
+            existente = bool((getattr(self.painel, "ultima_reserva", None) or {}).get("existente"))
+            if existente:
+                _log.info("Painel: %s é projeto que já existe (decisão humana) — o lote entra nele.", codigo)
+            if codigo.upper() in usados and not existente:
                 return None, "", (f"painel devolveu {codigo}, que já é outro projeto no acervo "
                                   f"(maior P local: P{maior:04d}) — corrigir a numeração no painel")
             self.estado.guardar_codigo(ctx.fundo.codigo, ctx.projeto, codigo)

@@ -31,6 +31,7 @@ class Painel:
         self.timeout = timeout
         self.fila = (pasta_estado / "painel_pendentes.json") if pasta_estado else None
         self.ultimo_erro = ""
+        self.ultima_reserva: dict = {"pendente": False, "existente": False, "mensagem": ""}
         self.ultimo_ok: str = ""
 
     @property
@@ -82,6 +83,17 @@ class Painel:
         corpo = {"fundo_codigo": fundo_codigo, "titulo": titulo, "chave_reserva": chave_reserva}
         corpo.update({k: v for k, v in extra.items() if v not in (None, "")})
         status, dados = self._chamar("POST", "/api/estacoes/projetos/reservar", corpo)
+        # Contrato §6.2 do painel: 202 = achou projeto parecido e abriu decisão para
+        # uma pessoa (sem código; tentar de novo com a mesma chave); 200 com
+        # existente=true = "é o mesmo projeto", o material entra no que já existe.
+        self.ultima_reserva = {"pendente": False, "existente": False, "mensagem": ""}
+        if status == 202 and isinstance(dados, dict):
+            mensagem = str(dados.get("mensagem") or "aguardando decisão no painel (projeto parecido)")
+            self.ultima_reserva = {"pendente": True, "existente": False, "mensagem": mensagem,
+                                   "decisao_id": dados.get("decisao_id")}
+            self.ultimo_erro = mensagem
+            _log.info("Reserva pendente: %s", mensagem)
+            return None
         if status not in (200, 201) or not isinstance(dados, dict):
             if status:
                 _log.warning("Reserva recusada (%s): %s", status, dados)
@@ -89,6 +101,7 @@ class Painel:
         codigo = dados.get("codigo") or (dados.get("projeto") or {}).get("codigo")
         if not codigo and dados.get("numero"):
             codigo = f"{fundo_codigo}-P{int(dados['numero']):04d}"
+        self.ultima_reserva["existente"] = bool(dados.get("existente"))
         return str(codigo) if codigo else None
 
     def heartbeat(self, dados: dict) -> bool:

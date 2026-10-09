@@ -200,3 +200,45 @@ class TestOrganizarFormatos(unittest.TestCase):
             self.assertTrue((serie / "JPG" / "F000-P0001-1970-S01-D00001.jpg").exists())
             self.assertIn("/TIF/", (cat / "mapa_origem.json").read_text())
             self.assertEqual(renomear.organizar_formatos(raiz, raiz / "estado"), 0)  # idempotente
+
+
+class TestReservaExistente(unittest.TestCase):
+    """Card 83: 202 aguarda; existente=true entra no projeto que já existe (sem a trava CV-27)."""
+
+    def test_existente_entra_e_colisao_comum_espera(self):
+        from unittest import mock
+
+        from tests.test_entrada import Base, conferir_falso, exif_falso
+
+        class Caso(Base):
+            def runTest(self):
+                pass
+
+        caso = Caso()
+        caso.setUp()
+        try:
+            pasta_existente = (caso.acervo / "F026 - SBU Sami Bussab" / estrutura.PASTA_PROJETOS
+                               / "F026-P0001 - Clube Sírio")
+            pasta_existente.mkdir(parents=True)
+            caso.scan("F026", "Clube Sirio Libanes", n=1, formatos=("jpg",))
+
+            def reservar(fundo, titulo, chave, **extra):
+                caso.painel.ultima_reserva = {"existente": modo["existente"]}
+                return "F026-P0001"
+
+            modo = {"existente": False}
+            caso.painel.reservar = reservar
+            r = caso.recebedor()
+            with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                    mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+                res = r.processar(r.pendentes()[0])
+                self.assertEqual(res.status, entrada.AGUARDANDO)
+                self.assertIn("já é outro projeto", res.motivo)
+                modo["existente"] = True
+                r = caso.recebedor()
+                r.painel.reservar = reservar
+                res = r.processar(r.pendentes()[0])
+            self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+            self.assertEqual(res.pasta_projeto, pasta_existente)
+        finally:
+            caso.tearDown()

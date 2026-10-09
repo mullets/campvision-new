@@ -17,6 +17,7 @@ class _Servidor:
     def __init__(self):
         self.pedidos: list[tuple] = []
         self.aceitar_aviso = True
+        self.resposta_reserva = (201, {"codigo": "F026-P0042"})
         dono = self
 
         class H(BaseHTTPRequestHandler):
@@ -38,7 +39,7 @@ class _Servidor:
                 corpo = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 dono.pedidos.append(("POST", self.path, corpo))
                 if self.path.endswith("/reservar"):
-                    self._r(201, {"codigo": "F026-P0042"})
+                    self._r(*dono.resposta_reserva)
                 elif self.path.endswith("/aviso") and not dono.aceitar_aviso:
                     self._r(503, {})
                 else:
@@ -72,6 +73,19 @@ class TestPainel(unittest.TestCase):
         self.assertEqual((corpo["fundo_codigo"], corpo["chave_reserva"], corpo["ano"]),
                          ("F026", "a" * 32, "1972"))
         self.assertTrue(self.p.heartbeat({"estacao_id": "campvision2"}))
+
+    def test_reserva_202_aguarda_decisao_e_existente(self):
+        self.srv.resposta_reserva = (202, {"pendente": True, "decisao_id": 7,
+                                           "mensagem": "Aguardando decisão no painel"})
+        self.assertIsNone(self.p.reservar("F026", "Tarumã", "a" * 32))
+        self.assertTrue(self.p.ultima_reserva["pendente"])
+        self.assertEqual(self.p.ultimo_erro, "Aguardando decisão no painel")
+        self.srv.resposta_reserva = (200, {"codigo": "F026-P0001", "existente": True})
+        self.assertEqual(self.p.reservar("F026", "Tarumã", "a" * 32), "F026-P0001")
+        self.assertTrue(self.p.ultima_reserva["existente"])
+        self.srv.resposta_reserva = (200, {"codigo": "F026-P0043"})
+        self.p.reservar("F026", "Outro", "b" * 32)
+        self.assertFalse(self.p.ultima_reserva["existente"])
 
     def test_aviso_perdido_e_reenviado(self):
         self.srv.aceitar_aviso = False
