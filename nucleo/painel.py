@@ -104,6 +104,20 @@ class Painel:
         self.ultima_reserva["existente"] = bool(dados.get("existente"))
         return str(codigo) if codigo else None
 
+    def pedidos_releitura(self, estacao_id: str) -> list[dict]:
+        """Pedidos de releitura abertos no painel. Painel sem o recurso (404) = lista vazia."""
+        status, dados = self._chamar("GET", f"/api/estacoes/pedidos-releitura?estacao_id={estacao_id}")
+        if status != 200:
+            return []
+        if isinstance(dados, dict):
+            dados = dados.get("pedidos") or []
+        return [d for d in dados if isinstance(d, dict) and d.get("id")] if isinstance(dados, list) else []
+
+    def releitura_concluida(self, pedido_id, resumo: dict, ok: bool = True, mensagem: str = "") -> bool:
+        corpo = {"ok": ok, "mensagem": mensagem, **resumo}
+        status, _ = self._chamar("POST", f"/api/estacoes/pedidos-releitura/{pedido_id}/concluido", corpo)
+        return 200 <= status < 300
+
     def heartbeat(self, dados: dict) -> bool:
         status, _ = self._chamar("POST", "/api/estacoes/heartbeat", dados)
         return 200 <= status < 300

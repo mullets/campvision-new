@@ -242,3 +242,50 @@ class TestReservaExistente(unittest.TestCase):
             self.assertEqual(res.pasta_projeto, pasta_existente)
         finally:
             caso.tearDown()
+
+
+class TestReleitura(unittest.TestCase):
+    """Pedido de releitura: relê AO LADO, nunca sobrescreve leituras.json."""
+
+    def test_reler_grava_ao_lado_e_compara(self):
+        from unittest import mock
+
+        from nucleo import releitura
+        from nucleo.livro import Livro
+        from tests.test_entrada import Base, conferir_falso, exif_falso
+
+        class Caso(Base):
+            def runTest(self):
+                pass
+
+        caso = Caso()
+        caso.setUp()
+        try:
+            caso.scan("F026", "Clube Sirio", n=2, formatos=("jpg",))
+            r = caso.recebedor()
+            with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                    mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+                res = r.processar(r.pendentes()[0])
+            self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+            principal = (res.pasta_projeto / "catalogacao" / "leituras.json").read_text()
+
+            class LeitorNovo:
+                def ler(self, caminho):
+                    l = Leitura(arquivo=caminho.name)
+                    l.valores.update({"projeto": "CLUBE SÍRIO", "cliente": "Clube Novo"})
+                    l.carimbo_encontrado = True
+                    return l
+
+            resumo = releitura.reler(caso.acervo, caso.estado, caso.config, None, "F026-P0001",
+                                     "projeto", motivo="teste", pedido_por="Rafa",
+                                     livro=Livro(caso.acervo), leitor=LeitorNovo())
+            self.assertEqual(resumo["relidos"], 2)
+            self.assertEqual((res.pasta_projeto / "catalogacao" / "leituras.json").read_text(), principal)
+            comp = json.loads((caso.acervo / resumo["pasta"] / "comparacao.json").read_text())
+            doc = next(iter(comp["documentos"].values()))
+            self.assertEqual(doc["mudou"]["cliente"]["agora"], "Clube Novo")
+            self.assertTrue(any(l["acao"] == "relido" for l in Livro(caso.acervo).todas()))
+            with self.assertRaises(ValueError):
+                releitura.alvos(res.pasta_projeto, "tudo")
+        finally:
+            caso.tearDown()

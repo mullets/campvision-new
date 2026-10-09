@@ -518,6 +518,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--proximo-p", metavar="F0xx", help="Mostra o próximo número P livre no acervo")
     p.add_argument("--backtest-programa", metavar="CURADO.csv",
                    help="Back-test das sugestões de programa/natureza (colunas titulo, programa, natureza)")
+    p.add_argument("--reler", metavar="F0xx-P000x",
+                   help="Relê um projeto do acervo e grava AO LADO (catalogacao/releituras/); "
+                        "use --escopo e --documentos")
+    p.add_argument("--escopo", choices=("vazios", "projeto", "documentos"), default="vazios",
+                   help="O que reler (padrão: só as folhas com campo vazio ou erro)")
+    p.add_argument("--documentos", metavar="COD,COD", help="Códigos para --escopo documentos")
     p.add_argument("--organizar-formatos", action="store_true",
                    help="Move o que já está no acervo para <série>/TIF, JPG, DNG… (sem apagar nada)")
     p.add_argument("--livro-legado", action="store_true",
@@ -575,7 +581,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -615,6 +621,21 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_historico(config, args.historico)
     if args.livro_legado:
         return _comando_livro_legado(config)
+    if args.reler:
+        from nucleo import releitura as _rel
+        from nucleo.livro import Livro
+
+        try:
+            r = _rel.reler(Path(config.raiz_final), PASTA_ESTADO, config, ClienteAnthropic(config), args.reler,
+                           args.escopo, (args.documentos or "").split(",") if args.documentos else None,
+                           "linha de comando", "", Livro(Path(config.raiz_final)))
+        except (OSError, ValueError) as erro:
+            print(f"Não reli: {erro}", file=sys.stderr)
+            return 1
+        print(f"{r['relidos']} folha(s) relida(s), {r['com_mudanca']} com mudança, "
+              f"{r['campos_preenchidos']} campo(s) que estavam vazios, US$ {r['custo_usd']:.2f}.")
+        print(f"Resultado ao lado, sem sobrescrever nada: {r['pasta']}/comparacao.json")
+        return 0
     if args.organizar_formatos:
         from nucleo import renomear as _ren
         from nucleo.livro import Livro

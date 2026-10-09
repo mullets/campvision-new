@@ -668,6 +668,7 @@ class Vigia:
     def uma_rodada(self) -> int:
         """Processa tudo o que está pronto agora. Devolve quantos projetos rodou."""
         recebidos = self.receber_lotes()
+        recebidos += self.atender_releituras()
         if not self.config.varre_pasta_vigiada or not self.config.pasta_vigiada:
             self.estado.situacao = "vigiando"
             self.estado.projeto_atual = ""
@@ -762,6 +763,33 @@ class Vigia:
             evento.duracao_segundos = int(time.monotonic() - comeco)
             self._contabilizar(evento)
             self._salvar_estado()
+        self.estado.projeto_atual = ""
+        return feitos
+
+    def atender_releituras(self) -> int:
+        """Pedidos de releitura do painel: relê ao lado, nunca sobrescreve, e responde."""
+        if (not self.painel.ligado or not self.config.raiz_final or self.cancelar.is_set()
+                or not hasattr(self.painel, "pedidos_releitura")):
+            return 0
+        from . import releitura as mod_releitura
+
+        feitos = 0
+        for pedido in self.painel.pedidos_releitura(self.config.estacao_id):
+            codigo = str(pedido.get("projeto_codigo") or "")
+            self.estado.situacao = "relendo"
+            self.estado.projeto_atual = codigo
+            try:
+                resumo = mod_releitura.reler(
+                    Path(self.config.raiz_final), self.pasta_estado, self.config, self.cliente, codigo,
+                    str(pedido.get("escopo") or "vazios"), pedido.get("documentos") or None,
+                    str(pedido.get("motivo") or ""), str(pedido.get("pedido_por") or ""), self.livro)
+                self.painel.releitura_concluida(pedido["id"], resumo)
+                self.painel.aviso(codigo, resumo.get("pasta", ""), "pronto")
+                feitos += 1
+            except Exception as erro:  # noqa: BLE001 - pedido ruim não derruba o vigia
+                _log.error("Releitura %s (pedido %s) falhou: %s", codigo, pedido.get("id"), erro)
+                self.painel.releitura_concluida(pedido["id"], {"projeto_codigo": codigo}, ok=False,
+                                                mensagem=str(erro)[:300])
         self.estado.projeto_atual = ""
         return feitos
 

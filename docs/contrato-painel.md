@@ -331,3 +331,21 @@ Em `catalogacao/`, `decisoes.json` é gravado por `vigia.py --decisao CODIGO --a
 **Lado do site (CV-01):** criar na coleção Documentos (8013) um metadado de texto "Arquivo de origem" e gravar nele `documentos[].arquivo_origem` (pasta + nome original). O CV2 já manda esse dado; falta o importador do painel gravar.
 
 `reservar` agora envia `proximo_p_local` (o maior P no acervo + 1). Se o painel devolver um P que já é de outra pasta, o lote espera (CV-27).
+
+## 12. Pedido de releitura (versão 2026-10-09-02)
+
+O fluxo continua de mão única: o painel registra o pedido e o CV2 pergunta, a cada rodada.
+
+`GET /api/estacoes/pedidos-releitura?estacao_id=campvision2` devolve `[{id, projeto_codigo, escopo, documentos?, motivo, pedido_por}]` ou `{"pedidos": [...]}`. Se o painel ainda não tiver esse endpoint (404), o CV2 ignora.
+
+- `escopo`:
+  - `"vazios"` (padrão): folhas com erro, sem carimbo, ou com projeto, arquiteto, data ou título vazio;
+  - `"projeto"`: todas as folhas;
+  - `"documentos"`: só os códigos listados em `documentos`.
+- O CV2 relê e grava **ao lado**, em `catalogacao/releituras/AAAAMMDD-HHMMSS/`:
+  - `leituras.json`;
+  - `comparacao.json`: para cada documento, `mudou` com `antes` e `agora` campo a campo, `preencheu` e `erro`, além do `resumo`.
+  - Nada é sobrescrito; quem escolhe é o revisor.
+- A resposta é `POST /api/estacoes/pedidos-releitura/{id}/concluido` com `{ok, mensagem, projeto_codigo, escopo, relidos, com_mudanca, campos_preenchidos, falhas, custo_usd, pasta}`. Em seguida o CV2 envia o `aviso` habitual do projeto.
+- Pela linha de comando: `vigia.py --reler F0xx-P000x [--escopo vazios|projeto|documentos] [--documentos COD,COD]`.
+- No livro de registro entra a ação `relido`. As decisões humanas usam a ação `decisao`.
