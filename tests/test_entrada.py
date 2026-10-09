@@ -160,14 +160,15 @@ class TestContexto(Base):
         self.assertEqual(c.problemas, [])
         self.assertEqual(c.fundo.codigo, "F022")
 
-    def test_numero_p_da_estacao_vira_codigo_e_nao_nome(self):
-        # Caso real (08/10): info com projeto "P0001" e pasta "P0001 - EXPO Brasil 1978 Cingapura - 1978"
+    def test_numero_p_da_estacao_e_pista_nao_codigo(self):
+        # Caso real (08/10): info com projeto "P0001" e pasta "P0001 - EXPO Brasil 1978 Cingapura - 1978".
+        # O P da estação NÃO é oficial (Rafa, 09/10): o código vem da reserva; o P vira pista.
         pasta = self.scan("F022 - MSL - Marklen Slan", "P0001 - EXPO Brasil 1978 Cingapura - 1978", n=1)
         (pasta / "info_projeto.json").write_text(json.dumps({"projeto": "P0001", "fundo": "Marklen Slan"}),
                                                  encoding="utf-8")
         c = entrada.contexto(entrada.Unidade(pasta, pasta.relative_to(self.scanners)),
                              fundos.Tabela(fundos.EMBUTIDA))
-        self.assertEqual(c.codigo, "F022-P0001")
+        self.assertEqual((c.codigo, c.p_estacao), ("", "P0001"))
         self.assertEqual(c.projeto, "EXPO Brasil 1978 Cingapura")
         self.assertEqual(c.ano, "1978")
 

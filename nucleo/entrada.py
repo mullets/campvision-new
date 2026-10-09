@@ -190,7 +190,8 @@ class Contexto:
     fundo: object | None = None
     serie: str = ""
     projeto: str = ""
-    codigo: str = ""          # F002-P0002, se já veio da estação
+    codigo: str = ""          # F002-P0002, código oficial (reservado no painel)
+    p_estacao: str = ""       # "P0001" que a estação escreveu: NÃO é oficial, só pista
     ano: str = ""
     cidade: str = ""
     operador: str = ""
@@ -272,10 +273,9 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     # Projeto: código explícito, nome do manifesto/info, senão a pasta mais funda.
     ctx.codigo = _texto(dados, "codigo", "projeto_codigo").upper()
     if ctx.codigo and not estrutura.CODIGO_PROJETO.fullmatch(ctx.codigo):
-        if re.fullmatch(r"P\d{4}", ctx.codigo) and ctx.fundo:
-            ctx.codigo = f"{ctx.fundo.codigo}-{ctx.codigo}"
-        else:
-            ctx.codigo = ""
+        if re.fullmatch(r"P\d{4}", ctx.codigo):
+            ctx.p_estacao = ctx.codigo  # número da estação: pista, não código (Rafa, 09/10)
+        ctx.codigo = ""
     nome = _texto(dados, "nome", "titulo") or traduzido.get("projeto", "")
     if not nome and isinstance(manifesto.get("projeto"), str):
         nome = manifesto["projeto"]
@@ -285,14 +285,14 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
         achado = estrutura.CODIGO_PROJETO.search(" ".join(restantes))
         if achado:
             ctx.codigo = f"{achado.group(1)}-{achado.group(2)}".upper()
-    # Número P sozinho ("P0001", ou a pasta "P0001 - EXPO Brasil...") é o
-    # número que a estação já reservou no painel: vale como código do projeto
-    # no fundo identificado — reservar outro duplicava o projeto (F022, 08/10).
-    if not ctx.codigo and ctx.fundo:
+    # Número P sozinho ("P0001", ou a pasta "P0001 - EXPO Brasil...") NÃO é
+    # oficial (Rafa, 09/10): o código vem da reserva no painel. O número da
+    # estação vira pista — vai para o painel na reserva e fica no lote.
+    if not ctx.codigo and not ctx.p_estacao:
         for candidato in [nome, *reversed(restantes)]:
             achado = re.match(r"^\s*P(\d{4})\b", candidato or "", re.IGNORECASE)
             if achado:
-                ctx.codigo = f"{ctx.fundo.codigo}-P{achado.group(1)}"
+                ctx.p_estacao = f"P{achado.group(1)}"
                 break
     # Nome que é só o código não é nome: usa o resto da pasta.
     if re.fullmatch(r"\s*(F\d{3}-)?P\d{4}\s*", nome or "", re.IGNORECASE):
@@ -717,7 +717,8 @@ class Recebedor:
             maior, usados = estrutura.numeros_p(self.raiz_final, ctx.fundo.codigo)
             codigo = self.painel.reservar(
                 ctx.fundo.codigo, ctx.projeto, chave, ano=ctx.ano, cidade=ctx.cidade,
-                identificacao_original=ctx.projeto, operador=ctx.operador,
+                identificacao_original=(f"{ctx.p_estacao} - {ctx.projeto}" if ctx.p_estacao else ctx.projeto),
+                operador=ctx.operador,
                 proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
             ) or ""
             if not codigo:

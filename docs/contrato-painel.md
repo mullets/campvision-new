@@ -344,3 +344,7 @@ Segue o §14 de `docs/campvision.md` do camp-painel, que já está implementado 
 4. No fim manda `POST .../{id}/concluido` com `{"ok", "mensagem", ...resumo}`. Com `ok:true` o painel reimporta o pacote, protegendo o que já foi revisado ou publicado.
 
 Pela linha de comando: `vigia.py --reler F0xx-P000x [--escopo vazios|projeto|documentos] [--documentos COD,COD]`. O escopo `vazios`, que relê só as folhas com campo vazio ou erro, existe apenas na linha de comando. No livro de registro a ação fica como `relido`.
+
+## 13. Número P escrito na estação (versão 2026-10-09-05)
+
+Decisão do Rafa em 09/10: o "P0001" que a estação escreve (no `info_projeto.json` ou numa pasta "P0001 - Nome") **não é oficial**. O código oficial vem sempre da reserva no painel. O número da estação vira pista (`contexto.p_estacao`) e vai na reserva como `identificacao_original: "P0001 - Nome"`, para ajudar quem decide. Um código completo `F0xx-P000x` no info/manifesto continua valendo como oficial.
