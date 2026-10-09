@@ -415,6 +415,66 @@ def _comando_decisao(config: Config, args) -> int:
     return 0
 
 
+def _comando_diagnostico(config: Config, fundo: str) -> int:
+    from nucleo import releitura as _rel
+
+    raiz = Path(config.raiz_final)
+    total = {"documentos": 0, "lidos": 0, "vazias_ou_sem_leitura": 0, "sem_jpg": 0, "sem_pacote": 0}
+    print(f"{'projeto':<12} {'docs':>5} {'lidos':>5} {'erro':>5} {'carimbo':>7} {'vazias':>6} {'semJPG':>6}  pacote")
+    for pasta in _rel.projetos(raiz, fundo):
+        d = _rel.diagnostico(pasta)
+        print(f"{d['codigo']:<12} {d['documentos']:>5} {d['lidos']:>5} {d['com_erro']:>5} {d['com_carimbo']:>7} "
+              f"{d['vazias_ou_sem_leitura']:>6} {d['sem_jpg']:>6}  {d['pacote']} ({d['no_pacote']})")
+        for k in ("documentos", "lidos", "vazias_ou_sem_leitura", "sem_jpg"):
+            total[k] += d[k]
+        total["sem_pacote"] += d["pacote"] != "v2"
+    print(f"TOTAL: {total['documentos']} documento(s), {total['lidos']} lido(s), "
+          f"{total['vazias_ou_sem_leitura']} vazio(s) ou sem leitura, {total['sem_jpg']} sem JPG, "
+          f"{total['sem_pacote']} projeto(s) sem pacote v2 para o painel.")
+    return 0
+
+
+def _comando_consertar(config: Config, fundo: str, escopo: str, sim: bool) -> int:
+    """JPG que falta + releitura do vazio + pacote refeito + aviso ao painel, projeto a projeto."""
+    from nucleo import derivados, releitura as _rel
+    from nucleo import painel as _painel
+    from nucleo.livro import Livro
+
+    raiz = Path(config.raiz_final)
+    pastas = _rel.projetos(raiz, fundo)
+    a_reler = sum(len(_rel.alvos(p, escopo)) for p in pastas)
+    sem_jpg = sum(_rel.diagnostico(p)["sem_jpg"] for p in pastas)
+    custo = config.custo_estimado_usd(3000 * a_reler, 900 * a_reler)
+    print(f"{len(pastas)} projeto(s): {a_reler} folha(s) a reler (escopo {escopo}), "
+          f"{sem_jpg} JPG a gerar. Estimativa: US$ {custo:.2f}.")
+    if not sim:
+        print("Nada foi feito. Para rodar de verdade, repita com --sim.")
+        return 0
+    livro = Livro(raiz)
+    cliente = ClienteAnthropic(config)
+    painel = (_painel.Painel(config.painel_url, config.token_painel(), PASTA_ESTADO)
+              if config.painel_url else _painel.PainelDesligado())
+    falhas = 0
+    for n, pasta in enumerate(pastas, 1):
+        codigo = pasta.name.split(" - ")[0]
+        try:
+            gerados = derivados.gerar_jpgs(pasta, raiz, PASTA_ESTADO, livro)
+            r = _rel.reler(raiz, PASTA_ESTADO, config, cliente, codigo, escopo, None,
+                           "conserto do acervo", "", livro) if _rel.alvos(pasta, escopo) else None
+            if not r or not r.get("regravados") or gerados:
+                _rel.remontar_pacote(raiz, PASTA_ESTADO, codigo)
+            painel.aviso(codigo, str(pasta.relative_to(raiz)), "pronto")
+            print(f"[{n}/{len(pastas)}] {codigo}: {len(gerados)} JPG gerado(s); "
+                  + (f"{r['relidos']} relida(s), {r['campos_preenchidos']} campo(s) preenchido(s), "
+                     f"US$ {r['custo_usd']:.2f}" if r else "nada a reler") + "; pacote refeito.")
+        except Exception as erro:  # noqa: BLE001 - um projeto ruim não para o conserto
+            falhas += 1
+            print(f"[{n}/{len(pastas)}] {codigo}: FALHOU — {erro}", file=sys.stderr)
+    print(f"Pronto: {len(pastas) - falhas} projeto(s) consertado(s), {falhas} com falha. "
+          "O painel foi avisado de cada um.")
+    return 1 if falhas else 0
+
+
 def _comando_backtest_programa(caminho: str) -> int:
     import csv as _csv
 
@@ -524,6 +584,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--escopo", choices=("vazios", "projeto", "documentos"), default="vazios",
                    help="O que reler (padrão: só as folhas com campo vazio ou erro)")
     p.add_argument("--documentos", metavar="COD,COD", help="Códigos para --escopo documentos")
+    p.add_argument("--diagnostico", nargs="?", const="", metavar="F0xx",
+                   help="Por projeto: documentos, lidos, vazios, sem JPG e se o painel tem pacote")
+    p.add_argument("--consertar-acervo", nargs="?", const="", metavar="F0xx",
+                   help="Gera os JPG que faltam, relê o que veio vazio e refaz o pacote de todos os "
+                        "projetos (ou de um fundo). Sem --sim só mostra a estimativa")
+    p.add_argument("--sim", action="store_true", help="Confirma o --consertar-acervo (gasta API)")
     p.add_argument("--organizar-formatos", action="store_true",
                    help="Move o que já está no acervo para <série>/TIF, JPG, DNG… (sem apagar nada)")
     p.add_argument("--livro-legado", action="store_true",
@@ -581,7 +647,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.diagnostico is not None, args.consertar_acervo is not None, args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -621,6 +687,10 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_historico(config, args.historico)
     if args.livro_legado:
         return _comando_livro_legado(config)
+    if args.diagnostico is not None:
+        return _comando_diagnostico(config, args.diagnostico)
+    if args.consertar_acervo is not None:
+        return _comando_consertar(config, args.consertar_acervo, args.escopo, args.sim)
     if args.reler:
         from nucleo import releitura as _rel
         from nucleo.livro import Livro

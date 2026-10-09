@@ -186,6 +186,12 @@ def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
     """Gera o JPG de leitura em `destino`. None se não deu para abrir."""
     if destino.exists() and destino.stat().st_mtime >= origem.stat().st_mtime:
         return destino
+    img = abrir(origem, destino)
+    return _reduzir_e_salvar(img, destino) if img is not None else None
+
+
+def abrir(origem: Path, destino: Path) -> Image.Image | None:
+    """Abre qualquer formato suportado como imagem (o temporário do PDF/CDR fica ao lado de `destino`)."""
     ext = origem.suffix.lower()
     destino.parent.mkdir(parents=True, exist_ok=True)  # o pdftoppm grava direto aqui
     img: Image.Image | None = None
@@ -209,7 +215,7 @@ def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
     if img is None:
         _log.warning("Sem imagem de leitura para %s (%s).", origem.name, ext)
         return None
-    return _reduzir_e_salvar(img, destino)
+    return img
 
 
 def folha_de_contatos(itens: list[tuple[str, Path]], destino: Path, colunas: int = 6,

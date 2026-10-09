@@ -306,3 +306,58 @@ class TestCdrSemBitmap(unittest.TestCase):
         self.assertTrue(formatos._quase_branca(Image.new("RGB", (500, 500), "white")))
         img = formatos._texto_em_folha("PLANTA BAIXA\nESC 1:50")
         self.assertFalse(formatos._quase_branca(img))
+
+
+class TestConsertoDoAcervo(unittest.TestCase):
+    """JPG que falta, diagnóstico, pacote refeito e checkpoint atualizado na releitura."""
+
+    def test_gerar_jpg_diagnostico_e_remontar(self):
+        from unittest import mock
+
+        from PIL import Image
+
+        from nucleo import derivados, releitura
+        from nucleo.livro import Livro
+        from tests.test_entrada import Base, conferir_falso, exif_falso
+
+        class Caso(Base):
+            def runTest(self):
+                pass
+
+        caso = Caso()
+        caso.setUp()
+        try:
+            caso.scan("F026", "Clube Sirio", n=2, formatos=("tif",))
+            r = caso.recebedor()
+            with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                    mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+                res = r.processar(r.pendentes()[0])
+            self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+            d = releitura.diagnostico(res.pasta_projeto)
+            self.assertEqual((d["documentos"], d["sem_jpg"], d["pacote"]), (2, 2, "v2"))
+            gerados = derivados.gerar_jpgs(res.pasta_projeto, caso.acervo, caso.estado, Livro(caso.acervo))
+            self.assertEqual(len(gerados), 2)
+            jpgs = sorted((res.pasta_projeto / "01 - Desenhos e pranchas" / "JPG").glob("*.jpg"))
+            self.assertEqual(len(jpgs), 2)
+            self.assertTrue(all(Image.open(j).format == "JPEG" for j in jpgs))
+            self.assertEqual(derivados.gerar_jpgs(res.pasta_projeto, caso.acervo, caso.estado), [])
+            self.assertEqual(releitura.diagnostico(res.pasta_projeto)["sem_jpg"], 0)
+            # pacote refeito sem API passa a listar o JPG
+            (res.pasta_projeto / "catalogacao" / "pacote_tainacan.json").unlink()
+            self.assertGreater(releitura.remontar_pacote(caso.acervo, caso.estado, "F026-P0001"), 0)
+            pac = json.loads((res.pasta_projeto / "catalogacao" / "pacote_tainacan.json").read_text())
+            self.assertTrue(any(a.endswith(".jpg") for a in (pac["documentos"] + pac["retirados"])[0]["arquivos"]))
+
+            class LeitorNovo:
+                def ler(self, caminho):
+                    l = Leitura(arquivo=caminho.name)
+                    l.valores.update({"projeto": "CLUBE", "cliente": "Novo"})
+                    l.carimbo_encontrado = True
+                    return l
+
+            releitura.reler(caso.acervo, caso.estado, caso.config, None, "F026-P0001", "projeto",
+                            leitor=LeitorNovo())
+            ultimas = (res.pasta_projeto / "campvision2_checkpoint.jsonl").read_text().splitlines()[-2:]
+            self.assertTrue(all('"Novo"' in l for l in ultimas), "checkpoint guarda a leitura nova")
+        finally:
+            caso.tearDown()

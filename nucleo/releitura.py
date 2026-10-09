@@ -155,7 +155,7 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
 
 
 def _regravar(pasta: Path, raiz_final: Path, pasta_estado: Path, destino: Path, atuais: dict,
-              novas: list[Leitura], tabela=None) -> int:
+              novas: list[Leitura], tabela=None, remontar: bool = False) -> int:
     """Troca as folhas relidas em leituras.json/CSV/pacote, guardando o antes ao lado."""
     import shutil
     from types import SimpleNamespace
@@ -175,8 +175,18 @@ def _regravar(pasta: Path, raiz_final: Path, pasta_estado: Path, destino: Path, 
             continue  # leitura que falhou não substitui a que existe
         leituras[codigo] = nova
         trocadas += 1
-    if not trocadas:
+    if not trocadas and not remontar:
         return 0
+    # O checkpoint do projeto é a memória das leituras: sem atualizar, o próximo
+    # lote traria de volta a leitura velha (o carregador fica com a ÚLTIMA linha).
+    checkpoint = pasta / "campvision2_checkpoint.jsonl"
+    try:
+        with checkpoint.open("a", encoding="utf-8") as f:
+            for nova in novas:
+                if not nova.erro:
+                    f.write(json.dumps(nova.para_dict(), ensure_ascii=False) + "\n")
+    except OSError as erro:
+        _log.warning("Checkpoint de %s não atualizado: %s", pasta.name, erro)
     lista = [leituras[c] for c in sorted(leituras)]
     for l in lista:  # consolidação do grupo refeita do zero, sem herdar outliers velhos
         if l.lidos_originais:
@@ -205,4 +215,52 @@ def _regravar(pasta: Path, raiz_final: Path, pasta_estado: Path, destino: Path, 
                                        cat, info, "")
     mod_entrada.gravar_json(cat / "pacote_tainacan.json", novo)
     mod_entrada.gravar_json(cat / "erros.json", mod_entrada.erros_das_leituras(leituras.values()))
-    return trocadas
+    return trocadas or len(leituras)
+
+
+def remontar_pacote(raiz_final: Path, pasta_estado: Path, codigo_projeto: str, tabela=None) -> int:
+    """Refaz leituras/CSV/pacote do que JÁ foi lido, sem chamar a API (ex.: projeto antigo sem pacote)."""
+    pasta = mod_renomear.achar_projeto(raiz_final, codigo_projeto)
+    if pasta is None:
+        raise FileNotFoundError(f"projeto {codigo_projeto} não encontrado")
+    atuais = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(pasta / "catalogacao" / "leituras.json")}
+    if not atuais:
+        return 0
+    destino = pasta / "catalogacao" / "releituras" / datetime.now().strftime("%Y%m%d-%H%M%S-remontado")
+    destino.mkdir(parents=True, exist_ok=True)
+    return _regravar(pasta, raiz_final, pasta_estado, destino, atuais, [], tabela, remontar=True)
+
+
+def projetos(raiz_final: Path, fundo: str = "") -> list[Path]:
+    from . import estrutura
+
+    saida = []
+    for pasta_fundo in sorted(raiz_final.glob(f"{fundo.upper()}*" if fundo else "F[0-9][0-9][0-9]*")):
+        pp = pasta_fundo / estrutura.PASTA_PROJETOS
+        if pp.is_dir():
+            saida += [p for p in sorted(pp.iterdir()) if p.is_dir() and estrutura.codigo_da_pasta(p)]
+    return saida
+
+
+def diagnostico(pasta: Path) -> dict:
+    """O que existe × o que foi lido × o que o painel consegue importar, por projeto."""
+    from . import estrutura
+
+    masters = _masters(pasta)
+    cat = pasta / "catalogacao"
+    leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(cat / "leituras.json")}
+    pacote = {}
+    try:
+        pacote = json.loads((cat / "pacote_tainacan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    sem_jpg = [c for c, vs in masters.items() if not any(v.suffix.lower() in (".jpg", ".jpeg") for v in vs)]
+    vazias = [c for c in masters if c not in leituras or _vazia(leituras[c])]
+    return {
+        "codigo": estrutura.codigo_da_pasta(pasta), "documentos": len(masters),
+        "lidos": sum(1 for c in masters if c in leituras), "com_erro": sum(1 for l in leituras.values() if l.erro),
+        "com_carimbo": sum(1 for l in leituras.values() if l.carimbo_encontrado),
+        "vazias_ou_sem_leitura": len(vazias), "sem_jpg": len(sem_jpg),
+        "pacote": "v2" if pacote.get("versao") == 2 else ("antigo" if pacote else "NÃO"),
+        "no_pacote": len(pacote.get("documentos") or pacote.get("itens") or []),
+    }
