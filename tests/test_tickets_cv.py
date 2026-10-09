@@ -289,3 +289,14 @@ class TestReleitura(unittest.TestCase):
                 releitura.alvos(res.pasta_projeto, "tudo")
         finally:
             caso.tearDown()
+
+
+class TestCdrSemBitmap(unittest.TestCase):
+    def test_folha_branca_vira_texto(self):
+        from PIL import Image
+
+        from nucleo import formatos
+
+        self.assertTrue(formatos._quase_branca(Image.new("RGB", (500, 500), "white")))
+        img = formatos._texto_em_folha("PLANTA BAIXA\nESC 1:50")
+        self.assertFalse(formatos._quase_branca(img))

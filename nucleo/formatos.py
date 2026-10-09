@@ -142,11 +142,44 @@ def _cdr(origem: Path, temporario: Path) -> Image.Image | None:
         subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", str(pasta), str(origem)],
                        capture_output=True, timeout=300)
         pdf = pasta / f"{origem.stem}.pdf"
-        return _pdf(pdf, temporario) if pdf.exists() else None
+        if not pdf.exists():
+            return None
+        img = _pdf(pdf, temporario)
+        # Às vezes o bitmap embutido do CDR some na conversão e a página sai em
+        # branco; o texto vem completo pelo pdftotext (CV-20). Nesse caso a
+        # imagem de leitura vira o texto escrito numa folha, para não perder nada.
+        if (img is None or _quase_branca(img)) and shutil.which("pdftotext"):
+            texto = subprocess.run(["pdftotext", "-layout", str(pdf), "-"], capture_output=True,
+                                   timeout=120).stdout.decode("utf-8", "ignore").strip()
+            if texto:
+                temporario.with_suffix(".txt").write_text(texto, encoding="utf-8")
+                return _texto_em_folha(texto)
+        return img
     except (OSError, subprocess.SubprocessError):
         return None
     finally:
         shutil.rmtree(pasta, ignore_errors=True)
+
+
+def _quase_branca(img: Image.Image) -> bool:
+    menor = img.convert("L").resize((200, 200)).getextrema()[0]
+    return menor > 235
+
+
+def _texto_em_folha(texto: str) -> Image.Image:
+    from PIL import ImageDraw, ImageFont
+
+    linhas = texto.splitlines()[:180]
+    try:
+        fonte = ImageFont.truetype("DejaVuSansMono.ttf", 22)
+    except OSError:
+        fonte = ImageFont.load_default()
+    largura = max(800, min(3000, 14 * max((len(l) for l in linhas), default=40) + 80))
+    img = Image.new("RGB", (largura, 40 + 28 * len(linhas)), "white")
+    d = ImageDraw.Draw(img)
+    for i, linha in enumerate(linhas):
+        d.text((40, 20 + 28 * i), linha, fill="black", font=fonte)
+    return img
 
 
 def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
