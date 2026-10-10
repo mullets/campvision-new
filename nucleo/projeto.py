@@ -344,6 +344,8 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
             "origem_formato": l.origem_formato,
             "rotacao_aplicada": l.rotacao_aplicada, "confianca_rotacao": l.confianca_rotacao,
             "espelhada": l.espelhada, "orientacao_incerta": l.orientacao_incerta,
+            # JPG e preview do acervo já gravados na orientação certa (nada a girar no painel)
+            "orientacao_corrigida": bool(preparos.get(doc, {}).get("jpg_orientado")),
             "serie_incerta": l.serie_incerta,
             "duplicata_de": l.duplicata_de or None, "tipo_duplicata": l.tipo_duplicata,
             "autoria_divergente": l.autoria_divergente, "projeto_divergente": l.suspeita_grupo,

@@ -907,6 +907,21 @@ class Recebedor:
             bruta.unlink(missing_ok=True)
         gravar_json(preparo_caminho, preparos)
 
+        # JPG do acervo na orientação certa (giro/espelho decidido com certeza pelo
+        # texto); o master TIF/DNG/PDF nunca é tocado. Antes do EXIF, que vem depois.
+        from . import derivados as mod_derivados
+
+        for codigo_doc, versoes in por_codigo.items():
+            prep = preparos.get(codigo_doc)
+            for versao in versoes:
+                if versao.suffix.lower() in (".jpg", ".jpeg") and prep and mod_derivados.orientar_jpg(versao, prep):
+                    prep["jpg_orientado"] = True
+                    self.livro.anotar("refeito", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                                      codigo_documento=codigo_doc, arquivo_destino=self._relativo(versao),
+                                      detalhe=f"JPG girado {prep.get('rotacao', 0)}°"
+                                      + (" e desespelhado" if prep.get("espelhada") else ""))
+        gravar_json(preparo_caminho, preparos)
+
         # Triagem por série (procedimento, etapa 2): só quando a estação não disse a
         # série (sem pasta de material). Carta não é lida com prompt de prancha.
         if ctx.serie_deduzida:

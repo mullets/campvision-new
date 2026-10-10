@@ -361,3 +361,22 @@ class TestConsertoDoAcervo(unittest.TestCase):
             self.assertTrue(all('"Novo"' in l for l in ultimas), "checkpoint guarda a leitura nova")
         finally:
             caso.tearDown()
+
+
+class TestJpgOrientado(unittest.TestCase):
+    def test_gira_so_com_certeza_e_uma_vez(self):
+        from PIL import Image
+
+        from nucleo import derivados
+
+        with TemporaryDirectory() as t:
+            jpg = Path(t) / "F000-P0001-1970-S01-D00001.jpg"
+            Image.new("RGB", (400, 200), "white").save(jpg)
+            self.assertFalse(derivados.orientar_jpg(jpg, {"rotacao": 90, "incerta": True}))
+            self.assertEqual(Image.open(jpg).size, (400, 200))
+            prep = {"rotacao": 90, "espelhada": False, "incerta": False}
+            self.assertTrue(derivados.orientar_jpg(jpg, prep))
+            self.assertEqual(Image.open(jpg).size, (200, 400))
+            prep["jpg_orientado"] = True
+            self.assertFalse(derivados.orientar_jpg(jpg, prep))
+            self.assertTrue(derivados.orientar_jpg(jpg, {"rotacao": 0, "espelhada": True}))

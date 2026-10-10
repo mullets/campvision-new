@@ -458,13 +458,14 @@ def _comando_consertar(config: Config, fundo: str, escopo: str, sim: bool) -> in
     for n, pasta in enumerate(pastas, 1):
         codigo = pasta.name.split(" - ")[0]
         try:
-            gerados = derivados.gerar_jpgs(pasta, raiz, PASTA_ESTADO, livro)
             r = _rel.reler(raiz, PASTA_ESTADO, config, cliente, codigo, escopo, None,
                            "conserto do acervo", "", livro) if _rel.alvos(pasta, escopo) else None
-            if not r or not r.get("regravados") or gerados:
+            girados = derivados.orientar_jpgs_do_projeto(pasta, raiz, livro)
+            gerados = derivados.gerar_jpgs(pasta, raiz, PASTA_ESTADO, livro)
+            if not r or not r.get("regravados") or gerados or girados:
                 _rel.remontar_pacote(raiz, PASTA_ESTADO, codigo)
             painel.aviso(codigo, str(pasta.relative_to(raiz)), "pronto")
-            print(f"[{n}/{len(pastas)}] {codigo}: {len(gerados)} JPG gerado(s); "
+            print(f"[{n}/{len(pastas)}] {codigo}: {len(girados)} JPG girado(s), {len(gerados)} JPG gerado(s); "
                   + (f"{r['relidos']} relida(s), {r['campos_preenchidos']} campo(s) preenchido(s), "
                      f"US$ {r['custo_usd']:.2f}" if r else "nada a reler") + "; pacote refeito.")
         except Exception as erro:  # noqa: BLE001 - um projeto ruim não para o conserto

@@ -69,16 +69,23 @@ def alvos(pasta_projeto: Path, escopo: str, documentos: list[str] | None = None)
     return [c for c in todos if c not in atuais or _vazia(atuais[c])]
 
 
-def _imagem(codigo_doc: str, versoes: list[Path], cache: Path, pasta_estado: Path) -> Path | None:
+def _imagem(codigo_doc: str, versoes: list[Path], cache: Path, pasta_estado: Path,
+            preparos: dict | None = None) -> Path | None:
     jpg = cache / f"{codigo_doc}.jpg"
-    if jpg.exists():
+    if jpg.exists() and (preparos is None or codigo_doc in preparos):
         return jpg
     melhor = formatos.Documento(codigo_doc, versoes).para_ler
     bruta = formatos.imagem_de_leitura(melhor, pasta_estado / "leitura_bruta" / "releitura" / f"{codigo_doc}.jpg")
     if bruta is None:
         return None
-    mod_preparo.preparar(bruta, melhor, jpg, None)
+    prep = mod_preparo.preparar(bruta, melhor, jpg, None)
     bruta.unlink(missing_ok=True)
+    if preparos is not None:  # orientação guardada: o conserto gira o JPG do acervo com ela
+        preparos.setdefault(codigo_doc, {}).update({
+            "md5": prep.md5, "hash_perceptual": prep.hash_perceptual, "rotacao": prep.orientacao.rotacao,
+            "espelhada": prep.orientacao.espelhada, "incerta": prep.orientacao.incerta,
+            "pontos": prep.orientacao.pontos, "lido_de": melhor.name,
+            "origem_formato": formatos.origem_formato(melhor)})
     return jpg
 
 
@@ -100,12 +107,17 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
         leitor = LeitorDeCarimbo(config, cliente)
 
     atuais = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(pasta / "catalogacao" / "leituras.json")}
+    caminho_prep = pasta / "catalogacao" / "preparo.json"
+    try:
+        preparos = json.loads(caminho_prep.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        preparos = {}
     novas: list[Leitura] = []
     comparacao: dict[str, dict] = {}
     t_in = t_out = 0
     falhas: list[str] = []
     for doc in escolhidos:
-        jpg = _imagem(doc, masters.get(doc, []), cache, pasta_estado)
+        jpg = _imagem(doc, masters.get(doc, []), cache, pasta_estado, preparos)
         if jpg is None:
             falhas.append(f"{doc}: não abri o master")
             continue
@@ -127,6 +139,9 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
         comparacao[doc] = {"mudou": mudou, "preencheu": sorted(k for k, v in mudou.items() if not v["antes"]),
                            "erro": nova.erro}
 
+    if preparos:
+        caminho_prep.parent.mkdir(parents=True, exist_ok=True)
+        caminho_prep.write_text(json.dumps(preparos, ensure_ascii=False, indent=1), encoding="utf-8")
     quando = datetime.now().strftime("%Y%m%d-%H%M%S")
     destino = pasta / "catalogacao" / "releituras" / quando
     destino.mkdir(parents=True, exist_ok=True)
