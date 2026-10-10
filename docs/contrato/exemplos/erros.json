@@ -1,0 +1,30 @@
+[
+  {
+    "arquivo": "F026-P0001-1972-S01-D00001",
+    "categoria": "orientação",
+    "gravidade": "aviso",
+    "origem": "CAMP Vision",
+    "detalhe": "orientação incerta — conferir na folha de contatos"
+  },
+  {
+    "arquivo": "F026-P0001-1972-S01-D00002",
+    "categoria": "duplicata",
+    "gravidade": "corrigir",
+    "origem": "CAMP Vision",
+    "detalhe": "quase de F026-P0001-1972-S01-D00001 — só a única publica"
+  },
+  {
+    "arquivo": "F026-P0001-1972-S01-D00002",
+    "categoria": "orientação",
+    "gravidade": "aviso",
+    "origem": "CAMP Vision",
+    "detalhe": "orientação incerta — conferir na folha de contatos"
+  },
+  {
+    "arquivo": "",
+    "categoria": "metadado",
+    "gravidade": "aviso",
+    "origem": "CAMP Vision",
+    "detalhe": "sem pasta de material: série S01 deduzida (01 - Desenhos e pranchas); corrigir com --reclassificar"
+  }
+]

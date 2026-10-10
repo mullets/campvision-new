@@ -1,0 +1,80 @@
+{
+ "heartbeat": {
+  "estacao_id": "campvision2",
+  "tipo_estacao": "campvision",
+  "app": "CAMP Vision 2",
+  "versao": "2026-10-10-02",
+  "estado": "vigiando",
+  "projeto": "",
+  "progresso": {
+   "feitos": 2,
+   "total": 2
+  },
+  "fila": 0,
+  "hoje": {
+   "projetos": 1,
+   "imagens": 2,
+   "erros": 4,
+   "custo_usd": 0.01
+  },
+  "montagens": {
+   "entrada": true,
+   "acervo": true
+  },
+  "contrato": "2.1",
+  "quarentena": {
+   "arquivos": 2,
+   "gb": 0.0,
+   "ultima_replica": null,
+   "aviso": "quarentena sem réplica: 0.0 GB"
+  }
+ },
+ "reservar": {
+  "metodo": "POST",
+  "caminho": "/api/estacoes/projetos/reservar",
+  "corpo": {
+   "fundo_codigo": "F026",
+   "titulo": "Edifício Tarumã",
+   "chave_reserva": "00000000000000000000000000000000",
+   "ano": "1972",
+   "cidade": "São Paulo",
+   "identificacao_original": "P0001 - Edifício Tarumã",
+   "operador": "Beatriz",
+   "proximo_p_local": "F026-P0002"
+  }
+ },
+ "aviso": {
+  "metodo": "POST",
+  "caminho": "/api/campvision/aviso",
+  "corpo": {
+   "codigo": "F026-P0001",
+   "pasta": "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã",
+   "status": "pronto",
+   "em": "2026-10-10T09:07:32"
+  }
+ },
+ "iniciado": {
+  "metodo": "POST",
+  "caminho": "/api/estacoes/pedidos-releitura/7/iniciado",
+  "corpo": {
+   "estacao": "campvision2"
+  }
+ },
+ "concluido": {
+  "metodo": "POST",
+  "caminho": "/api/estacoes/pedidos-releitura/7/concluido",
+  "corpo": {
+   "ok": true,
+   "mensagem": "1 folha relida",
+   "projeto_codigo": "F026-P0001",
+   "escopo": "folha",
+   "relidos": 1,
+   "com_mudanca": 1,
+   "campos_preenchidos": 2,
+   "falhas": [],
+   "custo_usd": 0.01,
+   "regravados": 1,
+   "pasta": "F026 - SBU Sami Bussab/…/releituras/…"
+  }
+ }
+}

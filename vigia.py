@@ -428,6 +428,12 @@ def _comando_diagnostico(config: Config, fundo: str) -> int:
         for k in ("documentos", "lidos", "vazias_ou_sem_leitura", "sem_jpg"):
             total[k] += d[k]
         total["sem_pacote"] += d["pacote"] != "v2"
+    if config.pasta_entrada and Path(config.pasta_entrada).is_dir():
+        from nucleo import quarentena as _q
+
+        q = _q.estado(Path(config.pasta_entrada), config.caminho_replica)
+        print(f"Quarentena (100 - Scanners/_conferidos): {q['arquivos']} arquivo(s), {q['gb']} GB; "
+              f"última réplica confirmada: {q['ultima_replica'] or 'NENHUMA (configure caminho_replica)'}")
     print(f"TOTAL: {total['documentos']} documento(s), {total['lidos']} lido(s), "
           f"{total['vazias_ou_sem_leitura']} vazio(s) ou sem leitura, {total['sem_jpg']} sem JPG, "
           f"{total['sem_pacote']} projeto(s) sem pacote v2 para o painel.")
@@ -585,6 +591,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--escopo", choices=("vazios", "projeto", "documentos"), default="vazios",
                    help="O que reler (padrão: só as folhas com campo vazio ou erro)")
     p.add_argument("--documentos", metavar="COD,COD", help="Códigos para --escopo documentos")
+    p.add_argument("--avaliar", metavar="GABARITO.csv",
+                   help="Relê as folhas do gabarito do painel (arquivo_origem, campo, valor_correto) sem mexer "
+                        "no acervo e mostra o placar por campo e o custo")
     p.add_argument("--diagnostico", nargs="?", const="", metavar="F0xx",
                    help="Por projeto: documentos, lidos, vazios, sem JPG e se o painel tem pacote")
     p.add_argument("--consertar-acervo", nargs="?", const="", metavar="F0xx",
@@ -648,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.diagnostico is not None, args.consertar_acervo is not None, args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.avaliar, args.diagnostico is not None, args.consertar_acervo is not None, args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -688,6 +697,23 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_historico(config, args.historico)
     if args.livro_legado:
         return _comando_livro_legado(config)
+    if args.avaliar:
+        from nucleo import avaliar as _av
+        from nucleo.config import versao_completa
+        from nucleo.visao import LeitorDeCarimbo, VERSAO_PROMPT
+
+        gab = _av.ler_gabarito(Path(args.avaliar))
+        r = _av.avaliar(Path(config.raiz_final), gab, LeitorDeCarimbo(config, ClienteAnthropic(config)), config)
+        print(f"CV2 {versao_completa()} · modelo {config.modelo} · prompts {VERSAO_PROMPT}")
+        for campo, p_ in r["placar"].items():
+            print(f"  {campo:<16} {p_['taxa']:6.1%}  ({p_['certos']}/{p_['total']})")
+        for e in r["erros"][:100]:
+            print(f"  ✗ {e['arquivo_origem']} · {e['campo']}: correto {e['correto']!r} · lido {e['lido']!r}")
+        if r["nao_achados"]:
+            print(f"  {len(r['nao_achados'])} folha(s) do gabarito não achada(s) no acervo: {r['nao_achados'][:5]}")
+        print(f"Custo: US$ {r['custo_usd']:.4f} ({r['tokens_entrada']} tokens entrada / {r['tokens_saida']} saída). "
+              "Nada foi gravado no acervo.")
+        return 0
     if args.diagnostico is not None:
         return _comando_diagnostico(config, args.diagnostico)
     if args.consertar_acervo is not None:

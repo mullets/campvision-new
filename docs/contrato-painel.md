@@ -1,7 +1,12 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-Versão 1 — 07/10/2026. Lado do CV2 implementado (nucleo/entrada.py, painel.py, livro.py). Vale para os dois repositórios: `campvision-new` (CV2) e
-`camp-painel`. Mudou aqui, muda nos dois.
+**Contrato 2.1 — 10/10/2026.** Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
+
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.1"`.
+- Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
+  - Para regenerar: `python -m tests.contrato_exemplos`.
+- Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
+- O histórico (versão 1 de 07/10 e acréscimos das seções 9 a 16) continua abaixo.
 
 ```
 estações ──► QNAP 100 - Scanners ──► CV2 (.40) ──► QNAP ACERVOS_CAMP ──► Painel (.60) ──► site
@@ -337,7 +342,7 @@ Em `catalogacao/`, `decisoes.json` é gravado por `vigia.py --decisao CODIGO --a
 Segue o §14 de `docs/campvision.md` do camp-painel, que já está implementado lá. O fluxo continua de mão única.
 
 1. A cada rodada o CV2 consulta `GET /api/estacoes/pedidos-releitura?estacao=campvision2`, que devolve `{"pedidos":[{id, escopo: "folha"|"projeto", projeto_codigo, item_codigo, motivo, ...}]}`. Se o painel não tiver essa rota (404), o CV2 ignora.
-2. Antes de ler, o CV2 manda `POST .../{id}/iniciado` com `{"estacao":"campvision2"}`. Se a resposta for **409**, o pedido foi cancelado e o CV2 não lê.
+2. Antes de ler, o CV2 manda `POST .../{id}/iniciado` com `{"estacao":"campvision2"}`. Se a resposta for **409**, o pedido foi cancelado: o CV2 não lê, não gasta API e registra `releitura_cancelada` no livro.
 3. Relê só o escopo pedido: a folha `item_codigo` ou o projeto inteiro. Regrava `catalogacao/leituras.json`, o CSV, o `pacote_tainacan.json` e o `erros.json` com a consolidação do grupo refeita.
    - A versão anterior fica em `catalogacao/releituras/AAAAMMDD-HHMMSS/`: `antes_leituras.json`, `antes_pacote.json`, `antes_catalogacao.csv`, o `leituras.json` novo e o `comparacao.json` (antes × agora, campo a campo).
    - Uma leitura que falhou não substitui a que já existe.
@@ -348,3 +353,34 @@ Pela linha de comando: `vigia.py --reler F0xx-P000x [--escopo vazios|projeto|doc
 ## 13. Número P escrito na estação (versão 2026-10-09-05)
 
 Decisão do Rafa em 09/10: o "P0001" que a estação escreve (no `info_projeto.json` ou numa pasta "P0001 - Nome") **não é oficial**. O código oficial vem sempre da reserva no painel. O número da estação vira pista (`contexto.p_estacao`) e vai na reserva como `identificacao_original: "P0001 - Nome"`, para ajudar quem decide. Um código completo `F0xx-P000x` no info/manifesto continua valendo como oficial.
+
+
+## 14. Execução: versão, modelo e custo (contrato 2.1, ticket 89)
+
+`pacote_tainacan.json` ganha `execucao`, e `catalogacao/lotes/<lote>.json` também:
+
+```json
+{"versao_cv2": "2026-10-10-02+ab12cd3", "contrato": "2.1", "modelo": "claude-…",
+ "versao_prompt": {"prancha": "1a2b3c4d", "fotografia": "…", "textual": "…"},
+ "chamadas": 12, "tokens_entrada": 36000, "tokens_saida": 9000, "custo_usd": 0.42, "tempo_s": 95.3}
+```
+
+- Cada documento do pacote traz `versao_cv2`, `versao_prompt` (por exemplo `prancha:1a2b3c4d`) e `modelo` da leitura que vale. Uma releitura atualiza esses campos.
+- `relatorio.txt` ganha a linha `Execução: …` com os mesmos números.
+- `versao_prompt` é o hash do texto do prompt: mudou o prompt, muda a versão.
+- `vigia.py --avaliar gabarito.csv` (colunas `arquivo_origem`, `campo`, `valor_correto`, exportado pelo painel) relê as folhas do gabarito **sem gravar nada no acervo** e mostra o placar por campo e o custo.
+
+## 15. Quarentena da entrada e réplica (contrato 2.1, ticket 87)
+
+- O original em `100 - Scanners` vai para `100 - Scanners/_conferidos/AAAA-MM-DD/<lote>/` em vez de ser apagado. No livro: `quarentena`.
+- Só é apagado (livro: `apagado_original`) quando duas condições valem:
+  - a réplica confirmou: a sentinela `ACERVOS_CAMP/_campvision/sentinela.json`, regravada a cada rodada, aparece em `caminho_replica` com data igual ou posterior à quarentena;
+  - passaram `quarentena_dias` (padrão 7). Com o disco acima de 85%, o que já tem réplica pode sair antes.
+- Sem `caminho_replica`, nada é apagado.
+- O heartbeat ganha `"quarentena": {"arquivos", "gb", "ultima_replica", "aviso"}`. O `aviso` diz "quarentena sem réplica: X GB" quando não há réplica confirmada.
+- `vigia.py --diagnostico` mostra a quarentena e a data da última réplica confirmada.
+
+## 16. Aviso importa as folhas e orientação corrigida
+
+- `POST /api/campvision/aviso` de um lote em revisão faz o painel importar o pacote (camp-painel c705124), com as mesmas garantias da importação manual.
+- `documentos[].orientacao_corrigida = true`: o JPG do acervo já está girado e desespelhado. O painel não marca a folha como espelhada nem girada.

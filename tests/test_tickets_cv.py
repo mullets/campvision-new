@@ -380,3 +380,108 @@ class TestJpgOrientado(unittest.TestCase):
             prep["jpg_orientado"] = True
             self.assertFalse(derivados.orientar_jpg(jpg, prep))
             self.assertTrue(derivados.orientar_jpg(jpg, {"rotacao": 0, "espelhada": True}))
+
+
+class TestQuarentena(unittest.TestCase):
+    """Ticket 87: nada some sem réplica; com réplica mais nova e prazo vencido, sai."""
+
+    def test_quarentena_e_replica(self):
+        from datetime import datetime, timedelta
+
+        from nucleo import quarentena as q
+
+        with TemporaryDirectory() as t:
+            base = Path(t)
+            entrada, acervo, replica = base / "entrada", base / "acervo", base / "replica"
+            (entrada / "F026" / "Lote").mkdir(parents=True)
+            arq = entrada / "F026" / "Lote" / "scan 001.tif"
+            arq.write_bytes(b"x" * 100)
+            t0 = datetime(2026, 10, 1, 10, 0).astimezone()
+            novo = q.mover(arq, entrada, Path("F026/Lote/scan 001.tif"), {"codigo_documento": "D1"}, agora=t0)
+            self.assertFalse(arq.exists())
+            self.assertTrue(novo.exists() and "_conferidos/2026-10-01" in str(novo))
+            # sem réplica configurada/confirmada: nada some, nem depois de 30 dias
+            self.assertEqual(q.limpar(entrada, "", 7, agora=t0 + timedelta(days=30)), 0)
+            self.assertEqual(q.limpar(entrada, str(replica), 7, agora=t0 + timedelta(days=30)), 0)
+            self.assertIn("sem réplica", q.estado(entrada, str(replica))["aviso"])
+            # réplica com sentinela ANTERIOR à quarentena: não cobre
+            q.gravar_sentinela(replica, "v", agora=t0 - timedelta(hours=1))
+            self.assertEqual(q.limpar(entrada, str(replica), 7, agora=t0 + timedelta(days=30)), 0)
+            # réplica mais nova, mas antes dos 7 dias (e disco folgado): fica
+            q.gravar_sentinela(replica, "v", agora=t0 + timedelta(days=1))
+            self.assertEqual(q.limpar(entrada, str(replica), 7, agora=t0 + timedelta(days=3), uso_disco=0.5), 0)
+            # disco cheio: o que tem réplica pode sair antes do prazo
+            self.assertEqual(q.limpar(entrada, str(replica), 7, agora=t0 + timedelta(days=3), uso_disco=0.9), 1)
+            self.assertFalse(novo.exists())
+            self.assertEqual(q.estado(entrada, str(replica))["arquivos"], 0)
+            # a sentinela do acervo é regravada a cada rodada
+            q.gravar_sentinela(acervo, "2026-10-10-02")
+            self.assertIsNotNone(q.replica_confirmada(acervo))
+
+
+class TestAvaliarEExecucao(unittest.TestCase):
+    """Ticket 89: placar contra gabarito sem tocar no acervo; versão e custo no pacote."""
+
+    def test_avaliar_e_execucao(self):
+        from unittest import mock
+
+        from nucleo import avaliar
+        from tests.test_entrada import Base, conferir_falso, exif_falso
+
+        class Caso(Base):
+            def runTest(self):
+                pass
+
+        caso = Caso()
+        caso.setUp()
+        try:
+            caso.scan("F026", "Clube Sirio", n=2, formatos=("jpg",))
+            r = caso.recebedor()
+            with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                    mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+                res = r.processar(r.pendentes()[0])
+            cat = res.pasta_projeto / "catalogacao"
+            pac = json.loads((cat / "pacote_tainacan.json").read_text())
+            self.assertTrue(pac["execucao"]["versao_cv2"].startswith("2026"))
+            self.assertIn("prancha", pac["execucao"]["versao_prompt"])
+            self.assertIn("Execução: CV2", (cat / "relatorio.txt").read_text())
+            doc = (pac["documentos"] + pac["retirados"])[0]
+            self.assertTrue(doc["versao_prompt"].startswith("prancha:"))
+            mapa = json.loads((cat / "mapa_origem.json").read_text())
+            origem = next(iter(mapa.values()))["origem"]
+            antes = sorted(str(p) for p in caso.acervo.rglob("*"))
+
+            class Leitor:
+                def ler(self, caminho):
+                    l = Leitura(arquivo=caminho.name)
+                    l.valores.update({"projeto": "CLUBE SÍRIO", "ano": "1975"})
+                    l.tokens_entrada, l.tokens_saida = 1000, 200
+                    return l
+
+            gab = {origem: {"projeto": "Clube Sírio", "ano": "1976"}, "nao/existe.tif": {"ano": "1"}}
+            res_av = avaliar.avaliar(caso.acervo, gab, Leitor(), caso.config)
+            self.assertEqual(res_av["placar"]["projeto"]["certos"], 1)
+            self.assertEqual(res_av["placar"]["ano"]["certos"], 0)
+            self.assertEqual(res_av["nao_achados"], ["nao/existe.tif"])
+            self.assertEqual(sorted(str(p) for p in caso.acervo.rglob("*")), antes, "acervo intacto")
+        finally:
+            caso.tearDown()
+
+
+class TestContrato(unittest.TestCase):
+    """Ticket 88: o que o CV2 grava/manda tem a MESMA estrutura dos exemplos do contrato.
+    Mudou um campo sem mudar CONTRATO (e regenerar com `python -m tests.contrato_exemplos`) = falha."""
+
+    def test_estrutura_igual_aos_exemplos(self):
+        from nucleo.config import CONTRATO
+        from tests import contrato_exemplos as ce
+
+        self.assertEqual((ce.EXEMPLOS / "VERSAO").read_text().strip(), CONTRATO,
+                         "CONTRATO mudou: regenere os exemplos (python -m tests.contrato_exemplos)")
+        with TemporaryDirectory() as t:
+            ce.gerar(Path(t))
+            for nome in [*(n for n in ce.ARQUIVOS if n.endswith(".json")), "status.json", "info_projeto.json",
+                         "http.json"]:
+                atual = ce.estrutura(json.loads((Path(t) / nome).read_text()))
+                exemplo = ce.estrutura(json.loads((ce.EXEMPLOS / nome).read_text()))
+                self.assertEqual(atual, exemplo, f"{nome} mudou de formato: suba CONTRATO e regenere os exemplos")

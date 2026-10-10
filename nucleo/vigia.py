@@ -26,7 +26,7 @@ from pathlib import Path
 from . import atualizador, caminho as mod_caminho, eventos as mod_eventos, grupos, imagem
 from . import info_projeto as mod_info, lote, planilha
 from . import relatorio_diario
-from .config import VERSAO_BUILD, Config
+from .config import CONTRATO, VERSAO_BUILD, Config
 from .planilha import LIMIAR_ATENCAO
 from .visao import ClienteAPI
 
@@ -667,6 +667,7 @@ class Vigia:
     # -------------------------------------------------------------- laços
     def uma_rodada(self) -> int:
         """Processa tudo o que está pronto agora. Devolve quantos projetos rodou."""
+        self._quarentena()
         recebidos = self.receber_lotes()
         recebidos += self.atender_releituras()
         if not self.config.varre_pasta_vigiada or not self.config.pasta_vigiada:
@@ -766,6 +767,21 @@ class Vigia:
         self.estado.projeto_atual = ""
         return feitos
 
+    def _quarentena(self) -> None:
+        """Sentinela para a réplica + limpeza da quarentena coberta por réplica (ticket 87)."""
+        from . import quarentena as mod_q
+
+        try:
+            if self.config.raiz_final and Path(self.config.raiz_final).is_dir():
+                mod_q.gravar_sentinela(Path(self.config.raiz_final), VERSAO_BUILD)
+            if self.config.pasta_entrada and Path(self.config.pasta_entrada).is_dir():
+                n = mod_q.limpar(Path(self.config.pasta_entrada), self.config.caminho_replica,
+                                 self.config.quarentena_dias, self.livro)
+                if n:
+                    _log.info("Quarentena: %d original(is) apagado(s), já cobertos pela réplica.", n)
+        except OSError as erro:
+            _log.warning("Quarentena/sentinela: %s", erro)
+
     def atender_releituras(self) -> int:
         """Pedidos de releitura do painel: relê ao lado, nunca sobrescreve, e responde."""
         if (not self.painel.ligado or not self.config.raiz_final or self.cancelar.is_set()
@@ -777,7 +793,11 @@ class Vigia:
         for pedido in self.painel.pedidos_releitura(self.config.estacao_id):
             codigo = str(pedido.get("projeto_codigo") or "")
             if not self.painel.releitura_iniciada(pedido["id"], self.config.estacao_id):
-                continue  # cancelado no painel
+                # 409: cancelado na tela do painel. Não lê (não gasta API) e registra.
+                self.livro.anotar("releitura_cancelada", codigo_projeto=codigo,
+                                  codigo_documento=str(pedido.get("item_codigo") or ""),
+                                  detalhe=f"pedido {pedido['id']} cancelado no painel (409 no iniciado)")
+                continue
             self.estado.situacao = "relendo"
             self.estado.projeto_atual = codigo
             escopo = str(pedido.get("escopo") or "vazios")
@@ -820,6 +840,16 @@ class Vigia:
         except OSError:
             pass
 
+    def _estado_quarentena(self) -> dict:
+        from . import quarentena as mod_q
+
+        try:
+            if self.config.pasta_entrada and Path(self.config.pasta_entrada).is_dir():
+                return mod_q.estado(Path(self.config.pasta_entrada), self.config.caminho_replica)
+        except OSError:
+            pass
+        return {}
+
     def _talvez_heartbeat(self, forcar: bool = False) -> None:
         if not self.painel.ligado:
             return
@@ -841,6 +871,8 @@ class Vigia:
             "hoje": {"projetos": self.estado.projetos_hoje, "imagens": self.estado.pranchas_hoje,
                      "erros": self.estado.erros_hoje, "custo_usd": round(self.estado.custo_hoje, 2)},
             "montagens": montagens,
+            "contrato": CONTRATO,
+            "quarentena": self._estado_quarentena(),
         })
         self.painel.reenviar()
 

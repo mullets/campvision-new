@@ -313,6 +313,20 @@ def _para_textual(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
     return leitura
 
 
+def _hash(texto: str) -> str:
+    import hashlib
+
+    return hashlib.sha1(texto.encode("utf-8")).hexdigest()[:8]
+
+
+# Versão de cada prompt = hash do texto: mudou o prompt, muda a versão (ticket 89).
+VERSAO_PROMPT = {"prancha": _hash(INSTRUCOES), "fotografia": _hash(INSTRUCOES_FOTO),
+                 "textual": _hash(INSTRUCOES_TEXTO)}
+
+
+_VERSAO_CACHE: dict[str, str] = {}
+
+
 class LeitorDeCarimbo:
     """Uma chamada por folha, página inteira. Nome mantido por compatibilidade."""
 
@@ -324,8 +338,13 @@ class LeitorDeCarimbo:
         self.ferramenta_texto = esquema_textual()
 
     def ler(self, caminho: Path, regiao_sugerida=None, modo: str | None = None) -> Leitura:
+        from .config import versao_completa
+
         resultado = Leitura(arquivo=caminho.name)
         modo = modo or modo_do_arquivo(caminho.name)
+        resultado.versao_cv2 = _VERSAO_CACHE.setdefault("v", versao_completa())
+        resultado.versao_prompt = f"{modo}:{VERSAO_PROMPT.get(modo, '')}"
+        resultado.modelo = getattr(self.config, "modelo", "")
         try:
             original = img_mod.abrir(caminho)
         except Exception as erro:  # noqa: BLE001

@@ -15,7 +15,9 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-10-10-01"
+VERSAO_BUILD = "2026-10-10-02"
+# Versão do contrato com o painel (docs/contrato-painel.md). Mudou o formato = muda aqui.
+CONTRATO = "2.1"
 
 _log = logging.getLogger("cv2.config")
 
@@ -145,6 +147,13 @@ class Config:
     # Depois de "pronto" (cópia conferida por hash + EXIF), apaga o original
     # da entrada. Decisão de 07/10/2026.
     apagar_original_apos_pronto: bool = True
+    # Decisão de 10/10 (ticket 87): em vez de apagar, o original vai para
+    # 100 - Scanners/_conferidos/ e só sai quando a réplica do ACERVOS_CAMP
+    # confirmar (sentinela) e passarem `quarentena_dias`. Sem `caminho_replica`,
+    # nada é apagado.
+    quarentena_entrada: bool = True
+    quarentena_dias: int = 7
+    caminho_replica: str = ""
     # A varredura antiga (status.json "enviado_windows" na pasta_vigiada).
     # None = automática: ligada só quando não há pasta_entrada.
     processar_pasta_vigiada: bool | None = None
@@ -277,3 +286,16 @@ class Config:
     def custo_estimado_usd(self, tokens_entrada: int, tokens_saida: int) -> float:
         entrada, saida = PRECOS_USD_POR_MTOK.get(self.modelo, (0.0, 0.0))
         return tokens_entrada / 1e6 * entrada + tokens_saida / 1e6 * saida
+
+
+def versao_completa() -> str:
+    """VERSAO_BUILD + commit curto (quando há git): '2026-10-10-02+ab12cd3'."""
+    import subprocess
+    from pathlib import Path as _P
+
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=_P(__file__).resolve().parents[1],
+                                capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = ""
+    return f"{VERSAO_BUILD}+{commit}" if commit else VERSAO_BUILD

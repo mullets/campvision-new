@@ -282,7 +282,8 @@ def capa_sugerida(leituras: dict) -> str:
 
 
 def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: dict,
-           catalogacao: Path, info: dict | None = None, nome_pasta: str = "") -> dict:
+           catalogacao: Path, info: dict | None = None, nome_pasta: str = "",
+           execucao: dict | None = None) -> dict:
     """pacote_tainacan.json (Anexo D.3). Os IDs de termo de série/tipo NÃO são
     inventados: o painel converte; taxonomia de valor único vai como NÚMERO."""
     canonico, fontes, lacunas = fontes_e_lacunas(ctx, leituras, info)
@@ -354,6 +355,7 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
             "confianca": round(l.confianca_media, 2) if hasattr(l, "confianca_media") else None,
             "decisao": decisao, "publicavel": not bloqueios, "bloqueios": bloqueios,
             "ressalvas": l.ressalvas,
+            "versao_cv2": l.versao_cv2, "versao_prompt": l.versao_prompt, "modelo": l.modelo,
         }
         # Autoria divergente e retirada por decisão NÃO vão no pacote de publicação (CV-06/25).
         if l.autoria_divergente or (decisao and decisao["acao"] == "retirar"):
@@ -390,4 +392,6 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
         "retirados": retirados,
         "propostas": prop,
         "avisos": avisos,
+        # Ticket 89: versão, modelo, prompts, chamadas, tokens, custo e tempo do lote/releitura.
+        "execucao": execucao or {},
     }

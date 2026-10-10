@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -93,6 +94,7 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
           escopo: str = "vazios", documentos: list[str] | None = None, motivo: str = "",
           pedido_por: str = "", livro=None, leitor=None, tabela=None, regravar: bool = True) -> dict:
     """Relê e grava ao lado. Devolve o resumo (vai na resposta ao painel)."""
+    comeco = time.monotonic()
     pasta = mod_renomear.achar_projeto(raiz_final, codigo_projeto)
     if pasta is None:
         raise FileNotFoundError(f"projeto {codigo_projeto} não encontrado no acervo")
@@ -148,7 +150,11 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
     mod_planilha.escrever_json(novas, destino / "leituras.json")
     regravados = 0
     if regravar and novas:
-        regravados = _regravar(pasta, raiz_final, pasta_estado, destino, atuais, novas, tabela)
+        from .entrada import execucao as _execucao
+
+        custo_parcial = config.custo_estimado_usd(t_in, t_out) if hasattr(config, "custo_estimado_usd") else 0.0
+        regravados = _regravar(pasta, raiz_final, pasta_estado, destino, atuais, novas, tabela,
+                               execucao_lote=_execucao(config, novas, custo_parcial, time.monotonic() - comeco))
     custo = round(config.custo_estimado_usd(t_in, t_out), 4) if hasattr(config, "custo_estimado_usd") else 0.0
     resumo = {
         "projeto_codigo": codigo, "escopo": escopo, "motivo": motivo, "pedido_por": pedido_por,
@@ -170,7 +176,7 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
 
 
 def _regravar(pasta: Path, raiz_final: Path, pasta_estado: Path, destino: Path, atuais: dict,
-              novas: list[Leitura], tabela=None, remontar: bool = False) -> int:
+              novas: list[Leitura], tabela=None, remontar: bool = False, execucao_lote: dict | None = None) -> int:
     """Troca as folhas relidas em leituras.json/CSV/pacote, guardando o antes ao lado."""
     import shutil
     from types import SimpleNamespace
@@ -227,7 +233,7 @@ def _regravar(pasta: Path, raiz_final: Path, pasta_estado: Path, destino: Path, 
                           teste=bool(pacote_antigo.get("teste")))
     info = mod_entrada.ler_json(pasta / "info_projeto.json", {}) or {}
     novo = mod_entrada.pacote_tainacan(codigo_projeto, nome, ctx, leituras, preparos, mapa, raiz_final,
-                                       cat, info, "")
+                                       cat, info, "", execucao_lote or pacote_antigo.get("execucao"))
     mod_entrada.gravar_json(cat / "pacote_tainacan.json", novo)
     mod_entrada.gravar_json(cat / "erros.json", mod_entrada.erros_das_leituras(leituras.values()))
     return trocadas or len(leituras)

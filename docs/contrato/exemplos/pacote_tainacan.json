@@ -1,0 +1,391 @@
+{
+  "versao": 2,
+  "gerado_em": "2026-10-10T09:07:32-03:00",
+  "teste": false,
+  "projeto_codigo": "F026-P0001",
+  "projeto_nome": "Edifício Tarumã",
+  "fundo_codigo": "F026",
+  "fundo": {
+    "codigo": "F026",
+    "sigla": "SBU",
+    "nome": "Sami Bussab",
+    "coautores": [],
+    "periodo_atuacao": null
+  },
+  "projeto": {
+    "codigo": "F026-P0001",
+    "titulo": "Edifício Tarumã",
+    "ano": "1972",
+    "cidade": "",
+    "uf": "",
+    "cliente": "",
+    "endereco": "",
+    "fontes": {
+      "ano": {
+        "pasta": "1972",
+        "info_projeto": "1972"
+      },
+      "cliente": {},
+      "endereco": {},
+      "cidade": {},
+      "uf": {},
+      "projeto": {
+        "pasta": "Edifício Tarumã",
+        "carimbo": "CASA DA PRAIA"
+      }
+    },
+    "lacunas": [],
+    "programa_sugerido": [],
+    "natureza_sugerida": [],
+    "sugestao": {
+      "programa": null,
+      "regra_programa": "",
+      "natureza": null,
+      "regra_natureza": "",
+      "motivo": "",
+      "e_sugestao": true
+    },
+    "capa_sugerida": "F026-P0001-1972-S01-D00001",
+    "descricao_sugerida": ""
+  },
+  "documentos": [
+    {
+      "codigo": "F026-P0001-1972-S01-D00001",
+      "projeto_codigo": "F026-P0001",
+      "fundo_codigo": "F026",
+      "serie": "S01",
+      "modo": "prancha",
+      "titulo": "",
+      "titulo_lido": "",
+      "tipo": "",
+      "tipo_de_desenho": "",
+      "folha": "03",
+      "escala": "",
+      "codigo_unidade": "ABC-1",
+      "revisao": "",
+      "data_lida": "",
+      "data_iso": "",
+      "data_sugerida": "",
+      "data_outlier": false,
+      "ano": "1968",
+      "ano_do_projeto": "",
+      "metadados": {
+        "projeto": "CASA DA PRAIA",
+        "arquiteto": "Sami Bussab",
+        "folha": "03",
+        "codigo_unidade": "ABC-1",
+        "ano": "1968"
+      },
+      "rastreio": {
+        "projeto": "leitura",
+        "arquiteto": "leitura",
+        "folha": "leitura",
+        "codigo_unidade": "leitura",
+        "ano": "leitura"
+      },
+      "alternativas": {},
+      "onde": {},
+      "transcricao_integral": "",
+      "materiais_citados": [],
+      "foto": {},
+      "textual": {},
+      "pessoas_identificadas": [],
+      "fotografo": "",
+      "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
+      "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
+      "arquivos": [
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00001.jpg"
+      ],
+      "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
+      "arquivo_origem": [
+        {
+          "arquivo_origem": "100 - Scanners/F026 - SBU Sami Bussab/P0001 - Edificio Taruma 1972/JPG/scan 001.jpg",
+          "nome_original": "scan 001.jpg",
+          "origem_formato": "jpg"
+        }
+      ],
+      "origem_formato": "jpg",
+      "rotacao_aplicada": 0,
+      "confianca_rotacao": 0.0,
+      "espelhada": false,
+      "orientacao_incerta": true,
+      "orientacao_corrigida": false,
+      "serie_incerta": false,
+      "duplicata_de": null,
+      "tipo_duplicata": "",
+      "autoria_divergente": false,
+      "projeto_divergente": false,
+      "fora_do_periodo": false,
+      "prancha_original": "scan 001.jpg",
+      "confianca": 0.88,
+      "decisao": null,
+      "publicavel": true,
+      "bloqueios": [],
+      "ressalvas": [],
+      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_prompt": "prancha:48f8c530",
+      "modelo": "claude-sonnet-5"
+    },
+    {
+      "codigo": "F026-P0001-1972-S01-D00002",
+      "projeto_codigo": "F026-P0001",
+      "fundo_codigo": "F026",
+      "serie": "S01",
+      "modo": "prancha",
+      "titulo": "",
+      "titulo_lido": "",
+      "tipo": "",
+      "tipo_de_desenho": "",
+      "folha": "03",
+      "escala": "",
+      "codigo_unidade": "ABC-1",
+      "revisao": "",
+      "data_lida": "",
+      "data_iso": "",
+      "data_sugerida": "",
+      "data_outlier": false,
+      "ano": "1968",
+      "ano_do_projeto": "",
+      "metadados": {
+        "projeto": "CASA DA PRAIA",
+        "arquiteto": "Sami Bussab",
+        "folha": "03",
+        "codigo_unidade": "ABC-1",
+        "ano": "1968"
+      },
+      "rastreio": {
+        "projeto": "leitura",
+        "arquiteto": "leitura",
+        "folha": "leitura",
+        "codigo_unidade": "leitura",
+        "ano": "leitura"
+      },
+      "alternativas": {},
+      "onde": {},
+      "transcricao_integral": "",
+      "materiais_citados": [],
+      "foto": {},
+      "textual": {},
+      "pessoas_identificadas": [],
+      "fotografo": "",
+      "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
+      "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
+      "arquivos": [
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00002.jpg"
+      ],
+      "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
+      "arquivo_origem": [
+        {
+          "arquivo_origem": "100 - Scanners/F026 - SBU Sami Bussab/P0001 - Edificio Taruma 1972/JPG/scan 002.jpg",
+          "nome_original": "scan 002.jpg",
+          "origem_formato": "jpg"
+        }
+      ],
+      "origem_formato": "jpg",
+      "rotacao_aplicada": 0,
+      "confianca_rotacao": 0.0,
+      "espelhada": false,
+      "orientacao_incerta": true,
+      "orientacao_corrigida": false,
+      "serie_incerta": false,
+      "duplicata_de": "F026-P0001-1972-S01-D00001",
+      "tipo_duplicata": "quase",
+      "autoria_divergente": false,
+      "projeto_divergente": false,
+      "fora_do_periodo": false,
+      "prancha_original": "scan 002.jpg",
+      "confianca": 0.88,
+      "decisao": null,
+      "publicavel": false,
+      "bloqueios": [
+        "duplicata de F026-P0001-1972-S01-D00001"
+      ],
+      "ressalvas": [],
+      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_prompt": "prancha:48f8c530",
+      "modelo": "claude-sonnet-5"
+    }
+  ],
+  "itens": [
+    {
+      "codigo": "F026-P0001-1972-S01-D00001",
+      "projeto_codigo": "F026-P0001",
+      "fundo_codigo": "F026",
+      "serie": "S01",
+      "modo": "prancha",
+      "titulo": "",
+      "titulo_lido": "",
+      "tipo": "",
+      "tipo_de_desenho": "",
+      "folha": "03",
+      "escala": "",
+      "codigo_unidade": "ABC-1",
+      "revisao": "",
+      "data_lida": "",
+      "data_iso": "",
+      "data_sugerida": "",
+      "data_outlier": false,
+      "ano": "1968",
+      "ano_do_projeto": "",
+      "metadados": {
+        "projeto": "CASA DA PRAIA",
+        "arquiteto": "Sami Bussab",
+        "folha": "03",
+        "codigo_unidade": "ABC-1",
+        "ano": "1968"
+      },
+      "rastreio": {
+        "projeto": "leitura",
+        "arquiteto": "leitura",
+        "folha": "leitura",
+        "codigo_unidade": "leitura",
+        "ano": "leitura"
+      },
+      "alternativas": {},
+      "onde": {},
+      "transcricao_integral": "",
+      "materiais_citados": [],
+      "foto": {},
+      "textual": {},
+      "pessoas_identificadas": [],
+      "fotografo": "",
+      "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
+      "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
+      "arquivos": [
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00001.jpg"
+      ],
+      "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
+      "arquivo_origem": [
+        {
+          "arquivo_origem": "100 - Scanners/F026 - SBU Sami Bussab/P0001 - Edificio Taruma 1972/JPG/scan 001.jpg",
+          "nome_original": "scan 001.jpg",
+          "origem_formato": "jpg"
+        }
+      ],
+      "origem_formato": "jpg",
+      "rotacao_aplicada": 0,
+      "confianca_rotacao": 0.0,
+      "espelhada": false,
+      "orientacao_incerta": true,
+      "orientacao_corrigida": false,
+      "serie_incerta": false,
+      "duplicata_de": null,
+      "tipo_duplicata": "",
+      "autoria_divergente": false,
+      "projeto_divergente": false,
+      "fora_do_periodo": false,
+      "prancha_original": "scan 001.jpg",
+      "confianca": 0.88,
+      "decisao": null,
+      "publicavel": true,
+      "bloqueios": [],
+      "ressalvas": [],
+      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_prompt": "prancha:48f8c530",
+      "modelo": "claude-sonnet-5"
+    },
+    {
+      "codigo": "F026-P0001-1972-S01-D00002",
+      "projeto_codigo": "F026-P0001",
+      "fundo_codigo": "F026",
+      "serie": "S01",
+      "modo": "prancha",
+      "titulo": "",
+      "titulo_lido": "",
+      "tipo": "",
+      "tipo_de_desenho": "",
+      "folha": "03",
+      "escala": "",
+      "codigo_unidade": "ABC-1",
+      "revisao": "",
+      "data_lida": "",
+      "data_iso": "",
+      "data_sugerida": "",
+      "data_outlier": false,
+      "ano": "1968",
+      "ano_do_projeto": "",
+      "metadados": {
+        "projeto": "CASA DA PRAIA",
+        "arquiteto": "Sami Bussab",
+        "folha": "03",
+        "codigo_unidade": "ABC-1",
+        "ano": "1968"
+      },
+      "rastreio": {
+        "projeto": "leitura",
+        "arquiteto": "leitura",
+        "folha": "leitura",
+        "codigo_unidade": "leitura",
+        "ano": "leitura"
+      },
+      "alternativas": {},
+      "onde": {},
+      "transcricao_integral": "",
+      "materiais_citados": [],
+      "foto": {},
+      "textual": {},
+      "pessoas_identificadas": [],
+      "fotografo": "",
+      "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
+      "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
+      "arquivos": [
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00002.jpg"
+      ],
+      "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
+      "arquivo_origem": [
+        {
+          "arquivo_origem": "100 - Scanners/F026 - SBU Sami Bussab/P0001 - Edificio Taruma 1972/JPG/scan 002.jpg",
+          "nome_original": "scan 002.jpg",
+          "origem_formato": "jpg"
+        }
+      ],
+      "origem_formato": "jpg",
+      "rotacao_aplicada": 0,
+      "confianca_rotacao": 0.0,
+      "espelhada": false,
+      "orientacao_incerta": true,
+      "orientacao_corrigida": false,
+      "serie_incerta": false,
+      "duplicata_de": "F026-P0001-1972-S01-D00001",
+      "tipo_duplicata": "quase",
+      "autoria_divergente": false,
+      "projeto_divergente": false,
+      "fora_do_periodo": false,
+      "prancha_original": "scan 002.jpg",
+      "confianca": 0.88,
+      "decisao": null,
+      "publicavel": false,
+      "bloqueios": [
+        "duplicata de F026-P0001-1972-S01-D00001"
+      ],
+      "ressalvas": [],
+      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_prompt": "prancha:48f8c530",
+      "modelo": "claude-sonnet-5"
+    }
+  ],
+  "retirados": [],
+  "propostas": {
+    "obras_na_pasta": [],
+    "sem_codigo_de_unidade": [],
+    "fotos_sem_obra": []
+  },
+  "avisos": [
+    "F026-P0001-1972-S01-D00002 é quase de F026-P0001-1972-S01-D00001 — publicar F026-P0001-1972-S01-D00001"
+  ],
+  "execucao": {
+    "versao_cv2": "2026-10-10-02+d4f9308",
+    "contrato": "2.1",
+    "modelo": "claude-sonnet-5",
+    "versao_prompt": {
+      "prancha": "48f8c530",
+      "fotografia": "554fca8b",
+      "textual": "b3df79d7"
+    },
+    "chamadas": 2,
+    "tokens_entrada": 2000,
+    "tokens_saida": 200,
+    "custo_usd": 0.006,
+    "tempo_s": 3.3
+  }
+}

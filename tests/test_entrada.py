@@ -247,7 +247,7 @@ class TestPontaAPonta(Base):
         livro = Livro(self.acervo)
         historia = livro.historico("F026-P0001-1972-S01-D00001")
         acoes = [l["acao"] for l in historia]
-        for acao in ("copiado", "lido", "exif_gravado", "apagado_original"):
+        for acao in ("copiado", "lido", "exif_gravado", "quarentena"):
             self.assertIn(acao, acoes)
         copia = next(l for l in historia if l["acao"] == "copiado")
         self.assertTrue(copia["nome_original"].startswith("scan 00"))

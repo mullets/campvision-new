@@ -497,14 +497,26 @@ def erros_das_leituras(leituras) -> list[dict]:
     return erros
 
 
+def execucao(config, leituras_do_lote: list, custo_usd: float, tempo_s: float) -> dict:
+    """Versão, modelo, prompts, chamadas, tokens, custo e tempo do lote (ticket 89)."""
+    from .config import CONTRATO, versao_completa
+    from .visao import VERSAO_PROMPT
+
+    lidas = [l for l in leituras_do_lote if l.tokens_entrada or l.tokens_saida]
+    return {"versao_cv2": versao_completa(), "contrato": CONTRATO, "modelo": getattr(config, "modelo", ""),
+            "versao_prompt": dict(VERSAO_PROMPT), "chamadas": sum(max(1, l.passes) for l in lidas),
+            "tokens_entrada": sum(l.tokens_entrada for l in lidas), "tokens_saida": sum(l.tokens_saida for l in lidas),
+            "custo_usd": round(float(custo_usd or 0.0), 4), "tempo_s": round(tempo_s, 1)}
+
+
 def pacote_tainacan(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: dict,
                     raiz: Path, catalogacao: Path | None = None, info: dict | None = None,
-                    nome_pasta: str = "") -> dict:
+                    nome_pasta: str = "", execucao_lote: dict | None = None) -> dict:
     """Pacote para o painel/importador (Anexo D.3). Montado em nucleo/projeto.py."""
     from . import projeto as mod_projeto
 
     return mod_projeto.pacote(codigo, nome, ctx, leituras, preparos, mapa,
-                              catalogacao or Path("/nao-existe"), info, nome_pasta)
+                              catalogacao or Path("/nao-existe"), info, nome_pasta, execucao_lote)
 
 
 def _d(codigo: str) -> str:
@@ -615,6 +627,12 @@ def relatorio_lote(codigo: str, nome: str, lote: dict, leituras: dict, por_codig
         f"{a} — formato não suportado, ficou na entrada" for a in lote.get("nao_suportados", [])])
     bloqueia = [e for e in erros if e.get("gravidade") == "bloqueia"]
     linhas.append(f"Erros: {len(erros)} ({len(bloqueia)} bloqueiam). Detalhe em erros.json.")
+    ex = lote.get("execucao") or {}
+    if ex:
+        linhas.append(f"Execução: CV2 {ex.get('versao_cv2')} · contrato {ex.get('contrato')} · modelo {ex.get('modelo')} · "
+                      f"{ex.get('chamadas')} chamada(s) · {ex.get('tokens_entrada')} tokens entrada / "
+                      f"{ex.get('tokens_saida')} saída · US$ {ex.get('custo_usd', 0):.4f} · {ex.get('tempo_s')} s · "
+                      f"prompts {', '.join(f'{k}:{v}' for k, v in (ex.get('versao_prompt') or {}).items())}")
     return "\n".join(linhas) + "\n"
 
 
@@ -737,6 +755,7 @@ class Recebedor:
 
     # ------------------------------------------------------------ principal
     def processar(self, unidade: Unidade, estado_vigia=None, cancelar=None) -> Resultado:
+        comeco = time.monotonic()
         ok, motivo = pronta(unidade, self.config)
         if not ok:
             return Resultado(AGUARDANDO, motivo)
@@ -1062,11 +1081,13 @@ class Recebedor:
         self._erros(catalogacao, todos_erros)
         (catalogacao / "orientacao.txt").write_text(log_orientacao(leituras), encoding="utf-8")
         bloqueantes = sum(1 for e in todos_erros if e["gravidade"] == "bloqueia")
+        lote["execucao"] = execucao(self.config, [leituras[c] for c in por_codigo if c in leituras],
+                                    lote.get("custo_usd", 0.0), time.monotonic() - comeco)
         gravar_json(catalogacao / "pacote_tainacan.json",
                     pacote_tainacan(codigo, nome, ctx, leituras, preparos, mapa, self.raiz_final,
                                     catalogacao, ler_json(unidade.pasta / "info_projeto.json", {})
                                     or ler_json(pasta / "info_projeto.json", {}) or {},
-                                    unidade.relativo.name))
+                                    unidade.relativo.name, lote["execucao"]))
         propostas = ler_json(catalogacao / "pacote_tainacan.json", {}).get("propostas") or {}
         if propostas.get("obras_na_pasta") or propostas.get("fotos_sem_obra"):
             gravar_json(catalogacao / "propostas.json", propostas)
@@ -1125,6 +1146,21 @@ class Recebedor:
                     _log.warning("%s mudou depois da cópia — não apago.", origem)
                     continue
                 tamanho = origem.stat().st_size
+                rel_origem = Path(unidade.relativo) / origem.relative_to(unidade.pasta)
+                if self.config.quarentena_entrada:
+                    from . import quarentena as mod_quarentena
+
+                    novo = mod_quarentena.mover(origem, self.raiz_entrada, rel_origem, {
+                        "codigo_projeto": codigo, "codigo_documento": codigo_doc, "sha256": soma,
+                        "lote_id": ctx.lote_id})
+                    apagados += 1
+                    self.livro.anotar(
+                        "quarentena", lote_id=ctx.lote_id, codigo_projeto=codigo, codigo_documento=codigo_doc,
+                        arquivo_origem=str(Path("100 - Scanners") / rel_origem),
+                        arquivo_destino=str(Path("100 - Scanners") / novo.relative_to(self.raiz_entrada)),
+                        nome_original=origem.name, tamanho=tamanho, sha256=soma,
+                        detalhe="original em quarentena até a réplica confirmar")
+                    continue
                 origem.unlink()
                 apagados += 1
                 self.livro.anotar(

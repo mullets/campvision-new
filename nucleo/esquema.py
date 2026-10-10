@@ -135,6 +135,10 @@ class Leitura:
     conflito_endereco: bool = False
     confianca_rotacao: float = 0.0
     titulo_publicacao: str = ""
+    # Ticket 89: com que versão/prompt/modelo esta folha foi lida.
+    versao_cv2: str = ""
+    versao_prompt: str = ""
+    modelo: str = ""
 
     @property
     def confianca_media(self) -> float:
