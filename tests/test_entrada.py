@@ -211,7 +211,11 @@ class TestPontaAPonta(Base):
         self.assertEqual(r.codigo, "F026-P0001")
 
         fundo = self.acervo / "F026 - SBU Sami Bussab"
-        projeto = fundo / "01 - Projetos" / "F026-P0001 - Edifício Tarumã"
+        # Nome do projeto novo = o que o CARIMBO diz (a pasta é pista; auditoria F026).
+        projeto = r.pasta_projeto
+        self.assertTrue(projeto.name.startswith("F026-P0001 - "), projeto.name)
+        self.assertEqual(projeto.parent, fundo / "01 - Projetos")
+        self.assertFalse(any((fundo / estrutura.PASTA_IDENTIFICACAO).iterdir()))  # provisória sumiu
         serie = projeto / "01 - Desenhos e pranchas"
         # MODELO de pastas
         for nome in estrutura.PASTAS_DO_FUNDO:

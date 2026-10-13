@@ -1,6 +1,6 @@
 {
   "codigo": "F026-P0001",
-  "nome": "Edifício Tarumã",
+  "nome": "CASA DA PRAIA",
   "fundo_codigo": "F026",
   "ano": "1972",
   "folhas_esperadas": 2,
@@ -9,6 +9,6 @@
   "operador": "Beatriz",
   "operador_email": "beatriz@camp.arq.br",
   "teste": false,
-  "atualizado_em": "2026-10-10T09:07:32-03:00",
-  "gerado_por": "CAMP Vision 2 2026-10-10-02"
+  "atualizado_em": "2026-10-13T17:35:14-03:00",
+  "gerado_por": "CAMP Vision 2 2026-10-13-01"
 }

@@ -23,6 +23,11 @@ from datetime import date
 from pathlib import Path
 
 PASTA_PROJETOS = "01 - Projetos"
+# Lote lido ANTES de ter código (auditoria F026, 13/10): fica aqui, com código
+# provisório P9xxx, até o carimbo dizer de que projeto(s) ele é. Nunca vai ao
+# painel nem ao site; numeros_p/diagnóstico não olham esta pasta.
+PASTA_IDENTIFICACAO = "00 - Em identificação"
+MARCA_UNIDADE = ".unidade_cv2"
 
 SERIES: dict[str, str] = {
     "S01": "01 - Desenhos e pranchas",
@@ -217,3 +222,29 @@ def numeros_p(raiz_final: Path, fundo_codigo: str) -> tuple[int, set[str]]:
                 usados.add(codigo)
     maior = max((int(c.split("-P")[1]) for c in usados), default=0)
     return maior, usados
+
+
+def e_provisorio(codigo: str) -> bool:
+    return bool(re.search(r"-P9\d{3}$", (codigo or "").upper()))
+
+
+def pasta_provisoria(pasta_fundo: Path, fundo: str, chave_unidade: str, nome: str) -> tuple[Path, str]:
+    """A pasta provisória da unidade (a mesma em todas as rodadas) e o código P9xxx dela."""
+    base = pasta_fundo / PASTA_IDENTIFICACAO
+    base.mkdir(parents=True, exist_ok=True)
+    fundo = fundo.upper()
+    usados = set()
+    for filho in base.iterdir():
+        if not filho.is_dir():
+            continue
+        codigo = codigo_da_pasta(filho)
+        usados.add(codigo)
+        marca = filho / MARCA_UNIDADE
+        if marca.exists() and marca.read_text(encoding="utf-8").strip() == chave_unidade:
+            return filho, codigo
+    numero = next(n for n in range(9001, 10000) if f"{fundo}-P{n:04d}" not in usados)
+    codigo = f"{fundo}-P{numero:04d}"
+    pasta = base / limpar(f"{codigo} - {nome or 'lote'}", 110)
+    pasta.mkdir(parents=True, exist_ok=True)
+    (pasta / MARCA_UNIDADE).write_text(chave_unidade, encoding="utf-8")
+    return pasta, codigo

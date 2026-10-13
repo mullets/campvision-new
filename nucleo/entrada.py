@@ -452,6 +452,102 @@ def enriquecer(leituras: dict, preparos: dict, fundo) -> None:
             hashes.append((codigo, l.hash_perceptual))
         arquiteto = (l.lidos_originais or l.valores).get("arquiteto", "") or l.valores.get("arquiteto", "")
         l.autoria_divergente = l.modo == "prancha" and autoria_divergente(arquiteto, fundo.autorizados)
+        ident = p.get("identidade") or {}
+        l.suspeita_grupo = bool(ident.get("divergente"))
+        l.capa = str(ident.get("capa") or "")
+        l.sem_identificacao = bool(ident.get("sem_identificacao"))
+        if ident.get("carimbo"):
+            l.carimbo = dict(ident["carimbo"])
+        elif not l.carimbo:
+            from .identidade import carimbo as _carimbo
+            l.carimbo = _carimbo(l)
+
+
+def indice_do_fundo(pasta_fundo: Path, raiz_final: Path) -> dict[str, Path]:
+    """SHA-256 → arquivo já arquivado em algum projeto do fundo (pelos mapa_origem.json)."""
+    indice: dict[str, Path] = {}
+    for mapa in (pasta_fundo / estrutura.PASTA_PROJETOS).glob("*/catalogacao/mapa_origem.json"):
+        for sha, item in (ler_json(mapa, {}) or {}).items():
+            destino = raiz_final / item.get("destino", "")
+            if item.get("destino") and destino.exists():
+                indice[sha] = destino
+    return indice
+
+
+def _diz(l) -> str:
+    c = l.carimbo or {}
+    return " · ".join(v for v in (c.get("obra"), c.get("local"), c.get("cliente")) if v) \
+        or (l.lidos_originais or l.valores).get("projeto", "")
+
+
+def _proporcao(caminho: Path) -> float:
+    """Lado maior / lado menor da imagem de leitura (tira estreita = não é prancha)."""
+    try:
+        from PIL import Image
+
+        with Image.open(caminho) as im:
+            a, b = im.size
+        return max(a, b) / max(1, min(a, b))
+    except (OSError, ValueError, ImportError):
+        return 0.0
+
+
+def marcar_identidade(preparos: dict, analise, plano: list[dict], leituras: dict) -> None:
+    """Grava no preparo de cada folha o que a identificação decidiu (sobrevive a releituras)."""
+    from .identidade import carimbo
+
+    varios = len(plano) > 1 or len(analise.grupos) > 1
+    for codigo, l in leituras.items():
+        prep = preparos.setdefault(codigo, {})
+        grupo = analise.grupo_de(codigo)
+        destino = next((d for d in plano if codigo in d["documentos"]), None)
+        no_grupo = bool(destino and codigo in destino.get("folhas_grupo", []))
+        prep["identidade"] = {
+            "grupo": grupo.titulo if grupo else "",
+            "carimbo": carimbo(l),
+            "capa": analise.capas.get(codigo, ""),
+            # Folha de OUTRA obra (grupo pequeno sem projeto na base) que foi junto com o principal.
+            "divergente": bool(grupo and destino and not no_grupo),
+            "sem_identificacao": bool(varios and codigo in analise.sem_identificacao),
+        }
+
+
+def relatorio_identificacao(analise, plano: list[dict], pendente: str, leituras: dict, origem: str) -> str:
+    """O que o carimbo diz, grupo a grupo, e para onde cada folha vai (ou o que falta decidir)."""
+    from .identidade import carimbo
+
+    linhas = [f"Identificação pelo carimbo — {origem}", ""]
+    for i, g in enumerate(analise.grupos, 1):
+        destino = next((d for d in plano if set(g.folhas) & set(d["documentos"])), None)
+        linhas.append(f"Grupo {i}: {g.titulo} ({len(g.folhas)} folha(s))"
+                      + (f" → {destino['codigo']} ({destino['motivo']})" if destino else ""))
+        if g.cliente:
+            linhas.append(f"   cliente: {g.cliente}")
+        if g.ids:
+            linhas.append(f"   identificadores: {', '.join(sorted(g.ids))}")
+        for c in g.folhas:
+            dz = carimbo(leituras[c]) if c in leituras else {}
+            linhas.append(f"   {c}: " + " · ".join(v for v in (dz.get("obra"), dz.get("local"), dz.get("data")) if v))
+    if analise.sem_identificacao:
+        linhas += ["", "Sem identificação (o carimbo não diz a obra):",
+                   *(f"   {c}" for c in analise.sem_identificacao)]
+    if analise.capas:
+        linhas += ["", "Capas, envelopes e tiras (não são pranchas):",
+                   *(f"   {c}: {m}" for c, m in sorted(analise.capas.items()))]
+    if analise.mesmo_endereco:
+        linhas += ["", "Obras diferentes no MESMO endereço — perguntar se são projetos separados ou fases:"]
+        for juntos in analise.mesmo_endereco:
+            linhas.append("   " + " | ".join(analise.grupos[i].titulo for i in juntos))
+    for f in analise.fases:
+        linhas += ["", f"Escritórios diferentes em décadas diferentes em '{f['titulo']}' — fases ou obras?"]
+        linhas += [f"   {e}: {', '.join(fs)}" for e, fs in f["subgrupos"].items()]
+    linhas.append("")
+    if pendente:
+        linhas.append(f"AGUARDANDO DECISÃO: {pendente}")
+    else:
+        for d in plano:
+            linhas.append(f"→ {d['codigo']} {d['nome']}: {len(d['documentos'])} documento(s) — {d['motivo']}")
+    return "\n".join(linhas) + "\n"
 
 
 def erros_das_leituras(leituras) -> list[dict]:
@@ -474,8 +570,13 @@ def erros_das_leituras(leituras) -> list[dict]:
         if l.duplicata_de:
             add(nome, "duplicata", "corrigir", f"{l.tipo_duplicata} de {l.duplicata_de} — só a única publica")
         if l.suspeita_grupo:
-            add(nome, "projeto errado", "corrigir",
-                f"projeto divergente: carimbo diz '{l.valores.get('projeto', '')}'")
+            add(nome, "projeto errado", "bloqueia",
+                f"projeto divergente: o carimbo diz '{_diz(l)}' — fora da publicação até decisão")
+        if l.capa:
+            add(nome, "metadado", "aviso", f"{l.capa}: não é prancha — fora da publicação")
+        if l.sem_identificacao:
+            add(nome, "projeto errado", "bloqueia", "sem identificação: pasta com várias obras e a folha não diz "
+                "de qual é — fora da publicação até decisão")
         if l.serie_incerta:
             add(nome, "série", "aviso", "série incerta na triagem — "
                 f"{(l.triagem or {}).get('motivo', '')}; conferir na folha de contatos")
@@ -602,11 +703,14 @@ def relatorio_lote(codigo: str, nome: str, lote: dict, leituras: dict, por_codig
     secao(3, "Duplicatas (publica só a única)", [
         f"{c} é {l.tipo_duplicata} de {l.duplicata_de} — publicar {l.duplicata_de}"
         for c, l in sorted(do_lote.items()) if l.duplicata_de])
-    secao(4, "Autoria divergente e projeto divergente (não publicar)", [
+    secao(4, "Autoria divergente, projeto divergente, sem identificação e capas (não publicar)", [
         *(f"{c}: autoria divergente — carimbo '{(l.lidos_originais or l.valores).get('arquiteto', '')}'"
           for c, l in sorted(do_lote.items()) if l.autoria_divergente),
-        *(f"{c}: projeto divergente — carimbo '{l.valores.get('projeto', '')}'"
-          for c, l in sorted(do_lote.items()) if l.suspeita_grupo)])
+        *(f"{c}: projeto divergente — o carimbo diz '{_diz(l)}'"
+          for c, l in sorted(do_lote.items()) if l.suspeita_grupo),
+        *(f"{c}: sem identificação — pasta com várias obras; a folha não diz de qual é"
+          for c, l in sorted(do_lote.items()) if l.sem_identificacao),
+        *(f"{c}: {l.capa} — não é prancha" for c, l in sorted(do_lote.items()) if l.capa)])
     secao(5, "Precisa de olho humano (orientação e série incertas)", [
         *(f"{c}: orientação incerta" for c, l in sorted(do_lote.items()) if l.orientacao_incerta),
         *(f"{c}: série incerta — {(l.triagem or {}).get('motivo', '')}"
@@ -701,12 +805,14 @@ class Recebedor:
 
     def _status(self, pasta: Path, codigo: str, situacao: str, ctx: Contexto, **extra) -> None:
         atual = ler_json(pasta / "status.json", {}) or {}
+        provisorio = estrutura.e_provisorio(codigo)
         atual.update({
             "codigo": codigo, "status": situacao, "status_em": _agora(),
             "lote_atual": ctx.lote_id, "versao_cv2": VERSAO_BUILD, **extra,
         })
         gravar_json(pasta / "status.json", atual)
-        self.painel.aviso(codigo, self._relativo(pasta), situacao)
+        if not provisorio:  # código provisório (P9xxx) nunca vai ao painel
+            self.painel.aviso(codigo, self._relativo(pasta), situacao)
 
     def _info(self, pasta: Path, codigo: str, nome: str, ctx: Contexto, folhas: int) -> None:
         gravar_json(pasta / "info_projeto.json", {
@@ -719,40 +825,6 @@ class Recebedor:
         })
 
     # ------------------------------------------------------------ projeto
-    def _resolver_projeto(self, ctx: Contexto) -> tuple[Path | None, str, str]:
-        """(pasta, código, nome) — ou (None, '', motivo) para esperar."""
-        pasta_fundo = estrutura.garantir_fundo(self.raiz_final, ctx.fundo)
-        existente = estrutura.achar_projeto(pasta_fundo, ctx.codigo, ctx.projeto)
-        if existente:
-            codigo = estrutura.codigo_da_pasta(existente) or ctx.codigo
-            nome = estrutura.nome_sem_codigo(existente.name)
-            return existente, codigo, nome
-        codigo = ctx.codigo
-        if not codigo:
-            if not self.painel.ligado:
-                return None, "", "painel não configurado: não há como numerar projeto novo"
-            chave = self.estado.chave_reserva(ctx.fundo.codigo, ctx.projeto)
-            maior, usados = estrutura.numeros_p(self.raiz_final, ctx.fundo.codigo)
-            codigo = self.painel.reservar(
-                ctx.fundo.codigo, ctx.projeto, chave, ano=ctx.ano, cidade=ctx.cidade,
-                identificacao_original=(f"{ctx.p_estacao} - {ctx.projeto}" if ctx.p_estacao else ctx.projeto),
-                operador=ctx.operador,
-                proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
-            ) or ""
-            if not codigo:
-                return None, "", f"painel não reservou o projeto ({self.painel.ultimo_erro or 'sem resposta'})"
-            # CV-27: número P nunca se reusa. Se o painel devolveu um P que já é de
-            # OUTRA pasta no acervo, não mistura os dois projetos: espera correção.
-            existente = bool((getattr(self.painel, "ultima_reserva", None) or {}).get("existente"))
-            if existente:
-                _log.info("Painel: %s é projeto que já existe (decisão humana) — o lote entra nele.", codigo)
-            if codigo.upper() in usados and not existente:
-                return None, "", (f"painel devolveu {codigo}, que já é outro projeto no acervo "
-                                  f"(maior P local: P{maior:04d}) — corrigir a numeração no painel")
-            self.estado.guardar_codigo(ctx.fundo.codigo, ctx.projeto, codigo)
-        nome = ctx.projeto or codigo
-        return estrutura.garantir_projeto(pasta_fundo, codigo, nome, ctx.fundo), codigo, nome
-
     # ------------------------------------------------------------ principal
     def processar(self, unidade: Unidade, estado_vigia=None, cancelar=None) -> Resultado:
         comeco = time.monotonic()
@@ -770,12 +842,20 @@ class Recebedor:
             _log.error("Unidade %s: %s", unidade.relativo, motivo)
             return Resultado(ERRO, motivo)
 
-        pasta, codigo, nome = self._resolver_projeto(ctx)
-        if pasta is None:
-            self.estado.anotar(unidade.chave, AGUARDANDO, motivo=nome)
-            _log.warning("Unidade %s aguardando: %s", unidade.relativo, nome)
-            return Resultado(AGUARDANDO, nome)
+        # Sem painel não há como numerar projeto novo: espera ANTES de ler (não gasta API).
+        pasta_fundo = estrutura.garantir_fundo(self.raiz_final, ctx.fundo)
+        if not self.painel.ligado and not estrutura.achar_projeto(pasta_fundo, ctx.codigo, ctx.projeto):
+            motivo = "painel não configurado: não há como numerar projeto novo"
+            self.estado.anotar(unidade.chave, AGUARDANDO, motivo=motivo)
+            _log.warning("Unidade %s aguardando: %s", unidade.relativo, motivo)
+            return Resultado(AGUARDANDO, motivo)
 
+        # Auditoria F026 (13/10): o lote é lido ANTES de ter código, numa pasta
+        # provisória P9xxx fora de "01 - Projetos". O carimbo decide de que
+        # projeto(s) ele é; só então os arquivos vão para o código certo.
+        pasta, codigo = estrutura.pasta_provisoria(pasta_fundo, ctx.fundo.codigo, unidade.chave,
+                                                   ctx.projeto or unidade.relativo.name)
+        nome = ctx.projeto or codigo
         resultado = Resultado(PROCESSANDO, codigo=codigo, pasta_projeto=pasta)
         catalogacao = pasta / "catalogacao"
         erros_lote: list[dict] = []
@@ -809,6 +889,18 @@ class Recebedor:
             resultado.status, resultado.motivo, resultado.lote = ERRO, motivo, lote
             return resultado
 
+        # Livro de registro: o que acontece na pasta provisória é anotado com o código
+        # FINAL, depois que o carimbo decide o projeto (a história do documento fica inteira).
+        adiado = catalogacao / "livro_adiado.jsonl"
+
+        def anotar_adiado(acao: str, **campos) -> None:
+            adiado.parent.mkdir(parents=True, exist_ok=True)
+            with adiado.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"acao": acao, **campos}, ensure_ascii=False, default=str) + "\n")
+
+        # Arquivo que JÁ está no acervo (mesmo SHA-256, em qualquer projeto do fundo): não entra de novo.
+        no_acervo = indice_do_fundo(pasta_fundo, self.raiz_final)
+
         # ---- 4. cópia com nome CAMP, conferida por hash
         mapa_caminho = catalogacao / "mapa_origem.json"
         mapa: dict = ler_json(mapa_caminho, {}) or {}
@@ -837,9 +929,13 @@ class Recebedor:
         proximo = estrutura.proximo_documento(pasta)
         arquivados: list[tuple[Path, Path, str, str]] = []  # (origem, destino, código, sha)
         vistos_sha: dict[str, str] = {}
+        ja_arquivados: list[tuple[Path, Path, str, str]] = []
         try:
             for doc in documentos:
                 shas = {v: sha256(v) for v in doc.versoes}
+                if all(s in no_acervo for s in shas.values()):
+                    ja_arquivados += [(v, no_acervo[sh], no_acervo[sh].stem, sh) for v, sh in shas.items()]
+                    continue
                 ja = [mapa[s] for s in shas.values() if s in mapa]
                 if ja:
                     codigo_doc = Path(ja[0]["destino"]).stem
@@ -867,7 +963,7 @@ class Recebedor:
                             temporario.unlink(missing_ok=True)
                             return falhar(f"cópia de {versao.name} não confere (hash)")
                         os.replace(temporario, destino)
-                        self.livro.anotar(
+                        anotar_adiado(
                             "copiado", lote_id=ctx.lote_id, codigo_projeto=codigo,
                             codigo_documento=codigo_doc, arquivo_origem=origem_rel(versao),
                             arquivo_destino=self._relativo(destino), nome_original=versao.name,
@@ -888,6 +984,19 @@ class Recebedor:
 
         if cancelar is not None and cancelar.is_set():
             return falhar("cancelado antes da leitura")
+        if not arquivados:  # tudo o que veio já estava no acervo: nada a ler nem a decidir
+            from . import transferir as mod_transferir
+
+            mod_transferir.limpar_provisoria(pasta)
+            proj = "-".join(ja_arquivados[0][2].split("-")[:2]) if ja_arquivados else ""
+            if self.config.apagar_original_apos_pronto and ja_arquivados:
+                resultado.apagados = self._apagar_originais(unidade, ja_arquivados, ctx, proj,
+                                                            sobrou=bool(lote["nao_suportados"]))
+            self.estado.anotar(unidade.chave, PRONTO, assinatura=assinatura, codigo=proj, lote_id=ctx.lote_id)
+            _log.info("Lote %s: os %d arquivo(s) já estavam no acervo (%s).", ctx.lote_id, len(ja_arquivados), proj)
+            resultado.status, resultado.codigo, resultado.copiados = PRONTO, proj, 0
+            resultado.pasta_projeto = ja_arquivados[0][1].parents[2] if ja_arquivados else pasta
+            return resultado
 
         from . import renomear as mod_renomear
 
@@ -935,7 +1044,7 @@ class Recebedor:
             for versao in versoes:
                 if versao.suffix.lower() in (".jpg", ".jpeg") and prep and mod_derivados.orientar_jpg(versao, prep):
                     prep["jpg_orientado"] = True
-                    self.livro.anotar("refeito", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                    anotar_adiado("refeito", lote_id=ctx.lote_id, codigo_projeto=codigo,
                                       codigo_documento=codigo_doc, arquivo_destino=self._relativo(versao),
                                       detalhe=f"JPG girado {prep.get('rotacao', 0)}°"
                                       + (" e desespelhado" if prep.get("espelhada") else ""))
@@ -972,6 +1081,7 @@ class Recebedor:
         cfg_leitura = dataclasses.replace(
             self.config, status_concluido=PROCESSANDO, status_pronto=PROCESSANDO,
             espera_estabilidade_segundos=0, escrever_por_projeto=True, formatos_saida=("csv",),
+            usar_pasta_como_pista=False,  # a pasta é pista do PROJETO, nunca do que a folha diz
         )
         projeto = mod_vigia.Projeto(pasta, [cache], pasta.name, self.raiz_final)
         evento = mod_vigia.processar(projeto, cfg_leitura, self.cliente, estado_vigia, cancelar)
@@ -988,10 +1098,291 @@ class Recebedor:
             return falhar(f"leitura falhou em {len(falhas)} de {len(por_codigo)} documento(s): {exemplo[:160]}")
         for codigo_doc in por_codigo:
             if codigo_doc in leituras:
-                self.livro.anotar("lido", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                anotar_adiado("lido", lote_id=ctx.lote_id, codigo_projeto=codigo,
                                   codigo_documento=codigo_doc,
                                   detalhe="carimbo lido" if leituras[codigo_doc].carimbo_encontrado
                                   else "sem carimbo")
+
+
+        # ---- 5b. identificação pelo CARIMBO (T2/T3/T6): grupos, capas, base do fundo
+        from . import identidade as mod_ident, transferir as mod_transferir
+
+        enriquecer(leituras, preparos, ctx.fundo)
+        do_lote = {c: leituras[c] for c in por_codigo if c in leituras}
+        analise = mod_ident.analisar(do_lote, {c: _proporcao(cache / f"{c}.jpg") for c in do_lote})
+        plano, pendente = self._planejar(analise, ctx, unidade, do_lote)
+        marcar_identidade(preparos, analise, plano, do_lote)
+        gravar_json(preparo_caminho, preparos)
+        gravar_json(catalogacao / "identificacao.json", {
+            "lote_id": ctx.lote_id, "unidade": str(unidade.relativo), "em": _agora(),
+            "analise": analise.como_dict(), "plano": plano, "pendente": pendente})
+        (catalogacao / "identificacao.txt").write_text(
+            relatorio_identificacao(analise, plano, pendente, do_lote, str(unidade.relativo)), encoding="utf-8")
+        lote["identificacao"] = {"grupos": len(analise.grupos), "capas": len(analise.capas),
+                                 "sem_identificacao": len(analise.sem_identificacao),
+                                 "destinos": [d["codigo"] for d in plano], "pendente": pendente}
+        gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+        if pendente:
+            self._status(pasta, codigo, AGUARDANDO, ctx, motivo=pendente)
+            self.estado.anotar(unidade.chave, AGUARDANDO, motivo=pendente, codigo=codigo)
+            _log.warning("Lote %s aguardando decisão: %s", ctx.lote_id, pendente)
+            resultado.status, resultado.motivo, resultado.lote = AGUARDANDO, pendente, lote
+            return resultado
+
+        # ---- 5c. cada grupo para o projeto decidido (move, renumera o D; não relê)
+        total_docs = max(1, len(por_codigo))
+        prontos: list[Resultado] = []
+        finais: list[tuple] = []
+        for destino in plano:
+            pasta_d = estrutura.garantir_projeto(pasta_fundo, destino["codigo"], destino["nome"], ctx.fundo)
+            ja_tinha = set(ler_json(pasta_d / "catalogacao" / "mapa_origem.json", {}) or {})
+            try:
+                trocas, movidos = mod_transferir.transferir(
+                    self.raiz_final, self.pasta_estado, pasta, pasta_d, destino["documentos"], destino["codigo"],
+                    self.livro, destino["motivo"])
+            except OSError as erro:
+                return falhar(f"não consegui levar o lote para {destino['codigo']}: {erro}")
+            arq_d = [(o, movidos.get(d, d), trocas[c], sh) for o, d, c, sh in arquivados if c in trocas]
+            self._livro_adiado(adiado, destino["codigo"], trocas, movidos)
+            finais += arq_d
+            lote_d = {**lote, "codigo": destino["codigo"], "erros": [dict(e) for e in erros_lote],
+                      "custo_usd": round(lote.get("custo_usd", 0.0) * len(destino["documentos"]) / total_docs, 4),
+                      "arquivos": [{**a, "codigo": trocas[a["codigo"]],
+                                    "destino": self._relativo(movidos.get(self.raiz_final / a["destino"],
+                                                                          self.raiz_final / a["destino"]))}
+                                   for a in lote.get("arquivos", []) if a.get("codigo") in trocas],
+                      "identificacao": {**lote["identificacao"], "grupo": destino.get("grupo", ""),
+                                        "motivo": destino["motivo"]}}
+            ctx_d = dataclasses.replace(ctx, projeto=destino["nome"] if len(plano) > 1 else ctx.projeto)
+            r = self._concluir(unidade, ctx_d, pasta_d, destino["codigo"], destino["nome"], lote_d, arq_d,
+                               comeco, estado_vigia, cancelar,
+                               copiados=len({sh for *_x, sh in arq_d if sh not in ja_tinha}))
+            if r.status != PRONTO:
+                return r
+            prontos.append(r)
+        mod_transferir.limpar_provisoria(
+            pasta, guardar_em=prontos[0].pasta_projeto / "catalogacao" / "identificacao" / ctx.lote_id if prontos else None)
+        for vazia in (self.raiz_final / "_campvision" / "preview" / codigo, cache,
+                      self.pasta_estado / "leitura_bruta" / codigo):
+            try:
+                vazia.rmdir()
+            except OSError:
+                pass
+
+        # ---- 9. apaga o original (só o que foi arquivado e conferido)
+        codigos = [r.codigo for r in prontos]
+        resultado.codigo = codigos[0] if codigos else codigo
+        resultado.pasta_projeto = prontos[0].pasta_projeto if prontos else pasta
+        finais += ja_arquivados
+        if self.config.apagar_original_apos_pronto:
+            resultado.apagados = self._apagar_originais(unidade, finais, ctx, resultado.codigo,
+                                                        sobrou=bool(lote["nao_suportados"]))
+        self.estado.anotar(unidade.chave, PRONTO, assinatura=assinatura, codigo=resultado.codigo,
+                           codigos=codigos, lote_id=ctx.lote_id)
+        _log.info("Lote %s → %s pronto: %d documento(s), %d copiado(s), %d apagado(s).",
+                  ctx.lote_id, ", ".join(codigos), len(por_codigo), resultado.copiados, resultado.apagados)
+        resultado.status, resultado.lote = PRONTO, (prontos[0].lote if len(prontos) == 1 else
+                                                    {**lote, "status": PRONTO, "destinos": codigos})
+        return resultado
+
+    def _livro_adiado(self, adiado: Path, codigo_destino: str, trocas: dict, movidos: dict) -> None:
+        """Escreve no livro, com o código e o caminho FINAIS, o que foi feito na pasta provisória."""
+        if not adiado.exists():
+            return
+        caminhos = {self._relativo(a): self._relativo(b) for a, b in movidos.items()}
+        ficam = []
+        for linha in adiado.read_text(encoding="utf-8").splitlines():
+            try:
+                item = json.loads(linha)
+            except ValueError:
+                continue
+            doc = item.get("codigo_documento", "")
+            if doc not in trocas:
+                ficam.append(linha)
+                continue
+            item.update(codigo_documento=trocas[doc], codigo_projeto=codigo_destino)
+            if item.get("arquivo_destino") in caminhos:
+                item["arquivo_destino"] = caminhos[item["arquivo_destino"]]
+            acao = item.pop("acao")
+            self.livro.anotar(acao, **item)
+        adiado.write_text("".join(f"{l}\n" for l in ficam), encoding="utf-8")
+
+    # ------------------------------------------------------------ plano
+    def _planejar(self, analise, ctx: Contexto, unidade: Unidade, leituras: dict) -> tuple[list[dict], str]:
+        """Para cada grupo, o projeto: base do fundo (um candidato forte), decisão no painel
+        (dois ou mais), ou reserva nova (nenhum). Devolve (plano, '') ou ([], motivo de espera)."""
+        from . import identidade as mod_ident
+
+        base = []
+        if self.painel.ligado:
+            base = (self.painel.contexto(ctx.fundo.codigo) or {}).get("projetos") or []
+        pista = mod_ident.pista_da_pasta(ctx.projeto or unidade.relativo.name)
+        grupos = list(analise.grupos)
+        varios = len(grupos) > 1
+        # Grupo de 1 folha, numa pasta com outras obras, sem projeto forte na base: não vira
+        # projeto sozinho; fica em "sem identificação" (e não é encaixado à força no maior).
+        sobras: list[str] = list(analise.sem_identificacao)
+        casamentos = {}
+        for g in list(grupos):
+            casamentos[g.chave] = mod_ident.casar_com_base(g, base, pista if not varios else "")
+            if varios and len(g.folhas) < mod_ident.MINIMO_GRUPO and "forte" not in casamentos[g.chave]:
+                grupos.remove(g)
+                sobras += g.folhas
+        if not grupos:  # nada legível no lote: a pasta é a única pista (como antes)
+            g = mod_ident.Grupo(obra=pista, folhas=[])
+            grupos = [g]
+            casamentos[g.chave] = mod_ident.casar_com_base(g, base, "")
+        perguntar = {i for juntos in analise.mesmo_endereco for i in juntos}
+        perguntar |= {i for i, g in enumerate(analise.grupos) if any(f["grupo"] == g.chave for f in analise.fases)}
+        perguntar_chaves = {analise.grupos[i].chave for i in perguntar if i < len(analise.grupos)}
+
+        plano: list[dict] = []
+        esperando: list[str] = []
+        for g in grupos:
+            casa = casamentos[g.chave]
+            titulo = g.titulo if g.folhas else (ctx.projeto or pista)
+            forte = casa.get("forte")
+            candidatos = casa.get("candidatos") or ([forte] if forte else [])
+            # Código oficial explícito (manifesto/pasta F0xx-P0xxx): vale, a não ser que o carimbo
+            # aponte com força OUTRO projeto da base — aí pergunta.
+            if ctx.codigo and not varios:
+                if forte and forte["codigo"].upper() != ctx.codigo.upper():
+                    candidatos = [{"codigo": ctx.codigo, "titulo": "código informado pela estação",
+                                   "motivos": ["código no manifesto/pasta"]}, forte]
+                    forte = None
+                else:
+                    plano.append(self._destino(ctx.codigo, g, ctx, "código oficial informado pela estação"))
+                    continue
+            if forte and g.chave not in perguntar_chaves:
+                nome = forte["titulo"]
+                plano.append(self._destino(forte["codigo"], g, ctx, "carimbo casa com o projeto da base: "
+                                           + "; ".join(forte.get("motivos") or []), nome=nome))
+                continue
+            sem_painel = not self.painel.ligado
+            if sem_painel:  # só acontece com projeto já no acervo (ver processar)
+                existente = estrutura.achar_projeto(estrutura.garantir_fundo(self.raiz_final, ctx.fundo),
+                                                    ctx.codigo, ctx.projeto)
+                plano.append(self._destino(estrutura.codigo_da_pasta(existente), g, ctx, "projeto já no acervo",
+                                           nome=estrutura.nome_sem_codigo(existente.name)))
+                continue
+            chave_nome = ctx.projeto if not varios else f"{ctx.projeto}|{g.chave}"
+            chave = self.estado.chave_reserva(ctx.fundo.codigo, chave_nome)
+            maior, usados = estrutura.numeros_p(self.raiz_final, ctx.fundo.codigo)
+            extra = {}
+            if candidatos and (len(candidatos) > 1 or g.chave in perguntar_chaves):
+                extra["candidatos"] = [{"codigo": c["codigo"], "titulo": c.get("titulo", ""),
+                                        "motivos": c.get("motivos") or []} for c in candidatos]
+            codigo = self.painel.reservar(
+                ctx.fundo.codigo, titulo, chave, ano=ctx.ano, cidade=ctx.cidade,
+                identificacao_original=(f"{ctx.p_estacao} - {ctx.projeto}" if ctx.p_estacao else ctx.projeto),
+                operador=ctx.operador, proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
+                carimbo={"obra": g.obra, "local": g.local, "cliente": g.cliente,
+                         "identificadores": sorted(g.ids), "folhas": len(g.folhas)},
+                **extra) or ""
+            if not codigo:
+                pend = getattr(self.painel, "ultima_reserva", None) or {}
+                if extra.get("candidatos"):
+                    lista = " × ".join(c["codigo"] for c in extra["candidatos"])
+                    esperando.append(f"'{titulo}': qual projeto? ({lista}) — decisão no painel")
+                else:
+                    esperando.append(f"'{titulo}': {pend.get('mensagem') or self.painel.ultimo_erro or 'painel não reservou'}")
+                continue
+            existente = bool((getattr(self.painel, "ultima_reserva", None) or {}).get("existente"))
+            ja_era_nosso = (ler_json(self.estado.reservas, {}) or {}).get(
+                f"{ctx.fundo.codigo}|{estrutura.normalizar(chave_nome)}", {}).get("codigo", "").upper() == codigo.upper()
+            if codigo.upper() in usados and not existente and not ja_era_nosso and not any(
+                    c["codigo"].upper() == codigo.upper() for c in candidatos):
+                esperando.append(f"painel devolveu {codigo}, que já é outro projeto no acervo "
+                                 f"(maior P local: P{maior:04d}) — corrigir a numeração no painel")
+                continue
+            self.estado.guardar_codigo(ctx.fundo.codigo, chave_nome, codigo)
+            base_titulo = next((str(p.get("projeto") or "") for p in base if str(p.get("codigo")) == codigo), "")
+            plano.append(self._destino(codigo, g, ctx, "decidido no painel" if (existente or extra) else
+                                       "projeto novo reservado no painel", nome=base_titulo or titulo))
+        if esperando:
+            return [], "; ".join(esperando)
+        # Juntar destinos iguais (dois grupos que o painel mandou para o mesmo projeto).
+        juntos: dict[str, dict] = {}
+        for d in plano:
+            if d["codigo"] in juntos:
+                juntos[d["codigo"]]["documentos"] += d["documentos"]
+                juntos[d["codigo"]]["motivo"] += f"; {d['motivo']}"
+            else:
+                juntos[d["codigo"]] = d
+        plano = list(juntos.values())
+        # Capas e folhas sem identificação: com o projeto principal (o maior), fora da publicação.
+        principal = max(plano, key=lambda d: len(d["documentos"]))
+        principal["documentos"] += [c for c in [*analise.capas, *sobras] if c not in principal["documentos"]]
+        principal["documentos"] = sorted(set(principal["documentos"]))
+        # Lote sem nada legível: tudo vai para o único destino.
+        resto = [c for c in leituras if not any(c in d["documentos"] for d in plano)]
+        principal["documentos"] = sorted(set(principal["documentos"]) | set(resto))
+        return plano, ""
+
+    @staticmethod
+    def _destino(codigo: str, grupo, ctx: Contexto, motivo: str, nome: str = "") -> dict:
+        return {"codigo": codigo.upper(), "nome": nome or grupo.titulo if grupo.folhas else (nome or ctx.projeto or codigo),
+                "documentos": list(grupo.folhas), "folhas_grupo": list(grupo.folhas), "grupo": grupo.titulo,
+                "motivo": motivo}
+
+    # ------------------------------------------------------------ conclusão (por projeto)
+    def _concluir(self, unidade: Unidade, ctx: Contexto, pasta: Path, codigo: str, nome: str, lote: dict,
+                  arquivados: list, comeco: float, estado_vigia=None, cancelar=None,
+                  copiados: int = 0) -> Resultado:
+        """O projeto decidido: consolidação (sem API: as leituras vieram no checkpoint), EXIF,
+        catalogação, pronto e aviso ao painel."""
+        from . import planilha as mod_planilha, renomear as mod_renomear, vigia as mod_vigia
+
+        assinatura = unidade.assinatura()
+        resultado = Resultado(PROCESSANDO, codigo=codigo, pasta_projeto=pasta)
+        resultado.copiados = copiados
+        catalogacao = pasta / "catalogacao"
+        erros_lote = lote["erros"]
+        mapa_caminho = catalogacao / "mapa_origem.json"
+        preparo_caminho = catalogacao / "preparo.json"
+        mapa = ler_json(mapa_caminho, {}) or {}
+        preparos = ler_json(preparo_caminho, {}) or {}
+        cache = self.pasta_estado / "leitura" / codigo
+        por_codigo: dict[str, list[Path]] = {}
+        for _o, destino, codigo_doc, _s in arquivados:
+            por_codigo.setdefault(codigo_doc, []).append(destino)
+        gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+        self._status(pasta, codigo, PROCESSANDO, ctx)
+
+        def falhar(motivo: str) -> Resultado:
+            erros_lote.append({"arquivo": "", "categoria": "metadado", "gravidade": "bloqueia",
+                               "origem": "CAMP Vision", "detalhe": motivo})
+            lote["status"] = ERRO
+            gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+            try:
+                (catalogacao / "catalogacao_ERRO.txt").write_text(
+                    f"{_agora()}  lote {ctx.lote_id}  {codigo}\n{motivo}\n"
+                    f"origem: {lote['origem']}\n", encoding="utf-8")
+            except OSError:
+                pass
+            self._erros(catalogacao, erros_lote)
+            self._status(pasta, codigo, ERRO, ctx, motivo=motivo)
+            self.livro.anotar("erro", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                              arquivo_origem=str(unidade.relativo), detalhe=motivo)
+            self.estado.anotar(unidade.chave, ERRO, motivo=motivo, assinatura=assinatura, codigo=codigo)
+            _log.error("Lote %s (%s): %s", ctx.lote_id, codigo, motivo)
+            resultado.status, resultado.motivo, resultado.lote = ERRO, motivo, lote
+            return resultado
+
+        # Consolidação do projeto inteiro (o que já estava + este lote), sem chamar a API.
+        cfg_leitura = dataclasses.replace(
+            self.config, status_concluido=PROCESSANDO, status_pronto=PROCESSANDO,
+            espera_estabilidade_segundos=0, escrever_por_projeto=True, formatos_saida=("csv",),
+        )
+        projeto = mod_vigia.Projeto(pasta, [cache], pasta.name, self.raiz_final)
+        evento = mod_vigia.processar(projeto, cfg_leitura, self.cliente, estado_vigia, cancelar)
+        if evento.falha:
+            return falhar(f"leitura falhou: {evento.falha}")
+        leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
+        falhas = [c for c in por_codigo if c not in leituras or leituras[c].erro]
+        if falhas:
+            exemplo = leituras[falhas[0]].erro if falhas[0] in leituras else "sem leitura"
+            return falhar(f"leitura falhou em {len(falhas)} de {len(por_codigo)} documento(s): {exemplo[:160]}")
 
         # Passada 3 complementos (§2.3, §4.4) — em código, sobre o projeto inteiro.
         enriquecer(leituras, preparos, ctx.fundo)
@@ -1118,14 +1509,6 @@ class Recebedor:
             erros_bloqueantes=bloqueantes, motivo="",
         )
 
-        # ---- 9. apaga o original (só o que foi arquivado e conferido)
-        if self.config.apagar_original_apos_pronto:
-            resultado.apagados = self._apagar_originais(unidade, arquivados, ctx, codigo,
-                                                        sobrou=bool(lote["nao_suportados"]))
-        self.estado.anotar(unidade.chave, PRONTO, assinatura=assinatura, codigo=codigo,
-                           lote_id=ctx.lote_id)
-        _log.info("Lote %s → %s pronto: %d documento(s), %d copiado(s), %d apagado(s).",
-                  ctx.lote_id, codigo, len(por_codigo), resultado.copiados, resultado.apagados)
         resultado.status, resultado.lote = PRONTO, lote
         return resultado
 

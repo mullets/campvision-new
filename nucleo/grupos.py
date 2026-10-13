@@ -14,8 +14,7 @@ a pasta é só pista) e cada campo do projeto:
 - ano do grupo = moda dos anos; o ano de cada prancha fica intacto. Prancha cujo
   ano diverge mas tem o ano do grupo entre as ALTERNATIVAS ganha ressalva
   ("lido 85, série indica 83 — conferir"), não correção.
-- grupo com poucas folhas dentro de uma pasta dominada por outro projeto:
-  suspeita_grupo (folha de outra obra).
+- "projeto divergente" vem da identificação do lote pelo carimbo (identidade.py).
 """
 
 from __future__ import annotations
@@ -168,8 +167,6 @@ def consolidar(
     """
     grupos = agrupar(leituras)
     canonicos: dict[str, dict[str, str]] = {}
-    total = len(leituras)
-    maior = max((len(v) for k, v in grupos.items() if k != "(sem projeto)"), default=0)
 
     for nome, itens in grupos.items():
         if nome == "(sem projeto)":
@@ -180,10 +177,8 @@ def consolidar(
             leitura.grupo = nome
             if not leitura.lidos_originais:
                 leitura.lidos_originais = dict(leitura.valores)
-        # Folhas de outra obra no meio da pasta (Araruama dentro de A. Abreu).
-        if total >= 5 and len(itens) < maior and len(itens) / total <= 0.2:
-            for leitura in itens:
-                leitura.suspeita_grupo = True
+        # "Projeto divergente" NÃO é decidido aqui (auditoria F026, T4): quem decide é a
+        # identificação do lote pelo carimbo (nucleo/identidade.py), gravada no preparo.
 
         dados: dict[str, str] = {}
         for campo in CAMPOS_DO_PROJETO:

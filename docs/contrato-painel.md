@@ -1,8 +1,8 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-**Contrato 2.1 — 10/10/2026.** Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
+**Contrato 2.2 — 13/10/2026.** Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
 
-- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.1"`.
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.2"`.
 - Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
   - Para regenerar: `python -m tests.contrato_exemplos`.
 - Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
@@ -384,3 +384,46 @@ Decisão do Rafa em 09/10: o "P0001" que a estação escreve (no `info_projeto.j
 
 - `POST /api/campvision/aviso` de um lote em revisão faz o painel importar o pacote (camp-painel c705124), com as mesmas garantias da importação manual.
 - `documentos[].orientacao_corrigida = true`: o JPG do acervo já está girado e desespelhado. O painel não marca a folha como espelhada nem girada.
+
+## 17. Identificação pelo carimbo antes do código (contrato 2.2, auditoria F026 de 13/10)
+
+O lote é **lido antes de ter código**. A pasta da estação (número P0001/T100 e nome) é só pista: nunca vira código nem título publicável.
+
+**Pasta provisória.** O CV2 copia e lê o lote em `<Fundo>/00 - Em identificação/F0xx-P9xxx - <pasta>/`. O código **P9xxx é provisório**: nunca vai ao painel (nem aviso, nem status), nunca vai ao EXIF nem ao site, e nem `numeros_p` nem o diagnóstico olham essa pasta. Lá ficam `catalogacao/identificacao.json` e `identificacao.txt` (o que o carimbo diz, grupo a grupo, e para onde vai cada folha).
+
+**Agrupar pelo carimbo** (`nucleo/identidade.py`): obra + local (endereço) e identificadores (contribuinte, alvará). Duas numerações de folha ou dois proprietários no mesmo endereço não separam; obra diferente em endereço diferente separa. Capa, envelope e tira não são pranchas. Folha sem nada legível fica "sem identificação". Grupo de 1 folha sem projeto forte na base não vira projeto.
+
+**Casar com a base do fundo** (lista de `/api/estacoes/contexto?fundo=`), grupo a grupo:
+
+| o que achou | o que o CV2 faz |
+|---|---|
+| um candidato forte | usa o código dele (o material entra no projeto existente) |
+| dois ou mais | `POST /reservar` com `candidatos` → o painel **pergunta** (decisão "projeto parecido"); o lote espera (202) |
+| nenhum | `POST /reservar` normal (o painel ainda pode perguntar) |
+| obras diferentes no mesmo endereço, ou escritórios diferentes em décadas diferentes | `/reservar` com `candidatos` mesmo que só haja um: projeto separado ou fase? quem decide é uma pessoa |
+
+Só depois de todos os grupos decididos os arquivos vão para o(s) código(s) certo(s) (move, renumera o D, leva checkpoint, cache e preview: **não relê**). Uma pasta pode virar vários projetos; cada um recebe o seu `aviso`.
+
+**`/reservar` — campos novos:**
+
+```json
+{"candidatos": [{"codigo": "F026-P0111", "titulo": "Comurb, Rua Pavan - Vila Sta. Catarina", "motivos": ["nome 'Comurb' no carimbo/pasta"]},
+                {"codigo": "F026-P0180", "titulo": "Comurb, Vila Sta. Catarina", "motivos": ["nome 'Comurb' no carimbo/pasta"]}],
+ "carimbo": {"obra": "Conjunto Residencial com Garagens", "local": "R. das Laranjeiras esq. Dr. Djalma Pinheiro Franco",
+             "cliente": "COMURB", "identificadores": ["contribuinte 0891490001"], "folhas": 1}}
+```
+
+Com `candidatos`, o painel **não cria projeto**: abre a decisão com esses candidatos e responde 202 até uma pessoa escolher ("mesmo" → código existente; "novo" → reserva). `titulo` passa a ser o que o carimbo diz (obra, local); `identificacao_original` continua sendo a pasta.
+
+**Pacote — por documento (T1):**
+
+- `carimbo`: `{obra, local, cidade, cliente, escritorio, arquiteto, data, codigo_unidade, contribuinte, alvara}` — como LIDO (o que veio da pasta não entra);
+- `lido`: a leitura inteira (todos os campos lidos + `transcricao_integral`, `carimbo_encontrado`, `modo`, anotações e observações);
+- `versao_cv2`, `versao_prompt`, `modelo` (já existiam);
+- `capa` (motivo) e `sem_identificacao` (bool).
+
+O painel grava `carimbo.obra` em `projeto_carimbo`, `carimbo.escritorio` em `escritorio_carimbo`, `carimbo.arquiteto` em `autor_carimbo` e `lido` em `lido_json`.
+
+**Projeto divergente (T4):** não compara mais com o título do código. Folha de outra obra que foi junto com o projeto principal (grupo pequeno sem projeto na base), folha "sem identificação" numa pasta com várias obras e capa **saem de `documentos` e vão para `retirados`**, com o bloqueio dizendo o que o carimbo diz. Uma pessoa devolve com a decisão `publicar` (`vigia.py --decisao`). Autoria divergente continua sem volta.
+
+**Corrigir o que já entrou errado:** `vigia.py --reidentificar F026` (ou `F026-P0236`) mostra o plano — grupos pelo carimbo e o código certo de cada um — sem mexer em nada. Com `--sim`, move as folhas que têm UM projeto forte na base, tira da publicação as de outra obra/sem identificação/capas, refaz os pacotes e avisa o painel; grupo que precisa de pessoa fica listado em `catalogacao/reidentificacao.json`. Só rode com `--sim` depois que o painel tiver as rotas de mesclar/mover (cartão 156).

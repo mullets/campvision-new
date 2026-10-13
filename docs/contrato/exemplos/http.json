@@ -3,7 +3,7 @@
   "estacao_id": "campvision2",
   "tipo_estacao": "campvision",
   "app": "CAMP Vision 2",
-  "versao": "2026-10-10-02",
+  "versao": "2026-10-13-01",
   "estado": "vigiando",
   "projeto": "",
   "progresso": {
@@ -21,7 +21,7 @@
    "entrada": true,
    "acervo": true
   },
-  "contrato": "2.1",
+  "contrato": "2.2",
   "quarentena": {
    "arquivos": 2,
    "gb": 0.0,
@@ -40,7 +40,32 @@
    "cidade": "São Paulo",
    "identificacao_original": "P0001 - Edifício Tarumã",
    "operador": "Beatriz",
-   "proximo_p_local": "F026-P0002"
+   "proximo_p_local": "F026-P0002",
+   "carimbo": {
+    "obra": "Edifício Tarumã",
+    "local": "R. Tarumã 120",
+    "cliente": "",
+    "identificadores": [
+     "alvara 41928"
+    ],
+    "folhas": 2
+   },
+   "candidatos": [
+    {
+     "codigo": "F026-P0111",
+     "titulo": "Tarumã, Rua A",
+     "motivos": [
+      "nome no carimbo"
+     ]
+    },
+    {
+     "codigo": "F026-P0180",
+     "titulo": "Tarumã, Rua B",
+     "motivos": [
+      "nome no carimbo"
+     ]
+    }
+   ]
   }
  },
  "aviso": {
@@ -48,9 +73,9 @@
   "caminho": "/api/campvision/aviso",
   "corpo": {
    "codigo": "F026-P0001",
-   "pasta": "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã",
+   "pasta": "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - CASA DA PRAIA",
    "status": "pronto",
-   "em": "2026-10-10T09:07:32"
+   "em": "2026-10-13T17:35:14"
   }
  },
  "iniciado": {

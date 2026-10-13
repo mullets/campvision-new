@@ -1,0 +1,161 @@
+"""`vigia.py --reidentificar F0xx[-P0xxx]`: o que JÁ entrou no código errado (auditoria F026).
+
+Relê nada (usa leituras.json): agrupa as folhas de cada projeto pelo carimbo, casa
+cada grupo com a base do fundo e mostra o plano. Com `--sim`:
+
+- grupo com UM projeto forte na base, diferente do atual → as folhas vão para lá
+  (move e renumera, como no recebimento; o livro registra `refeito`);
+- grupo que precisa de pessoa (dois candidatos, mesmo endereço, fases) → NÃO
+  mexe: fica listado em catalogacao/reidentificacao.json;
+- folhas de outra obra sem projeto na base, sem identificação e capas → saem do
+  pacote de publicação (retirados), com o que o carimbo diz;
+- refaz os pacotes e avisa o painel de cada projeto tocado.
+
+Nada é apagado. Folha já publicada no site muda de código: rode com `--sim` só
+depois que o painel tiver as rotas de mesclar/mover (cartão 156 do painel).
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from . import estrutura, identidade as mod_ident, planilha as mod_planilha
+from . import releitura as mod_rel, transferir as mod_transferir
+
+
+def _ler(caminho: Path, padrao):
+    try:
+        return json.loads(caminho.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return padrao
+
+
+def planejar(pasta: Path, base: list[dict], pasta_estado: Path) -> dict:
+    codigo = estrutura.codigo_da_pasta(pasta)
+    leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(pasta / "catalogacao" / "leituras.json")}
+    cache = pasta_estado / "leitura" / codigo
+    from .entrada import _proporcao
+
+    analise = mod_ident.analisar(leituras, {c: _proporcao(cache / f"{c}.jpg") for c in leituras})
+    varios = len(analise.grupos) > 1
+    pista = "" if varios else mod_ident.pista_da_pasta(estrutura.nome_sem_codigo(pasta.name))
+    perguntar = {analise.grupos[i].chave for juntos in analise.mesmo_endereco for i in juntos}
+    perguntar |= {f["grupo"] for f in analise.fases}
+    grupos = []
+    for g in analise.grupos:
+        casa = mod_ident.casar_com_base(g, [p for p in base if str(p.get("codigo")) != codigo] if varios else base,
+                                        pista)
+        forte = (casa.get("forte") or {}).get("codigo", "")
+        # O próprio código atual também é candidato: um lote homogêneo no código certo fica.
+        atual = next((p for p in base if str(p.get("codigo")) == codigo), None)
+        if atual and not varios:
+            casa_atual = mod_ident.casar_com_base(g, [atual], pista)
+            if "forte" in casa_atual and not forte:
+                forte = codigo
+        if g.chave in perguntar:
+            acao, alvo = "perguntar", ""
+        elif forte and forte.upper() == codigo.upper():
+            acao, alvo = "fica", codigo
+        elif forte:
+            acao, alvo = "mover", forte
+        elif casa.get("candidatos"):
+            acao, alvo = "perguntar", ""
+        elif varios and len(g.folhas) < mod_ident.MINIMO_GRUPO:
+            acao, alvo = "retirar", ""
+        else:
+            acao, alvo = ("fica", codigo) if not varios else ("perguntar", "")
+        grupos.append({**g.como_dict(), "acao": acao, "destino": alvo,
+                       "candidatos": [c["codigo"] for c in casa.get("candidatos") or []]})
+    # O maior grupo que fica (ou o maior de todos) é o "dono" das capas e das sem identificação.
+    return {"codigo": codigo, "pasta": str(pasta), "grupos": grupos, "capas": analise.capas,
+            "sem_identificacao": analise.sem_identificacao if varios else [],
+            "mesmo_endereco": [[analise.grupos[i].titulo for i in j] for j in analise.mesmo_endereco],
+            "_analise": analise, "_leituras": leituras}
+
+
+def texto(plano: dict) -> str:
+    linhas = [f"{plano['codigo']}  ({Path(plano['pasta']).name})"]
+    for g in plano["grupos"]:
+        alvo = {"fica": "fica", "mover": f"→ {g['destino']}", "retirar": "fora da publicação (outra obra, sem projeto na base)",
+                "perguntar": "PERGUNTAR" + (f" ({' × '.join(g['candidatos'])})" if g["candidatos"] else "")}[g["acao"]]
+        linhas.append(f"   {len(g['folhas']):3d} folha(s)  {g['titulo'][:70]:70s}  {alvo}")
+    if plano["sem_identificacao"]:
+        linhas.append(f"   {len(plano['sem_identificacao']):3d} sem identificação: {', '.join(plano['sem_identificacao'][:6])}")
+    if plano["capas"]:
+        linhas.append(f"   {len(plano['capas']):3d} capa(s)/tira(s): {', '.join(plano['capas'])}")
+    for juntos in plano["mesmo_endereco"]:
+        linhas.append(f"   mesmo endereço, obras diferentes: {' | '.join(juntos)}")
+    return "\n".join(linhas)
+
+
+def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict], livro, painel, tabela=None) -> list[str]:
+    """Move o que tem destino forte, marca o resto no preparo, refaz os pacotes. Devolve os projetos tocados."""
+    from .entrada import marcar_identidade
+
+    pasta = Path(plano["pasta"])
+    codigo = plano["codigo"]
+    analise, leituras = plano["_analise"], plano["_leituras"]
+    tocados = {codigo}
+    # Preparo: carimbo, capa, sem identificação e "divergente" (grupos sem destino que não ficam).
+    ficam = [g for g in plano["grupos"] if g["acao"] in ("fica", "perguntar")]
+    dono = max(ficam or plano["grupos"], key=lambda g: len(g["folhas"])) if plano["grupos"] else None
+    folhas_dono = set(dono["folhas"]) if dono else set()
+    destinos = [{"codigo": codigo, "documentos": list(leituras), "folhas_grupo": sorted(folhas_dono)}]
+    preparos = _ler(pasta / "catalogacao" / "preparo.json", {}) or {}
+    marcar_identidade(preparos, analise, destinos, leituras)
+    for g in plano["grupos"]:
+        if g["acao"] == "perguntar":       # a pessoa decide: não publica até lá, mas não é "outra obra"
+            for c in g["folhas"]:
+                preparos.setdefault(c, {}).setdefault("identidade", {})["divergente"] = g is not dono
+    (pasta / "catalogacao" / "preparo.json").write_text(json.dumps(preparos, ensure_ascii=False, indent=1),
+                                                       encoding="utf-8")
+    pasta_fundo = pasta.parents[1]
+    for g in plano["grupos"]:
+        if g["acao"] != "mover":
+            continue
+        titulo = next((str(p.get("projeto") or "") for p in base if str(p.get("codigo")) == g["destino"]), g["titulo"])
+        from . import fundos as mod_fundos
+
+        fundo = (tabela.get(codigo[:4]) if tabela else None) or mod_fundos.Fundo(codigo[:4], "", codigo[:4])
+        destino = estrutura.garantir_projeto(pasta_fundo, g["destino"], titulo, fundo)
+        trocas, _movidos = mod_transferir.transferir(raiz_final, pasta_estado, pasta, destino, g["folhas"],
+                                                     g["destino"], livro, f"reidentificado pelo carimbo: {g['titulo']}")
+        prep_d = _ler(destino / "catalogacao" / "preparo.json", {}) or {}
+        for novo in trocas.values():   # no projeto certo, a folha é do projeto
+            ident = prep_d.setdefault(novo, {}).setdefault("identidade", {})
+            ident.update(divergente=False, sem_identificacao=False)
+        (destino / "catalogacao" / "preparo.json").write_text(json.dumps(prep_d, ensure_ascii=False, indent=1),
+                                                             encoding="utf-8")
+        _mover_leituras(pasta, destino, trocas)
+        tocados.add(g["destino"])
+    for c in sorted(tocados):
+        try:
+            mod_rel.remontar_pacote(raiz_final, pasta_estado, c, tabela)
+        except FileNotFoundError:
+            continue
+        alvo = mod_rel.mod_renomear.achar_projeto(raiz_final, c)
+        if alvo is not None and painel is not None:
+            painel.aviso(c, str(alvo.relative_to(raiz_final)), "pronto")
+    salvo = {k: v for k, v in plano.items() if not k.startswith("_")}
+    (pasta / "catalogacao" / "reidentificacao.json").write_text(json.dumps(salvo, ensure_ascii=False, indent=1),
+                                                               encoding="utf-8")
+    return sorted(tocados)
+
+
+def _mover_leituras(origem: Path, destino: Path, trocas: dict) -> None:
+    """leituras.json: as folhas levadas saem da origem e entram no destino com o código novo."""
+    lo = mod_planilha.ler_json(origem / "catalogacao" / "leituras.json")
+    ld = mod_planilha.ler_json(destino / "catalogacao" / "leituras.json")
+    ficam, vao = [], []
+    for l in lo:
+        stem = Path(l.arquivo).stem
+        if stem in trocas:
+            l.arquivo = l.arquivo.replace(stem, trocas[stem])
+            vao.append(l)
+        else:
+            ficam.append(l)
+    ja = {Path(l.arquivo).stem for l in ld}
+    mod_planilha.escrever_json(ficam, origem / "catalogacao" / "leituras.json")
+    mod_planilha.escrever_json(ld + [l for l in vao if Path(l.arquivo).stem not in ja],
+                               destino / "catalogacao" / "leituras.json")

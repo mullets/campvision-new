@@ -307,7 +307,13 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
         if l.autoria_divergente:
             bloqueios.append("autoria divergente")
         if l.suspeita_grupo:
-            bloqueios.append("projeto divergente")
+            c = l.carimbo or {}
+            bloqueios.append("projeto divergente: o carimbo diz '"
+                             + (" · ".join(v for v in (c.get("obra"), c.get("local")) if v) or "?") + "'")
+        if l.sem_identificacao:
+            bloqueios.append("sem identificação (pasta com várias obras)")
+        if l.capa:
+            bloqueios.append(f"{l.capa}: não é prancha")
         if l.duplicata_de:
             bloqueios.append(f"duplicata de {l.duplicata_de}")
         if l.e_documento and serie == "S01":
@@ -356,9 +362,23 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
             "decisao": decisao, "publicavel": not bloqueios, "bloqueios": bloqueios,
             "ressalvas": l.ressalvas,
             "versao_cv2": l.versao_cv2, "versao_prompt": l.versao_prompt, "modelo": l.modelo,
+            # T1 (auditoria F026): o que o CARIMBO diz, como lido, e a leitura inteira.
+            "carimbo": l.carimbo or {}, "capa": l.capa, "sem_identificacao": l.sem_identificacao,
+            "lido": {**(l.lidos_originais or l.valores), "transcricao_integral": l.transcricao_integral,
+                     "carimbo_encontrado": l.carimbo_encontrado, "modo": l.modo,
+                     "anotacoes_manuscritas": l.anotacoes_manuscritas,
+                     "observacoes_leitura": l.observacoes_leitura},
         }
-        # Autoria divergente e retirada por decisão NÃO vão no pacote de publicação (CV-06/25).
-        if l.autoria_divergente or (decisao and decisao["acao"] == "retirar"):
+        # Autoria divergente, retirada por decisão, projeto divergente, sem identificação e capa
+        # NÃO vão no pacote de publicação (CV-06/25; auditoria F026 T4/T6). Uma pessoa devolve
+        # a folha de identificação duvidosa com a decisão "publicar"; autoria divergente, não.
+        liberada = bool(decisao and decisao["acao"] == "publicar")
+        identificacao = l.suspeita_grupo or l.sem_identificacao or bool(l.capa)
+        if liberada and identificacao:
+            item["bloqueios"] = bloqueios = [b for b in bloqueios if not b.startswith(
+                ("projeto divergente", "sem identificação")) and "não é prancha" not in b]
+            item["publicavel"] = not bloqueios
+        if l.autoria_divergente or (identificacao and not liberada) or (decisao and decisao["acao"] == "retirar"):
             retirados.append(item)
         else:
             documentos.append(item)

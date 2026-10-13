@@ -139,6 +139,13 @@ class Leitura:
     versao_cv2: str = ""
     versao_prompt: str = ""
     modelo: str = ""
+    # Auditoria F026 (13/10): identificação pelo carimbo. `carimbo` = o que foi LIDO
+    # (obra, local, cliente, escritório, arquiteto, data, contribuinte, alvará);
+    # `capa` = motivo de não ser prancha; sem_identificacao = numa pasta com várias
+    # obras, folha sem nada que diga de qual é (não publica).
+    carimbo: dict[str, Any] = field(default_factory=dict)
+    capa: str = ""
+    sem_identificacao: bool = False
 
     @property
     def confianca_media(self) -> float:

@@ -1,9 +1,9 @@
 {
   "versao": 2,
-  "gerado_em": "2026-10-10T09:07:32-03:00",
+  "gerado_em": "2026-10-13T17:35:14-03:00",
   "teste": false,
   "projeto_codigo": "F026-P0001",
-  "projeto_nome": "Edifício Tarumã",
+  "projeto_nome": "CASA DA PRAIA",
   "fundo_codigo": "F026",
   "fundo": {
     "codigo": "F026",
@@ -14,7 +14,7 @@
   },
   "projeto": {
     "codigo": "F026-P0001",
-    "titulo": "Edifício Tarumã",
+    "titulo": "CASA DA PRAIA",
     "ano": "1972",
     "cidade": "",
     "uf": "",
@@ -94,7 +94,7 @@
       "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
       "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
       "arquivos": [
-        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00001.jpg"
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - CASA DA PRAIA/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00001.jpg"
       ],
       "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
       "arquivo_origem": [
@@ -122,9 +122,47 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_cv2": "2026-10-13-01+f8c8a69",
       "versao_prompt": "prancha:48f8c530",
-      "modelo": "claude-sonnet-5"
+      "modelo": "claude-sonnet-5",
+      "carimbo": {
+        "obra": "CASA DA PRAIA",
+        "local": "",
+        "cidade": "",
+        "cliente": "",
+        "escritorio": "",
+        "arquiteto": "Sami Bussab",
+        "data": "",
+        "codigo_unidade": "ABC-1",
+        "contribuinte": "",
+        "alvara": ""
+      },
+      "capa": "",
+      "sem_identificacao": false,
+      "lido": {
+        "projeto": "CASA DA PRAIA",
+        "cliente": "",
+        "arquiteto": "Sami Bussab",
+        "escritorio": "",
+        "endereco": "",
+        "cidade": "",
+        "uf": "",
+        "data": "",
+        "escala": "",
+        "titulo_prancha": "",
+        "folha": "03",
+        "total_folhas": "",
+        "codigo_serie": "",
+        "codigo_unidade": "ABC-1",
+        "revisao": "",
+        "tipo": "",
+        "ano": "1968",
+        "transcricao_integral": "",
+        "carimbo_encontrado": true,
+        "modo": "prancha",
+        "anotacoes_manuscritas": [],
+        "observacoes_leitura": []
+      }
     },
     {
       "codigo": "F026-P0001-1972-S01-D00002",
@@ -171,7 +209,7 @@
       "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
       "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
       "arquivos": [
-        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00002.jpg"
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - CASA DA PRAIA/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00002.jpg"
       ],
       "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
       "arquivo_origem": [
@@ -201,9 +239,47 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_cv2": "2026-10-13-01+f8c8a69",
       "versao_prompt": "prancha:48f8c530",
-      "modelo": "claude-sonnet-5"
+      "modelo": "claude-sonnet-5",
+      "carimbo": {
+        "obra": "CASA DA PRAIA",
+        "local": "",
+        "cidade": "",
+        "cliente": "",
+        "escritorio": "",
+        "arquiteto": "Sami Bussab",
+        "data": "",
+        "codigo_unidade": "ABC-1",
+        "contribuinte": "",
+        "alvara": ""
+      },
+      "capa": "",
+      "sem_identificacao": false,
+      "lido": {
+        "projeto": "CASA DA PRAIA",
+        "cliente": "",
+        "arquiteto": "Sami Bussab",
+        "escritorio": "",
+        "endereco": "",
+        "cidade": "",
+        "uf": "",
+        "data": "",
+        "escala": "",
+        "titulo_prancha": "",
+        "folha": "03",
+        "total_folhas": "",
+        "codigo_serie": "",
+        "codigo_unidade": "ABC-1",
+        "revisao": "",
+        "tipo": "",
+        "ano": "1968",
+        "transcricao_integral": "",
+        "carimbo_encontrado": true,
+        "modo": "prancha",
+        "anotacoes_manuscritas": [],
+        "observacoes_leitura": []
+      }
     }
   ],
   "itens": [
@@ -252,7 +328,7 @@
       "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
       "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
       "arquivos": [
-        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00001.jpg"
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - CASA DA PRAIA/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00001.jpg"
       ],
       "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00001.jpg",
       "arquivo_origem": [
@@ -280,9 +356,47 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_cv2": "2026-10-13-01+f8c8a69",
       "versao_prompt": "prancha:48f8c530",
-      "modelo": "claude-sonnet-5"
+      "modelo": "claude-sonnet-5",
+      "carimbo": {
+        "obra": "CASA DA PRAIA",
+        "local": "",
+        "cidade": "",
+        "cliente": "",
+        "escritorio": "",
+        "arquiteto": "Sami Bussab",
+        "data": "",
+        "codigo_unidade": "ABC-1",
+        "contribuinte": "",
+        "alvara": ""
+      },
+      "capa": "",
+      "sem_identificacao": false,
+      "lido": {
+        "projeto": "CASA DA PRAIA",
+        "cliente": "",
+        "arquiteto": "Sami Bussab",
+        "escritorio": "",
+        "endereco": "",
+        "cidade": "",
+        "uf": "",
+        "data": "",
+        "escala": "",
+        "titulo_prancha": "",
+        "folha": "03",
+        "total_folhas": "",
+        "codigo_serie": "",
+        "codigo_unidade": "ABC-1",
+        "revisao": "",
+        "tipo": "",
+        "ano": "1968",
+        "transcricao_integral": "",
+        "carimbo_encontrado": true,
+        "modo": "prancha",
+        "anotacoes_manuscritas": [],
+        "observacoes_leitura": []
+      }
     },
     {
       "codigo": "F026-P0001-1972-S01-D00002",
@@ -329,7 +443,7 @@
       "credito": "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista",
       "preview": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
       "arquivos": [
-        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00002.jpg"
+        "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - CASA DA PRAIA/01 - Desenhos e pranchas/JPG/F026-P0001-1972-S01-D00002.jpg"
       ],
       "arquivo": "_campvision/preview/F026-P0001/F026-P0001-1972-S01-D00002.jpg",
       "arquivo_origem": [
@@ -359,9 +473,47 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-10-02+d4f9308",
+      "versao_cv2": "2026-10-13-01+f8c8a69",
       "versao_prompt": "prancha:48f8c530",
-      "modelo": "claude-sonnet-5"
+      "modelo": "claude-sonnet-5",
+      "carimbo": {
+        "obra": "CASA DA PRAIA",
+        "local": "",
+        "cidade": "",
+        "cliente": "",
+        "escritorio": "",
+        "arquiteto": "Sami Bussab",
+        "data": "",
+        "codigo_unidade": "ABC-1",
+        "contribuinte": "",
+        "alvara": ""
+      },
+      "capa": "",
+      "sem_identificacao": false,
+      "lido": {
+        "projeto": "CASA DA PRAIA",
+        "cliente": "",
+        "arquiteto": "Sami Bussab",
+        "escritorio": "",
+        "endereco": "",
+        "cidade": "",
+        "uf": "",
+        "data": "",
+        "escala": "",
+        "titulo_prancha": "",
+        "folha": "03",
+        "total_folhas": "",
+        "codigo_serie": "",
+        "codigo_unidade": "ABC-1",
+        "revisao": "",
+        "tipo": "",
+        "ano": "1968",
+        "transcricao_integral": "",
+        "carimbo_encontrado": true,
+        "modo": "prancha",
+        "anotacoes_manuscritas": [],
+        "observacoes_leitura": []
+      }
     }
   ],
   "retirados": [],
@@ -374,8 +526,8 @@
     "F026-P0001-1972-S01-D00002 é quase de F026-P0001-1972-S01-D00001 — publicar F026-P0001-1972-S01-D00001"
   ],
   "execucao": {
-    "versao_cv2": "2026-10-10-02+d4f9308",
-    "contrato": "2.1",
+    "versao_cv2": "2026-10-13-01+f8c8a69",
+    "contrato": "2.2",
     "modelo": "claude-sonnet-5",
     "versao_prompt": {
       "prancha": "48f8c530",
@@ -386,6 +538,6 @@
     "tokens_entrada": 2000,
     "tokens_saida": 200,
     "custo_usd": 0.006,
-    "tempo_s": 3.3
+    "tempo_s": 3.6
   }
 }

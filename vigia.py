@@ -440,6 +440,41 @@ def _comando_diagnostico(config: Config, fundo: str) -> int:
     return 0
 
 
+def _comando_reidentificar(config: Config, alvo: str, sim: bool) -> int:
+    """Auditoria F026: o que já entrou no código errado. Sem --sim, só mostra o plano."""
+    from nucleo import painel as _painel, releitura as _rel, reidentificar as _reid
+    from nucleo.livro import Livro
+
+    raiz = Path(config.raiz_final)
+    alvo = alvo.upper()
+    fundo = alvo[:4]
+    pastas = [p for p in _rel.projetos(raiz, fundo) if p.name.upper().startswith(alvo)]
+    if not pastas:
+        print(f"Nenhum projeto {alvo} em {raiz}.", file=sys.stderr)
+        return 1
+    painel = (_painel.Painel(config.painel_url, config.token_painel(), PASTA_ESTADO)
+              if config.painel_url else _painel.PainelDesligado())
+    base = ((painel.contexto(fundo) or {}).get("projetos") or []) if painel.ligado else []
+    if not base:
+        print("Sem a lista de projetos do fundo (painel fora?): não dá para casar com a base.", file=sys.stderr)
+        return 1
+    planos = [_reid.planejar(p, base, PASTA_ESTADO) for p in pastas]
+    for plano in planos:
+        print(_reid.texto(plano))
+    mexe = [p for p in planos if any(g["acao"] in ("mover", "retirar") for g in p["grupos"])
+            or p["capas"] or p["sem_identificacao"]]
+    perguntas = sum(1 for p in planos for g in p["grupos"] if g["acao"] == "perguntar")
+    print(f"\n{len(planos)} projeto(s): {len(mexe)} com mudança, {perguntas} grupo(s) para uma pessoa decidir.")
+    if not sim:
+        print("Nada foi feito. Para aplicar, repita com --sim (só depois das rotas de mesclar/mover do painel).")
+        return 0
+    livro = Livro(raiz)
+    for plano in mexe:
+        tocados = _reid.aplicar(plano, raiz, PASTA_ESTADO, base, livro, painel)
+        print(f"{plano['codigo']}: pacotes refeitos e painel avisado — {', '.join(tocados)}")
+    return 0
+
+
 def _comando_consertar(config: Config, fundo: str, escopo: str, sim: bool) -> int:
     """JPG que falta + releitura do vazio + pacote refeito + aviso ao painel, projeto a projeto."""
     from nucleo import derivados, releitura as _rel
@@ -599,7 +634,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--consertar-acervo", nargs="?", const="", metavar="F0xx",
                    help="Gera os JPG que faltam, relê o que veio vazio e refaz o pacote de todos os "
                         "projetos (ou de um fundo). Sem --sim só mostra a estimativa")
-    p.add_argument("--sim", action="store_true", help="Confirma o --consertar-acervo (gasta API)")
+    p.add_argument("--reidentificar", metavar="F0xx[-P0xxx]",
+                   help="Agrupa pelo carimbo o que JÁ entrou e mostra o código certo de cada grupo "
+                        "(com --sim, move o que tem projeto forte na base e refaz os pacotes)")
+    p.add_argument("--sim", action="store_true", help="Confirma o --consertar-acervo/--reidentificar")
     p.add_argument("--organizar-formatos", action="store_true",
                    help="Move o que já está no acervo para <série>/TIF, JPG, DNG… (sem apagar nada)")
     p.add_argument("--livro-legado", action="store_true",
@@ -657,7 +695,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.avaliar, args.diagnostico is not None, args.consertar_acervo is not None, args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.reidentificar, args.avaliar, args.diagnostico is not None, args.consertar_acervo is not None, args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -718,6 +756,8 @@ def main(argv: list[str] | None = None) -> int:
         return _comando_diagnostico(config, args.diagnostico)
     if args.consertar_acervo is not None:
         return _comando_consertar(config, args.consertar_acervo, args.escopo, args.sim)
+    if args.reidentificar:
+        return _comando_reidentificar(config, args.reidentificar, args.sim)
     if args.reler:
         from nucleo import releitura as _rel
         from nucleo.livro import Livro

@@ -70,7 +70,11 @@ def gerar(destino: Path) -> dict[str, Path]:
                                or (200, {"codigo": "F026-P0001"})):
             p.reservar("F026", "Edifício Tarumã", "0" * 32, ano="1972", cidade="São Paulo",
                        identificacao_original="P0001 - Edifício Tarumã", operador="Beatriz",
-                       proximo_p_local="F026-P0002")
+                       proximo_p_local="F026-P0002",
+                       carimbo={"obra": "Edifício Tarumã", "local": "R. Tarumã 120", "cliente": "",
+                                "identificadores": ["alvara 41928"], "folhas": 2},
+                       candidatos=[{"codigo": "F026-P0111", "titulo": "Tarumã, Rua A", "motivos": ["nome no carimbo"]},
+                                   {"codigo": "F026-P0180", "titulo": "Tarumã, Rua B", "motivos": ["nome no carimbo"]}])
             p.aviso("F026-P0001", str(proj.relative_to(caso.acervo)), "pronto")
             p.releitura_iniciada(7, "campvision2")
             p.releitura_concluida(7, {"projeto_codigo": "F026-P0001", "escopo": "folha", "relidos": 1,
