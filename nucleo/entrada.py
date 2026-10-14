@@ -317,6 +317,16 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
             continue
         restantes.append(parte)
     if not ctx.serie:
+        # A estação disse a série: o Mac manda `series` no info_lote e a pasta de
+        # material fica DENTRO do lote (P0060 - SESI/03 - Fotografias/...). Vale
+        # ela; adivinhar pela imagem pôs 14 fotos claras em S01 (SESI, 14/10).
+        declaradas = {estrutura.serie_do_texto(str(s)) for s in (mac.get("series") or [])} - {""}
+        if not declaradas and unidade.pasta.is_dir():
+            declaradas = {estrutura.serie_do_texto(f.name) for f in unidade.pasta.iterdir()
+                          if f.is_dir() and _e_pasta_de_material(f.name)} - {""}
+        if len(declaradas) == 1:
+            ctx.serie = declaradas.pop()
+    if not ctx.serie:
         # Sem pasta de material nem manifesto: a estação de fotografia/VueScan
         # manda foto; o resto (Contex, Universal) manda prancha. "99 - Não
         # identificado" só se o config pedir — mandava tudo para lá.
@@ -1109,6 +1119,17 @@ class Recebedor:
                                       + (" e desespelhado" if prep.get("espelhada") else ""))
         gravar_json(preparo_caminho, preparos)
 
+        def trocar_serie(trocas: dict[str, str], motivo: str):
+            """Renomeia (arquivos, catalogação, cache, preview) e recarrega o estado do lote."""
+            gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+            movidos = mod_renomear.renomear(pasta, self.raiz_final, self.pasta_estado, trocas,
+                                            self.livro, motivo)
+            novo_lote = ler_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
+            return ([(o, movidos.get(d, d), trocas.get(c, c), sh) for o, d, c, sh in arquivados],
+                    {trocas.get(c, c): [movidos.get(v, v) for v in vs] for c, vs in por_codigo.items()},
+                    ler_json(mapa_caminho, {}) or {}, ler_json(preparo_caminho, {}) or {},
+                    novo_lote, novo_lote.setdefault("erros", erros_lote))
+
         # Triagem por série (procedimento, etapa 2): só quando a estação não disse a
         # série (sem pasta de material). Carta não é lida com prompt de prancha.
         if ctx.serie_deduzida:
@@ -1124,16 +1145,8 @@ class Recebedor:
                     trocas_serie[codigo_doc] = mod_renomear.novo_codigo(codigo_doc, serie=tri.serie)
             gravar_json(preparo_caminho, preparos)
             if trocas_serie:
-                gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
-                movidos = mod_renomear.renomear(pasta, self.raiz_final, self.pasta_estado, trocas_serie,
-                                                self.livro, "série decidida na triagem")
-                arquivados = [(o, movidos.get(d, d), trocas_serie.get(c, c), sh) for o, d, c, sh in arquivados]
-                por_codigo = {trocas_serie.get(c, c): [movidos.get(v, v) for v in vs]
-                              for c, vs in por_codigo.items()}
-                mapa = ler_json(mapa_caminho, {}) or {}
-                preparos = ler_json(preparo_caminho, {}) or {}
-                lote = ler_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
-                erros_lote = lote.setdefault("erros", erros_lote)
+                arquivados, por_codigo, mapa, preparos, lote, erros_lote = trocar_serie(
+                    trocas_serie, "série decidida na triagem")
 
         from . import planilha as mod_planilha, vigia as mod_vigia
 
@@ -1148,6 +1161,33 @@ class Recebedor:
         if evento.falha:
             return falhar(f"leitura falhou: {evento.falha}")
         leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
+        # A leitura de prancha viu que era FOTO (a triagem achou que era papel) e já
+        # releu como foto: a série acompanha. Só quando a estação não disse a série.
+        if ctx.serie_deduzida:
+            from .visao import SERIES_FOTO
+
+            trocas_foto = {c: mod_renomear.novo_codigo(c, serie="S03") for c, l in leituras.items()
+                           if c in por_codigo and l.modo == "fotografia" and c.count("-") >= 4
+                           and c.split("-")[3] not in SERIES_FOTO}
+            if trocas_foto:
+                arquivados, por_codigo, mapa, preparos, lote, erros_lote = trocar_serie(
+                    trocas_foto, "a leitura viu que é fotografia")
+                leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
+        # Foto sem texto: o OCR não decide a orientação; a leitura da foto decide.
+        girou_foto = False
+        for codigo_doc, versoes in por_codigo.items():
+            l = leituras.get(codigo_doc)
+            if l is not None and l.foto and mod_derivados.orientar_pela_foto(
+                    preparos.get(codigo_doc), l.foto, versoes,
+                    [cache / f"{codigo_doc}.jpg", preview_dir / f"{codigo_doc}.jpg"]):
+                girou_foto = True
+                prep = preparos[codigo_doc]
+                if prep.get("rotacao"):
+                    anotar_adiado("refeito", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                                  codigo_documento=codigo_doc,
+                                  detalhe=f"JPG girado {prep['rotacao']}° (leitura da fotografia)")
+        if girou_foto:
+            gravar_json(preparo_caminho, preparos)
         # Leitura que não aconteceu (chave inválida, sem crédito, rede) NÃO pode
         # virar "pronto": o painel receberia pranchas sem catalogação e o
         # original seria apagado. Fica em erro; --refazer-lote relê só essas.

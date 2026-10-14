@@ -51,6 +51,9 @@ REGRAS
 7. "arquiteto" é a pessoa; "escritorio" é a empresa. Nunca misture os dois.
 8. Em "onde", diga em que parte da folha leu: carimbo, margem, contorno,
    manuscrito, legenda ou corpo.
+9. Se a imagem NÃO é uma prancha nem um documento, e sim uma FOTOGRAFIA (de
+   obra, maquete, interior, pessoas), marque "e_fotografia": true e deixe os
+   campos null. Ela será descrita com as regras de fotografia.
 
 Devolva chamando a ferramenta registrar_prancha."""
 
@@ -67,6 +70,11 @@ REGRAS
    escrita no slide, anotação na moldura) em "texto_na_imagem".
 5. Se a imagem for um negativo, verso, cartela de teste ou folha de contato,
    diga isso em "tipo_de_imagem" e não descreva como se fosse a obra.
+7. Em "rotacao", diga quantos graus no sentido HORÁRIO a imagem precisa girar
+   para ficar em pé (céu, teto e topo do edifício para cima): 0, 90, 180 ou
+   270. "orientacao_clara" é true só quando não há dúvida (há céu, chão,
+   pessoas, texto ou verticais evidentes); detalhe abstrato ou vista aérea
+   em dúvida → false.
 
 Devolva chamando a ferramenta registrar_fotografia.
 
@@ -284,6 +292,12 @@ def _para_foto(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
         confianca = max(0.0, min(1.0, float(entrada.get("confianca", 0.0) or 0.0)))
     except (TypeError, ValueError):
         confianca = 0.0
+    try:
+        rotacao = int(entrada.get("rotacao") or 0) % 360
+    except (TypeError, ValueError):
+        rotacao = 0
+    foto["rotacao"] = rotacao if rotacao in (0, 90, 180, 270) else 0
+    foto["orientacao_clara"] = entrada.get("orientacao_clara") is True
     leitura.foto = foto
     leitura.valores["titulo_prancha"] = foto["legenda_proposta"]
     leitura.confiancas["titulo_prancha"] = confianca if foto["legenda_proposta"] else 0.0
@@ -365,6 +379,17 @@ class LeitorDeCarimbo:
             mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": pedido}]}]
             entrada, t_in, t_out = self.cliente.chamar(mensagens, ferramenta, instrucoes)
             resultado.tokens_entrada, resultado.tokens_saida, resultado.passes = t_in, t_out, 1
+            if modo == "prancha" and entrada.get("e_fotografia") is True and not entrada.get("tem_carimbo"):
+                # A triagem achou que era papel (foto clara, muito céu/parede), mas é
+                # foto: lê de novo com as regras de fotografia (SESI Marília, 14/10).
+                mensagens = [{"role": "user", "content": [
+                    _bloco_imagem(env), {"type": "text", "text": "Descreva esta fotografia."}]}]
+                entrada, t_in2, t_out2 = self.cliente.chamar(mensagens, self.ferramenta_foto, INSTRUCOES_FOTO)
+                resultado.tokens_entrada += t_in2
+                resultado.tokens_saida += t_out2
+                resultado.passes = 2
+                resultado.versao_prompt = f"fotografia:{VERSAO_PROMPT.get('fotografia', '')}"
+                return _para_foto(entrada, resultado)
             return converter(entrada, resultado)
         except Exception as erro:  # noqa: BLE001
             resultado.erro = str(erro)

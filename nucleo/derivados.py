@@ -189,3 +189,42 @@ def gerar_jpgs(pasta: Path, raiz_final: Path, pasta_estado: Path, livro=None) ->
         mapa_caminho.parent.mkdir(parents=True, exist_ok=True)
         mapa_caminho.write_text(json.dumps(mapa, ensure_ascii=False, indent=1), encoding="utf-8")
     return gerados
+
+
+def orientar_pela_foto(prep: dict, foto: dict | None, jpgs: list[Path], imagens_giradas: list[Path]) -> bool:
+    """Foto sem texto: o OCR não decide a orientação (fica incerta). A leitura de
+    fotografia diz quanto girar; com `orientacao_clara`, vale ela.
+
+    `rotacao` da leitura é relativa à imagem que o modelo viu (a de leitura, já
+    com o giro do preparo): soma ao preparo. Gira o JPG do acervo (o master
+    nunca) e as imagens já derivadas (leitura, preview). Devolve se mudou algo.
+    """
+    from PIL import Image
+
+    if not prep or not foto or foto.get("orientacao_clara") is not True:
+        return False
+    if not prep.get("incerta") or prep.get("espelhada") or prep.get("jpg_orientado"):
+        return False  # o OCR decidiu com certeza (ou já foi aplicado): não mexe
+    giro = int(foto.get("rotacao") or 0) % 360
+    if giro not in (0, 90, 180, 270):
+        return False
+    prep.update(rotacao=(int(prep.get("rotacao") or 0) + giro) % 360, incerta=False,
+                orientacao_origem="leitura da fotografia")
+    if not giro:
+        return True  # já estava em pé: só deixa de ser "incerta"
+    for imagem in imagens_giradas:
+        if not imagem.exists():
+            continue
+        temporario = imagem.with_name(f".{imagem.stem}.girando.jpg")
+        with Image.open(imagem) as img:
+            icc = img.info.get("icc_profile")
+            img.rotate(-giro, expand=True).save(temporario, "JPEG", quality=90,
+                                               **({"icc_profile": icc} if icc else {}))
+        temporario.replace(imagem)
+    girou = False
+    for jpg in jpgs:
+        if jpg.suffix.lower() in (".jpg", ".jpeg") and jpg.exists():
+            girou = orientar_jpg(jpg, dict(prep, jpg_orientado=False)) or girou
+    if girou:
+        prep["jpg_orientado"] = True
+    return True

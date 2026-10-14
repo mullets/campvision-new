@@ -125,6 +125,12 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
             continue
         nova = leitor.ler(jpg)
         nova.arquivo = jpg.name
+        if nova.foto and not nova.erro:
+            from . import derivados as mod_derivados
+
+            mod_derivados.orientar_pela_foto(
+                preparos.get(doc), nova.foto, masters.get(doc, []),
+                [jpg, raiz_final / "_campvision" / "preview" / codigo / f"{doc}.jpg"])
         t_in += nova.tokens_entrada
         t_out += nova.tokens_saida
         if nova.erro:

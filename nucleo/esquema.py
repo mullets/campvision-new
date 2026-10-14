@@ -200,6 +200,8 @@ def esquema_ferramenta() -> dict[str, Any]:
     propriedades: dict[str, Any] = {
         "legivel": {"type": "boolean", "description": "false se a folha não dá para ler."},
         "tem_carimbo": {"type": "boolean", "description": "true se há carimbo/legenda de título."},
+        "e_fotografia": {"type": "boolean",
+                         "description": "true se a imagem é uma FOTOGRAFIA, não prancha nem documento."},
     }
     for campo in CAMPOS_DO_MODELO:
         propriedades[campo.nome] = _campo_schema(campo.descricao)
@@ -250,6 +252,10 @@ def esquema_fotografia() -> dict[str, Any]:
                 },
                 "legenda_proposta": {"type": "string"},
                 "confianca": {"type": "number"},
+                "rotacao": {"type": "integer", "enum": [0, 90, 180, 270],
+                            "description": "Graus no sentido horário para a foto ficar em pé."},
+                "orientacao_clara": {"type": "boolean",
+                                     "description": "true só quando o lado de cima é evidente."},
             },
             "required": ["tipo_de_imagem", "assunto", "legenda_proposta", "confianca"],
         },
