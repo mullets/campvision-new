@@ -7,10 +7,19 @@ grava o crédito da CAMP dentro de cada imagem.
 Roda como aplicativo de janela, como comando de terminal ou como serviço que
 vigia uma pasta sozinho.
 
+> **Como funciona tudo, passo a passo → [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md)**
+>
+> O caminho completo de um lote: da estação (Mac, Windows) ao `100 - Scanners`,
+> ao vigia no servidor, ao `ACERVOS_CAMP` e ao painel. Explica como ele decide
+> fundo, série, projeto e orientação, o que grava em cada pasta, o que manda
+> ao painel, os comandos de conserto, os problemas conhecidos e as pendências.
+> O contrato técnico com o painel fica em [docs/contrato-painel.md](docs/contrato-painel.md).
+
 ---
 
 ## Índice
 
+- [**Como funciona tudo, passo a passo**](docs/COMO_FUNCIONA.md) — guia completo
 - [Começar](#começar) — ambiente, chave, primeira leitura
 - [Servidor da CAMP (Ubuntu)](#servidor-da-camp-ubuntu) — instalar, atualizar, dia a dia
 - [Como funciona](#como-funciona) — as duas fases, a leitura, a pasta, os metadados
