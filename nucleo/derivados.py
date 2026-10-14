@@ -1,7 +1,7 @@
 """JPG de cada documento do acervo: se falta, gera a partir do master (TIF/DNG/PDF/...).
 
 Vai para <projeto>/<série>/JPG/<código>.jpg (mesmo código do master), 6000 px no
-lado maior, JPEG 92, sRGB, com o metadado CAMP copiado do master. Entra no
+lado maior, JPEG 95 sem subamostragem de cor (4:4:4), LANCZOS, sRGB, com o metadado CAMP copiado do master. Entra no
 mapa_origem.json (para o pacote e o painel acharem) e no livro como `refeito`.
 Nada é apagado nem sobrescrito: JPG que já existe fica como está.
 """
@@ -19,7 +19,7 @@ from . import estrutura, formatos
 
 _log = logging.getLogger("cv2.derivados")
 LADO_JPG = 6000
-QUALIDADE_JPG = 92
+QUALIDADE_JPG = 95   # + 4:4:4 e LANCZOS (formatos.salvar_jpg)
 ORDEM_MASTER = (".tif", ".tiff", ".dng", ".nef", ".png", ".pdf", ".cdr", ".plt")
 
 
@@ -49,17 +49,52 @@ def orientar_jpg(jpg: Path, prep: dict) -> bool:
 
     if not precisa_girar(prep):
         return False
+    from PIL import ImageOps
+
     o = Orientacao(rotacao=int(prep.get("rotacao") or 0) % 360, espelhada=bool(prep.get("espelhada")))
     temporario = jpg.with_name(f".{jpg.stem}.girando.jpg")
+    # Sem perda quando dá: jpegtran gira/espelha os blocos do JPEG sem recomprimir.
+    if shutil.which("jpegtran") and _sem_tag_de_orientacao(jpg):
+        args = ["jpegtran", "-copy", "all", "-perfect"]
+        passos = (["-flip", "horizontal"] if o.espelhada else []), (["-rotate", str(o.rotacao)] if o.rotacao else [])
+        atual = jpg
+        for i, passo in enumerate(p for p in passos if p):
+            saida = jpg.with_name(f".{jpg.stem}.passo{i}.jpg")
+            r = subprocess.run([*args, *passo, "-outfile", str(saida), str(atual)], capture_output=True, timeout=300)
+            if r.returncode != 0:
+                saida.unlink(missing_ok=True)
+                break
+            if atual != jpg:
+                atual.unlink(missing_ok=True)
+            atual = saida
+        else:
+            if atual != jpg:
+                atual.replace(temporario)
+                temporario.replace(jpg)
+                return True
+        if atual != jpg:
+            atual.unlink(missing_ok=True)
     with Image.open(jpg) as img:
         icc = img.info.get("icc_profile")
-        novo = transformar(img.convert("RGB"), o)
-        novo.save(temporario, "JPEG", quality=QUALIDADE_JPG, optimize=True, **({"icc_profile": icc} if icc else {}))
+        base = ImageOps.exif_transpose(img) or img   # a orientação foi decidida sobre a imagem já "em pé"
+        novo = transformar(base.convert("RGB") if base.mode != "RGB" else base, o)
+        novo.save(temporario, "JPEG", quality=QUALIDADE_JPG, subsampling=0, optimize=True,
+                  **({"icc_profile": icc} if icc else {}))
     if shutil.which("exiftool"):
         subprocess.run(["exiftool", "-q", "-overwrite_original", "-TagsFromFile", str(jpg), "-all:all",
                         "-Orientation=", str(temporario)], capture_output=True, timeout=120)
     temporario.replace(jpg)
     return True
+
+
+def _sem_tag_de_orientacao(jpg: Path) -> bool:
+    from PIL import Image
+
+    try:
+        with Image.open(jpg) as img:
+            return int(img.getexif().get(0x0112, 1) or 1) == 1
+    except (OSError, ValueError):
+        return False
 
 
 def orientar_jpgs_do_projeto(pasta: Path, raiz_final: Path, livro=None) -> list[str]:
@@ -116,11 +151,11 @@ def gerar_jpgs(pasta: Path, raiz_final: Path, pasta_estado: Path, livro=None) ->
             continue
         temporario = pasta_estado / "derivados" / f"{codigo}.jpg"
         temporario.parent.mkdir(parents=True, exist_ok=True)
-        img = formatos.abrir(master, temporario)
+        img = formatos.abrir(master, temporario, maxima=True)
         if img is None:
             _log.warning("%s: não abri %s para gerar o JPG.", codigo, master.name)
             continue
-        img = img.convert("RGB")
+        img = formatos.para_rgb(img)
         prep = preparos.get(codigo, {})
         if precisa_girar(prep):  # o JPG novo já nasce na orientação certa
             from .preparo import Orientacao, transformar
@@ -128,8 +163,7 @@ def gerar_jpgs(pasta: Path, raiz_final: Path, pasta_estado: Path, livro=None) ->
             img = transformar(img, Orientacao(rotacao=int(prep.get("rotacao") or 0) % 360,
                                               espelhada=bool(prep.get("espelhada"))))
             prep["jpg_orientado"] = True
-        img.thumbnail((LADO_JPG, LADO_JPG))
-        img.save(temporario, "JPEG", quality=QUALIDADE_JPG, optimize=True)
+        formatos.salvar_jpg(img, temporario, LADO_JPG, QUALIDADE_JPG)
         img.close()
         if shutil.which("exiftool"):
             subprocess.run(["exiftool", "-q", "-overwrite_original", "-TagsFromFile", str(master),

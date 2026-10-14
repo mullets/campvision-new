@@ -65,15 +65,59 @@ def suportado(caminho: Path) -> bool:
     return caminho.suffix.lower() in EXTENSOES
 
 
-def _reduzir_e_salvar(img: Image.Image, destino: Path) -> Path:
-    img = img.convert("RGB")
-    img.thumbnail((LADO_LEITURA, LADO_LEITURA))
+def para_rgb(img: Image.Image) -> Image.Image:
+    """RGB 8 bits em sRGB, sem estragar o que veio do scanner.
+
+    - 16 bits (I;16, I, F, RGB de 48 bits): reescala para 8 bits — `convert("RGB")`
+      direto CORTA e a prancha sai estourada ou preta;
+    - CMYK/LAB/P/LA/RGBA: converte pelo caminho certo (transparência vira branco);
+    - perfil ICC embutido (Adobe RGB, ProPhoto, do scanner): converte para sRGB.
+    """
+    from PIL import ImageCms
+
+    icc = img.info.get("icc_profile")
+    if img.mode in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
+        inteira = img.convert("I") if img.mode != "F" else img
+        maior = (inteira.getextrema() or (0, 255))[1] or 255
+        escala = 255.0 / (65535.0 if img.mode.startswith("I;16") or maior > 255 else 255.0)
+        img = inteira.point(lambda v: v * escala).convert("L")
+    if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
+        fundo = Image.new("RGB", img.size, "white")
+        rgba = img.convert("RGBA")
+        fundo.paste(rgba, mask=rgba.getchannel("A"))
+        img = fundo
+    if icc and img.mode in ("RGB", "CMYK", "L", "LAB"):
+        try:
+            origem = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+            img = ImageCms.profileToProfile(img, origem, ImageCms.createProfile("sRGB"), outputMode="RGB")
+        except (ImageCms.PyCMSError, OSError, ValueError):
+            pass
+    return img if img.mode == "RGB" else img.convert("RGB")
+
+
+def salvar_jpg(img: Image.Image, destino: Path, lado: int, qualidade: int = 95) -> Path:
+    """JPG de qualidade de arquivo: LANCZOS, 4:4:4 (traço fino de prancha não borra), sRGB."""
+    img = para_rgb(img)
+    if max(img.size) > lado:
+        img.thumbnail((lado, lado), Image.Resampling.LANCZOS)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    img.save(destino, "JPEG", quality=90)
+    img.save(destino, "JPEG", quality=qualidade, subsampling=0, optimize=True)
     return destino
 
 
-def _dng(origem: Path) -> Image.Image | None:
+def _reduzir_e_salvar(img: Image.Image, destino: Path) -> Path:
+    return salvar_jpg(img, destino, LADO_LEITURA, 92)
+
+
+def _dng(origem: Path, maxima: bool = False) -> Image.Image | None:
+    if maxima:  # revelado inteiro, 8 bits, balanço da câmera
+        try:
+            import rawpy  # type: ignore
+
+            with rawpy.imread(str(origem)) as raw:
+                return Image.fromarray(raw.postprocess(use_camera_wb=True, output_bps=8))
+        except Exception:  # noqa: BLE001 - sem rawpy: cai na prévia embutida (avisado no log)
+            _log.warning("%s: sem rawpy, o JPG sai da prévia embutida do RAW (qualidade menor).", origem.name)
     if shutil.which("exiftool"):
         for tag in ("-JpgFromRaw", "-PreviewImage", "-OtherImage"):
             try:
@@ -99,14 +143,14 @@ def _dng(origem: Path) -> Image.Image | None:
         return None
 
 
-def _pdf(origem: Path, temporario: Path) -> Image.Image | None:
+def _pdf(origem: Path, temporario: Path, dpi: int = 150) -> Image.Image | None:
     if shutil.which("pdftoppm"):
         prefixo = temporario.with_suffix("")
         try:
-            subprocess.run(["pdftoppm", "-f", "1", "-l", "1", "-r", "150", "-jpeg",
+            subprocess.run(["pdftoppm", "-f", "1", "-l", "1", "-r", str(dpi), "-png",
                             "-singlefile", str(origem), str(prefixo)],
                            capture_output=True, timeout=180, check=True)
-            gerado = prefixo.with_suffix(".jpg")
+            gerado = prefixo.with_suffix(".png")
             if gerado.exists():
                 img = Image.open(gerado)
                 img.load()
@@ -120,7 +164,7 @@ def _pdf(origem: Path, temporario: Path) -> Image.Image | None:
         pdf = pypdfium2.PdfDocument(str(origem))
         try:
             pagina = pdf[0]
-            img = pagina.render(scale=150 / 72).to_pil()
+            img = pagina.render(scale=dpi / 72).to_pil()
             img.load()
             pagina.close()
             return img
@@ -190,14 +234,18 @@ def imagem_de_leitura(origem: Path, destino: Path) -> Path | None:
     return _reduzir_e_salvar(img, destino) if img is not None else None
 
 
-def abrir(origem: Path, destino: Path) -> Image.Image | None:
-    """Abre qualquer formato suportado como imagem (o temporário do PDF/CDR fica ao lado de `destino`)."""
+def abrir(origem: Path, destino: Path, maxima: bool = False) -> Image.Image | None:
+    """Abre qualquer formato suportado como imagem (o temporário do PDF/CDR fica ao lado de `destino`).
+
+    A tag de orientação (EXIF/TIFF) é APLICADA: a imagem sai como o scanner/câmera
+    mostra. `maxima=True` (JPG do acervo): RAW revelado inteiro, PDF a 400 dpi — a
+    prévia embutida do DNG e o PDF a 150 dpi servem para LER, não para arquivar."""
     ext = origem.suffix.lower()
     destino.parent.mkdir(parents=True, exist_ok=True)  # o pdftoppm grava direto aqui
     img: Image.Image | None = None
     try:
         if ext in (".dng", ".nef"):
-            img = _dng(origem)
+            img = _dng(origem, maxima)
         elif ext == ".cdr":
             img = _cdr(origem, destino)
         elif ext == ".plt":
@@ -205,7 +253,7 @@ def abrir(origem: Path, destino: Path) -> Image.Image | None:
 
             img = renderizar(origem)
         elif ext == ".pdf":
-            img = _pdf(origem, destino)
+            img = _pdf(origem, destino, 400 if maxima else 150)
         else:
             img = Image.open(origem)
             img.load()
@@ -215,6 +263,12 @@ def abrir(origem: Path, destino: Path) -> Image.Image | None:
     if img is None:
         _log.warning("Sem imagem de leitura para %s (%s).", origem.name, ext)
         return None
+    try:
+        from PIL import ImageOps
+
+        img = ImageOps.exif_transpose(img) or img
+    except (OSError, ValueError, KeyError):
+        pass
     return img
 
 

@@ -172,11 +172,9 @@ def distancia(a: str, b: str) -> int:
 
 
 def salvar(img: Image.Image, destino: Path, lado: int, qualidade: int) -> Path:
-    img = img.convert("RGB")
-    img.thumbnail((lado, lado))
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    img.save(destino, "JPEG", quality=qualidade)
-    return destino
+    from .formatos import salvar_jpg
+
+    return salvar_jpg(img, destino, lado, qualidade)
 
 
 @dataclass

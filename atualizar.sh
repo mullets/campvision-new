@@ -119,8 +119,10 @@ desfazer() {
 [[ -x "$PY" ]] || python3 -m venv "$REPO/.venv"
 "$REPO/.venv/bin/pip" install -q -r requirements.txt || desfazer "pip falhou"
 ok "dependências Python em dia"
+# RAW (DNG/NEF) revelado inteiro para o JPG do acervo; sem ele, sai da prévia embutida (pior).
+"$REPO/.venv/bin/pip" install -q "rawpy>=0.19" 2>/dev/null || info "rawpy não instalou: JPG de DNG sai da prévia embutida"
 FALTAM=()
-for par in exiftool:libimage-exiftool-perl pdftoppm:poppler-utils mount.cifs:cifs-utils tesseract:tesseract-ocr; do
+for par in exiftool:libimage-exiftool-perl pdftoppm:poppler-utils mount.cifs:cifs-utils tesseract:tesseract-ocr jpegtran:libjpeg-turbo-progs; do
   command -v "${par%%:*}" >/dev/null || FALTAM+=("${par##*:}")
 done
 # O português do tesseract é pacote à parte: sem ele a orientação fica sempre incerta.
