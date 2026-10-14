@@ -116,7 +116,7 @@ Sem ele o app funciona, mas não grava metadados nas imagens.
 ### 6. Primeira leitura
 
 ```bash
-python -m unittest discover -s tests -t .   # 233 testes, sem rede
+python -m unittest discover -s tests -t .   # 316 testes, sem rede
 python app.py                                # janela
 ```
 
@@ -775,7 +775,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-233 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+316 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote
