@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import shutil
 import unittest
 from pathlib import Path
@@ -129,6 +130,30 @@ class TestContexto(Base):
     def test_ordem_projeto_antes_do_material(self):
         c = self.ctx("SBU Sami Bussab", "Casa Morumbi", "Fotografias")
         self.assertEqual((c.fundo.codigo, c.serie, c.projeto), ("F026", "S03", "Casa Morumbi"))
+
+    def mac(self, ja_existia: bool) -> Path:
+        projeto = self.scanners / "F026 - SBU Sami Bussab" / "P0060 - Edifício Tarumã - 1972"
+        self.scan(*projeto.relative_to(self.scanners).parts, "03 - Fotografias",
+                  "01 - Arquivo Arquivístico (TIFF)", n=1, formatos=("jpg",))
+        info = {"estacao": "mac-vuescan", "codigo_fundo": "F026", "numero_projeto": "P0060",
+                "projeto": "Edifício Tarumã", "ano": "1972", "projeto_ja_existia": ja_existia}
+        (projeto / "info_lote_20261014-161453_mac.json").write_text(json.dumps(info), encoding="utf-8")
+        (projeto / "info_projeto.json").write_text(json.dumps(info), encoding="utf-8")
+        (projeto / "status_mac.json").write_text(json.dumps({"etapa": "enviado_mac"}), encoding="utf-8")
+        return projeto
+
+    def test_mac_com_projeto_existente_usa_o_codigo_do_mac(self):
+        projeto = self.mac(ja_existia=True)
+        [unidade] = entrada.descobrir(self.scanners)
+        self.assertEqual(unidade.pasta, projeto)
+        c = entrada.contexto(unidade, fundos.Tabela(fundos.EMBUTIDA))
+        self.assertEqual((c.fundo.codigo, c.codigo), ("F026", "F026-P0060"))
+
+    def test_mac_com_projeto_novo_continua_reservando_no_painel(self):
+        self.mac(ja_existia=False)
+        [unidade] = entrada.descobrir(self.scanners)
+        c = entrada.contexto(unidade, fundos.Tabela(fundos.EMBUTIDA))
+        self.assertEqual((c.codigo, c.p_estacao), ("", "P0060"))
 
     def test_padrao_da_estacao_windows(self):
         c = self.ctx("F010 - Francisco Segnini Jr", "FSJ-AAbreuChacaraAnaliaFranco-1989")
@@ -451,6 +476,18 @@ class TestFalhasNaoApagam(Base):
         # Mesma assinatura, mas foi só o serviço parando: lê de novo no próximo início
         [r2] = self.rodar()
         self.assertEqual(r2.status, entrada.PRONTO)
+
+    def test_copia_que_manteve_o_mtime_do_scan_ainda_esta_chegando(self):
+        import os
+
+        self.config.entrada_quieto_minutos = 10
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
+        antigo = time.time() - 86400
+        for arquivo in pasta.rglob("*.jpg"):
+            os.utime(arquivo, (antigo, antigo))  # como shutil.copy2; o ctime fica o de agora
+        ok, motivo = entrada.pronta(entrada.descobrir(self.scanners)[0], self.config)
+        self.assertFalse(ok)
+        self.assertEqual(motivo, "arquivos ainda chegando")
 
     def test_fundo_desconhecido_nao_cria_nada(self):
         pasta = self.scan("F099 - Fulano", "Casa", n=1, formatos=("jpg",))

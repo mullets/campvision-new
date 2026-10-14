@@ -44,7 +44,7 @@ _log = logging.getLogger("cv2.entrada")
 PROCESSANDO, PRONTO, ERRO, AGUARDANDO = "processando", "pronto", "erro", "aguardando"
 # Parada do serviço no meio do lote: não é defeito do lote, volta à fila no próximo início.
 CANCELADO = "cancelado antes da leitura"
-MARCADORES = ("manifesto.json", "info_projeto.json", "status.json")
+MARCADORES = ("manifesto.json", "info_projeto.json", "status.json", "status_mac.json")
 PASTAS_DE_FORMATO = {
     "tif", "tiff", "jpg", "jpeg", "dng", "pdf", "png", "raw", "preview", "previews",
     "alta", "baixa", "alta resolucao", "baixa resolucao", "matriz", "master",
@@ -158,14 +158,19 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     if not arquivos:
         return False, "vazia"
     status = ler_json(unidade.pasta / "status.json", {})
+    status_mac = ler_json(unidade.pasta / "status_mac.json", {})
     marcada = (unidade.pasta / "manifesto.json").exists() or (
         isinstance(status, dict) and status.get("status") == "enviado_windows"
-    )
+    ) or (isinstance(status_mac, dict) and status_mac.get("etapa") == "enviado_mac")
     espera = config.espera_estabilidade_segundos if marcada else config.entrada_quieto_minutos * 60
     limite = time.time() - espera
     for arquivo in arquivos:
         try:
-            if arquivo.stat().st_mtime > limite:
+            info = arquivo.stat()
+            # O Mac copia com copy2 (mantém o mtime do scan): só o ctime diz que
+            # o arquivo acabou de chegar. Sem isso a pasta TIFF era pega no meio
+            # da cópia, antes do info_lote (SESI Marília, 14/10).
+            if max(info.st_mtime, info.st_ctime) > limite:
                 return False, "arquivos ainda chegando"
         except OSError:
             return False, "arquivo sumiu durante a leitura"
@@ -220,10 +225,35 @@ def _texto(dados: dict, *chaves: str) -> str:
     return ""
 
 
+def lote_mac(pasta: Path) -> dict:
+    """O info_lote_*_mac.json mais recente da pasta (estação Mac/VueScan), ou {}."""
+    for caminho in sorted(pasta.glob("info_lote_*.json"), reverse=True):
+        dados = ler_json(caminho, {})
+        if isinstance(dados, dict) and dados:
+            return dados
+    return {}
+
+
+def codigo_do_mac(dados: dict) -> str:
+    """F009-P0060 quando o Mac escolheu um projeto que JÁ existe no painel.
+
+    O número P sozinho não é oficial (Rafa, 09/10), mas com projeto_ja_existia
+    o Mac pegou o projeto da lista do painel: o código é o do acervo.
+    """
+    if dados.get("projeto_ja_existia") is not True:
+        return ""
+    fundo = str(dados.get("codigo_fundo") or "").strip().upper()
+    numero = str(dados.get("numero_projeto") or "").strip().upper()
+    if re.fullmatch(r"F\d{3}", fundo) and re.fullmatch(r"P\d{4}", numero):
+        return f"{fundo}-{numero}"
+    return ""
+
+
 def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S01") -> Contexto:
     """Monta o contexto: manifesto/info da estação > caminho da pasta."""
     ctx = Contexto()
     manifesto = ler_json(unidade.pasta / "manifesto.json", {}) or {}
+    mac = lote_mac(unidade.pasta)
     bruto_info = mod_info.ler_bruto(unidade.pasta)
     traduzido = mod_info.ler(unidade.pasta)
     dados = {**{k.split(".")[-1]: v for k, v in bruto_info.items()}, **manifesto}
@@ -273,7 +303,7 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
         ctx.serie_deduzida = True
 
     # Projeto: código explícito, nome do manifesto/info, senão a pasta mais funda.
-    ctx.codigo = _texto(dados, "codigo", "projeto_codigo").upper()
+    ctx.codigo = _texto(dados, "codigo", "projeto_codigo").upper() or codigo_do_mac(mac)
     if ctx.codigo and not estrutura.CODIGO_PROJETO.fullmatch(ctx.codigo):
         if re.fullmatch(r"P\d{4}", ctx.codigo):
             ctx.p_estacao = ctx.codigo  # número da estação: pista, não código (Rafa, 09/10)
