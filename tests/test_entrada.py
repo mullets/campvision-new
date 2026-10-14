@@ -489,6 +489,17 @@ class TestFalhasNaoApagam(Base):
         self.assertFalse(ok)
         self.assertEqual(motivo, "arquivos ainda chegando")
 
+    def test_etapas_longas_aparecem_no_log(self):
+        self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
+        with self.assertLogs("cv2.entrada", level="INFO") as log:
+            [r] = self.rodar()
+        self.assertEqual(r.status, entrada.PRONTO)
+        texto = "\n".join(log.output)
+        self.assertIn("copiando 1 de 2", texto)
+        self.assertIn("copiando 2 de 2", texto)
+        self.assertIn("preparando 2 de 2", texto)
+        self.assertIn("gravando metadados", texto)
+
     def test_fundo_desconhecido_nao_cria_nada(self):
         pasta = self.scan("F099 - Fulano", "Casa", n=1, formatos=("jpg",))
         [r] = self.rodar()

@@ -51,6 +51,28 @@ PASTAS_DE_FORMATO = {
 }
 
 
+class Andamento:
+    """Uma linha de log por etapa longa: "copiando 7 de 38". Na primeira, na
+    última e no máximo a cada `intervalo` segundos — cópia, preparo e EXIF de
+    TIFF pela rede levam minutos sem nada no log e parecia travado (14/10)."""
+
+    def __init__(self, lote_id: str, etapa: str, total: int, estado_vigia=None,
+                 intervalo: float = 15.0) -> None:
+        self.lote_id, self.etapa, self.total = lote_id, etapa, total
+        self.estado_vigia, self.intervalo = estado_vigia, intervalo
+        self.feitos = 0
+        self._ultimo = -1e9
+
+    def passo(self, n: int = 1) -> None:
+        self.feitos += n
+        agora = time.monotonic()
+        if self.feitos in (1, self.total) or agora - self._ultimo >= self.intervalo:
+            self._ultimo = agora
+            _log.info("Lote %s: %s %d de %d", self.lote_id, self.etapa, self.feitos, self.total)
+        if self.estado_vigia is not None:
+            self.estado_vigia.situacao = f"{self.etapa} {self.feitos} de {self.total}"
+
+
 def _agora() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -963,8 +985,10 @@ class Recebedor:
         arquivados: list[tuple[Path, Path, str, str]] = []  # (origem, destino, código, sha)
         vistos_sha: dict[str, str] = {}
         ja_arquivados: list[tuple[Path, Path, str, str]] = []
+        copia = Andamento(ctx.lote_id, "copiando", sum(len(d.versoes) for d in documentos), estado_vigia)
         try:
             for doc in documentos:
+                copia.passo(len(doc.versoes))
                 shas = {v: sha256(v) for v in doc.versoes}
                 if all(s in no_acervo for s in shas.values()):
                     ja_arquivados += [(v, no_acervo[sh], no_acervo[sh].stem, sh) for v, sh in shas.items()]
@@ -1045,7 +1069,9 @@ class Recebedor:
         preview_dir = self.raiz_final / "_campvision" / "preview" / codigo
         preparo_caminho = catalogacao / "preparo.json"
         preparos: dict = ler_json(preparo_caminho, {}) or {}
+        preparo = Andamento(ctx.lote_id, "preparando", len(por_codigo), estado_vigia)
         for codigo_doc, versoes in por_codigo.items():
+            preparo.passo()
             leitura_jpg = cache / f"{codigo_doc}.jpg"
             if codigo_doc in preparos and leitura_jpg.exists():
                 continue
@@ -1486,7 +1512,11 @@ class Recebedor:
             if not campos.get("Projeto"):
                 campos["Projeto"] = nome
             itens.append((destino, campos))
+        _log.info("Lote %s: gravando metadados em %d arquivo(s)…", ctx.lote_id, len(itens))
+        if estado_vigia is not None:
+            estado_vigia.situacao = f"gravando metadados ({len(itens)})"
         gravados, avisos = mod_metadados.gravar_em_lote(itens, self.config.identidade())
+        _log.info("Lote %s: conferindo metadados…", ctx.lote_id)
         conferidos = conferir_exif([(d, Path(d).stem) for d, _ in itens])
         lote["exif"] = {"total": len(itens), "gravados": gravados, "conferidos": len(conferidos),
                         "avisos": avisos}
