@@ -160,6 +160,32 @@ def _comando_identidade(config: Config) -> int:
     return 0
 
 
+def _avisar_painel(config: Config, codigo: str) -> str:
+    """Aplica nos JPG o giro já decidido e pede ao painel para reimportar o projeto
+    (substitui o que ele mostra; o que gente já revisou fica protegido pelo painel)."""
+    import json as _json
+
+    from nucleo import derivados as _der, painel as _painel, renomear as _ren
+    from nucleo.livro import Livro
+
+    raiz = Path(config.raiz_final)
+    pasta = _ren.achar_projeto(raiz, codigo)
+    if pasta is None:
+        return f"Painel não avisado: projeto {codigo} não encontrado no acervo."
+    girados = _der.orientar_jpgs_do_projeto(pasta, raiz, Livro(raiz))
+    linha = f"{len(girados)} JPG girado(s) agora. " if girados else ""
+    if not config.painel_url:
+        return linha + "Painel não configurado: nada enviado."
+    try:
+        situacao = _json.loads((pasta / "status.json").read_text(encoding="utf-8")).get("status") or "pronto"
+    except (OSError, ValueError):
+        situacao = "pronto"
+    painel = _painel.Painel(config.painel_url, config.token_painel(), PASTA_ESTADO)
+    ok = painel.aviso(codigo.upper(), str(pasta.relative_to(raiz)), situacao)
+    return linha + ("Painel avisado: vai reimportar o projeto." if ok
+                    else "Painel não respondeu: o aviso ficou na fila e o serviço reenvia.")
+
+
 def _comando_refazer(config: Config, alvo: str) -> int:
     if not config.pasta_vigiada or not Path(config.pasta_vigiada).is_dir():
         print("Defina a pasta primeiro: --pasta /caminho", file=sys.stderr)
@@ -628,6 +654,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--reler", metavar="F0xx-P000x",
                    help="Relê um projeto do acervo e grava AO LADO (catalogacao/releituras/); "
                         "use --escopo e --documentos")
+    p.add_argument("--avisar-painel", metavar="F0xx-P000x",
+                   help="Aplica nos JPG o giro já decidido e pede ao painel para reimportar o projeto")
     p.add_argument("--escopo", choices=("vazios", "projeto", "documentos"), default="vazios",
                    help="O que reler (padrão: só as folhas com campo vazio ou erro)")
     p.add_argument("--documentos", metavar="COD,COD", help="Códigos para --escopo documentos")
@@ -700,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
         config.salvar(CAMINHO_CONFIG)
         print(f"Painel: {config.painel_url}")
     configurou = bool(args.pasta or args.entrada or args.acervo or args.painel)
-    acao = any((args.reidentificar, args.avaliar, args.diagnostico is not None, args.consertar_acervo is not None, args.reler, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
+    acao = any((args.reidentificar, args.avaliar, args.diagnostico is not None, args.consertar_acervo is not None, args.reler, args.avisar_painel, args.organizar_formatos, args.decisao, args.proximo_p, args.backtest_programa, args.reclassificar, args.backtest, args.reconferir_tipo, args.uma_vez, args.status, args.lotes, args.historico, args.livro_legado,
                 args.relatorio, args.relatorio_geral, args.planilha_geral, args.marcar_fase,
                 args.identidade, args.info, args.estimativa, args.refazer, args.refazer_lote,
                 args.todos, args.sem_painel))
@@ -777,6 +805,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{r['relidos']} folha(s) relida(s), {r['com_mudanca']} com mudança, "
               f"{r['campos_preenchidos']} campo(s) que estavam vazios, US$ {r['custo_usd']:.2f}.")
         print(f"Resultado ao lado, sem sobrescrever nada: {r['pasta']}/comparacao.json")
+        print(_avisar_painel(config, args.reler))
+        return 0
+    if args.avisar_painel:
+        print(_avisar_painel(config, args.avisar_painel))
         return 0
     if args.organizar_formatos:
         from nucleo import renomear as _ren

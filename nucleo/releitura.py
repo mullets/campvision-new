@@ -150,6 +150,10 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
     if preparos:
         caminho_prep.parent.mkdir(parents=True, exist_ok=True)
         caminho_prep.write_text(json.dumps(preparos, ensure_ascii=False, indent=1), encoding="utf-8")
+        # Giro decidido e ainda não aplicado ao JPG do acervo (inclusive de leituras antigas).
+        from . import derivados as mod_derivados
+
+        mod_derivados.orientar_jpgs_do_projeto(pasta, raiz_final, livro)
     quando = datetime.now().strftime("%Y%m%d-%H%M%S")
     destino = pasta / "catalogacao" / "releituras" / quando
     destino.mkdir(parents=True, exist_ok=True)

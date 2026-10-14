@@ -104,6 +104,13 @@ class TestOrientarPelaFoto(unittest.TestCase):
         self.assertEqual(prep["rotacao"], 0)
         self.assertNotIn("jpg_orientado", prep)  # volta ao original: o JPG do acervo não muda
 
+    def test_modelo_confirma_o_chute_do_ocr_e_o_jpg_recebe_o_giro(self):
+        prep = {"rotacao": 90, "incerta": True}  # preview/leitura já giradas 90 pelo chute
+        self.assertTrue(derivados.orientar_pela_foto(prep, dict(FOTO, rotacao=0), [self.jpg], [self.leitura]))
+        self.assertEqual((prep["rotacao"], prep["incerta"], prep["jpg_orientado"]), (90, False, True))
+        with Image.open(self.jpg) as a, Image.open(self.leitura) as b:
+            self.assertEqual((a.size, b.size), ((200, 300), (300, 200)))  # leitura não gira de novo
+
     def test_em_duvida_nao_mexe(self):
         prep = {"rotacao": 0, "incerta": True}
         self.assertFalse(derivados.orientar_pela_foto(prep, dict(FOTO, orientacao_clara=False),
@@ -145,3 +152,24 @@ class TestLoteDeFotoSemSerie(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAvisarPainel(unittest.TestCase):
+    def test_gira_o_pendente_e_avisa(self):
+        import vigia as mod_vigia_cli
+
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            pasta = raiz / "F026 - SBU Sami Bussab" / "01 - Projetos" / "F026-P0060 - Tarumã"
+            jpg = foto_clara(pasta / "03 - Fotografias" / "JPG" / "F026-P0060-1972-S03-D00001.jpg", 300, 200)
+            (pasta / "catalogacao").mkdir(parents=True)
+            (pasta / "catalogacao" / "preparo.json").write_text(json.dumps(
+                {jpg.stem: {"rotacao": 90, "incerta": False}}), encoding="utf-8")
+            (pasta / "status.json").write_text(json.dumps({"status": "pronto"}), encoding="utf-8")
+            config = Config(pasta_acervo_final=str(raiz), painel_url="http://painel")
+            with mock.patch("nucleo.painel.Painel.aviso", return_value=True) as aviso:
+                msg = mod_vigia_cli._avisar_painel(config, "f026-p0060")
+            aviso.assert_called_once_with("F026-P0060", str(pasta.relative_to(raiz)), "pronto")
+            self.assertIn("1 JPG girado", msg)
+            with Image.open(jpg) as img:
+                self.assertEqual(img.size, (200, 300))

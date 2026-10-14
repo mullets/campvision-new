@@ -210,9 +210,9 @@ def orientar_pela_foto(prep: dict, foto: dict | None, jpgs: list[Path], imagens_
         return False
     prep.update(rotacao=(int(prep.get("rotacao") or 0) + giro) % 360, incerta=False,
                 orientacao_origem="leitura da fotografia")
-    if not giro:
-        return True  # já estava em pé: só deixa de ser "incerta"
-    for imagem in imagens_giradas:
+    # giro 0 = a imagem de leitura (já com o chute do OCR) está em pé: ela e o
+    # preview ficam; o JPG do acervo ainda precisa do giro do chute (abaixo).
+    for imagem in imagens_giradas if giro else []:
         if not imagem.exists():
             continue
         temporario = imagem.with_name(f".{imagem.stem}.girando.jpg")
