@@ -458,6 +458,11 @@ def _comando_reidentificar(config: Config, alvo: str, sim: bool) -> int:
     if not base:
         print("Sem a lista de projetos do fundo (painel fora?): não dá para casar com a base.", file=sys.stderr)
         return 1
+    conflitos = sorted(raiz.glob(f"{fundo}*/01 - Projetos/*_conflict_*"))
+    if conflitos:
+        print(f"ATENÇÃO: {len(conflitos)} pasta(s) '_conflict_' (cópia de conflito do Qsync/QNAP) — ignoradas aqui:")
+        for c in conflitos:
+            print(f"   {c.name}")
     planos = [_reid.planejar(p, base, PASTA_ESTADO) for p in pastas]
     for plano in planos:
         print(_reid.texto(plano))

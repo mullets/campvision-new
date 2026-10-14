@@ -84,6 +84,30 @@ class TestGabaritoBase(unittest.TestCase):
                                   cidade="Três Ranchos"), {})
 
 
+class TestLeituraReal(unittest.TestCase):
+    """Saída real do --reidentificar F026 (14/10): o que estava errado."""
+
+    def test_lixo_da_ferramenta_vira_vazio(self):
+        self.assertEqual(I.limpar_valor('<parameter name="valor">null'), "")
+        self.assertEqual(I.limpar_valor('<parameter name="valor">CONJUNTO RESIDENCIAL'), "CONJUNTO RESIDENCIAL")
+        self.assertEqual(I.limpar_valor('<parameter name="valor">null</parameter>\n<parameter name="confianca">0'), "")
+
+    def test_endereco_mal_lido_nao_separa_o_marambaia(self):
+        ruas = ["RUA BATATAES, 170"] * 24 + ["RUA BAHIA", "RUA IMITATAS", "RUA BANDAIRAS", "RUA WASHTAS", "RUA BUZATINS"]
+        leituras = {f"d{i:02d}": folha(f"d{i:02d}", projeto="EDIFICIO MARAMBAIA" if i % 5 else "EDIFICIO MARAMBIA",
+                                       endereco=r) for i, r in enumerate(ruas)}
+        a = I.analisar(leituras, base=BASE)
+        self.assertEqual(len(a.grupos), 1)
+        self.assertEqual(a.mesmo_endereco, [])
+        self.assertEqual(I.casar_com_base(a.grupos[0], BASE)["forte"]["codigo"], "F026-P0095")
+
+    def test_endereco_do_escritorio_no_carimbo_nao_impede(self):
+        achado = um_grupo(projeto="RESIDENCIA - Sr. MIGUEL BURIHAN", endereco="RUA 13 DE MAIO, 1954 CONJ. 121")
+        self.assertEqual(achado["forte"]["codigo"], "F026-P0113")
+        achado = um_grupo(projeto="JOCKEY CLUB DE SÃO PAULO", endereco="RUA JOSÉ BONIFÁCIO")
+        self.assertEqual(achado["forte"]["codigo"], "F026-P0092")
+
+
 class TestAgrupamento(unittest.TestCase):
     """T2/T5/T6: agrupar pelo carimbo, não pela pasta."""
 
@@ -102,7 +126,10 @@ class TestAgrupamento(unittest.TestCase):
         }
 
     def test_pasta_com_cinco_obras_vira_cinco_grupos(self):
-        a = I.analisar(self.t100())
+        # Sem a base, obra igual com endereço diferente fica junta (endereço mal lido não separa)…
+        self.assertEqual(len(I.analisar(self.t100()).grupos[0].folhas), 6)
+        # …com a base do fundo, cada praça tem projeto próprio e separa.
+        a = I.analisar(self.t100(), base=BASE)
         grupos = {tuple(g.folhas): I.casar_com_base(g, BASE) for g in a.grupos}
         fortes = {k: v["forte"]["codigo"] for k, v in grupos.items() if "forte" in v}
         self.assertEqual(fortes, {("d03", "d08"): "F026-P0087", ("d09", "d10"): "F026-P0089",

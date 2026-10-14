@@ -1109,8 +1109,9 @@ class Recebedor:
 
         enriquecer(leituras, preparos, ctx.fundo)
         do_lote = {c: leituras[c] for c in por_codigo if c in leituras}
-        analise = mod_ident.analisar(do_lote, {c: _proporcao(cache / f"{c}.jpg") for c in do_lote})
-        plano, pendente = self._planejar(analise, ctx, unidade, do_lote)
+        base = ((self.painel.contexto(ctx.fundo.codigo) or {}).get("projetos") or []) if self.painel.ligado else []
+        analise = mod_ident.analisar(do_lote, {c: _proporcao(cache / f"{c}.jpg") for c in do_lote}, base)
+        plano, pendente = self._planejar(analise, ctx, unidade, do_lote, base)
         marcar_identidade(preparos, analise, plano, do_lote)
         gravar_json(preparo_caminho, preparos)
         gravar_json(catalogacao / "identificacao.json", {
@@ -1208,14 +1209,14 @@ class Recebedor:
         adiado.write_text("".join(f"{l}\n" for l in ficam), encoding="utf-8")
 
     # ------------------------------------------------------------ plano
-    def _planejar(self, analise, ctx: Contexto, unidade: Unidade, leituras: dict) -> tuple[list[dict], str]:
+    def _planejar(self, analise, ctx: Contexto, unidade: Unidade, leituras: dict,
+                  base: list | None = None) -> tuple[list[dict], str]:
         """Para cada grupo, o projeto: base do fundo (um candidato forte), decisão no painel
         (dois ou mais), ou reserva nova (nenhum). Devolve (plano, '') ou ([], motivo de espera)."""
         from . import identidade as mod_ident
 
-        base = []
-        if self.painel.ligado:
-            base = (self.painel.contexto(ctx.fundo.codigo) or {}).get("projetos") or []
+        if base is None:
+            base = ((self.painel.contexto(ctx.fundo.codigo) or {}).get("projetos") or []) if self.painel.ligado else []
         pista = mod_ident.pista_da_pasta(ctx.projeto or unidade.relativo.name)
         grupos = list(analise.grupos)
         varios = len(grupos) > 1

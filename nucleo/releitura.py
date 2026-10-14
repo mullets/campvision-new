@@ -259,7 +259,9 @@ def projetos(raiz_final: Path, fundo: str = "") -> list[Path]:
     for pasta_fundo in sorted(raiz_final.glob(f"{fundo.upper()}*" if fundo else "F[0-9][0-9][0-9]*")):
         pp = pasta_fundo / estrutura.PASTA_PROJETOS
         if pp.is_dir():
-            saida += [p for p in sorted(pp.iterdir()) if p.is_dir() and estrutura.codigo_da_pasta(p)]
+            # "_conflict_(0)": cópia de conflito do Qsync/QNAP, não é projeto (avisada no --diagnostico).
+            saida += [p for p in sorted(pp.iterdir()) if p.is_dir() and estrutura.codigo_da_pasta(p)
+                      and "_conflict_" not in p.name]
     return saida
 
 

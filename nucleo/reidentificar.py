@@ -37,15 +37,14 @@ def planejar(pasta: Path, base: list[dict], pasta_estado: Path) -> dict:
     cache = pasta_estado / "leitura" / codigo
     from .entrada import _proporcao
 
-    analise = mod_ident.analisar(leituras, {c: _proporcao(cache / f"{c}.jpg") for c in leituras})
+    analise = mod_ident.analisar(leituras, {c: _proporcao(cache / f"{c}.jpg") for c in leituras}, base)
     varios = len(analise.grupos) > 1
     pista = "" if varios else mod_ident.pista_da_pasta(estrutura.nome_sem_codigo(pasta.name))
     perguntar = {analise.grupos[i].chave for juntos in analise.mesmo_endereco for i in juntos}
     perguntar |= {f["grupo"] for f in analise.fases}
     grupos = []
     for g in analise.grupos:
-        casa = mod_ident.casar_com_base(g, [p for p in base if str(p.get("codigo")) != codigo] if varios else base,
-                                        pista)
+        casa = mod_ident.casar_com_base(g, base, pista)   # o código atual concorre como qualquer outro
         forte = (casa.get("forte") or {}).get("codigo", "")
         # O próprio código atual também é candidato: um lote homogêneo no código certo fica.
         atual = next((p for p in base if str(p.get("codigo")) == codigo), None)

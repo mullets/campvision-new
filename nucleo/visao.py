@@ -197,7 +197,12 @@ def _bloco_imagem(env: img_mod.ImagemParaEnvio) -> dict[str, Any]:
 
 
 def _texto(valor: Any) -> str:
-    return "" if valor is None else str(valor).strip()
+    """Valor limpo: resto de marcação da ferramenta ('<parameter name="valor">null') e 'null' viram vazio."""
+    if valor is None:
+        return ""
+    from .identidade import limpar_valor
+
+    return limpar_valor(valor)
 
 
 def _lista(valor: Any) -> list[str]:

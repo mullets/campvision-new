@@ -65,7 +65,10 @@ def tokens_lugar(texto: str) -> list[str]:
 def _igual(a: str, b: str) -> bool:
     if a == b:
         return True
-    return len(a) >= 5 and len(b) >= 5 and SequenceMatcher(None, a, b).ratio() >= 0.8
+    if len(a) < 5 or len(b) < 5:
+        return False
+    r = SequenceMatcher(None, a, b).ratio()
+    return r >= 0.8 or (min(len(a), len(b)) >= 7 and r >= 0.7)
 
 
 def comuns(a: list[str], b: list[str]) -> int:
@@ -78,11 +81,22 @@ def _parecidos(a: list[str], b: list[str], limiar: float) -> bool:
     return comuns(a, b) / min(len(set(a)), len(set(b))) >= limiar
 
 
+LIXO = re.compile(r"</?parameter[^>]*>|</?invoke[^>]*>|<[a-z_]+ name=\"[^\"]*\">", re.IGNORECASE)
+
+
+def limpar_valor(valor) -> str:
+    """Tira resto de marcação da ferramenta ('<parameter name="valor">null') e 'null' literal."""
+    texto = re.split(r"</parameter>|<parameter name=\"(?!valor)", str(valor or ""), maxsplit=1)[0]
+    texto = LIXO.sub(" ", texto)
+    texto = re.sub(r"\s+", " ", texto).strip(" \"'")
+    return "" if texto.lower() in ("null", "none", "nulo", "-", "?") else texto
+
+
 def lido(leitura, campo: str) -> str:
     """O que foi LIDO na folha. O que veio do nome da pasta não conta."""
     if campo in (leitura.campos_da_pasta or []):
         return ""
-    return ((leitura.lidos_originais or {}).get(campo) or leitura.valores.get(campo) or "").strip()
+    return limpar_valor((leitura.lidos_originais or {}).get(campo) or leitura.valores.get(campo) or "")
 
 
 def identificadores(leitura) -> set[str]:
@@ -152,9 +166,8 @@ class Grupo:
         if ids and ids & self.ids:
             return True
         meu_obra, meu_lugar = tokens_obra(self.obra), tokens_lugar(self.local)
-        lugar_ok = not lugar or not meu_lugar or _parecidos(lugar, meu_lugar, 0.5)
         if obra and meu_obra:
-            return _parecidos(obra, meu_obra, 0.6) and lugar_ok
+            return _parecidos(obra, meu_obra, 0.6)
         # Obra genérica ("Edifício de apartamentos") ou ilegível: decide o endereço.
         return bool(lugar and meu_lugar) and _parecidos(lugar, meu_lugar, 0.5)
 
@@ -194,8 +207,56 @@ def _ano(texto: str) -> str:
     return f"19{next(g for g in m.groups() if g)}" if m else ""
 
 
-def analisar(leituras: dict, proporcoes: dict | None = None) -> Analise:
-    """Agrupa as folhas do lote pelo carimbo. Não usa a pasta."""
+def _separar_por_base(analise: "Analise", leituras: dict, base: list[dict]) -> None:
+    """Obra igual em lugares diferentes (Praças SABESP: Vila Alpina × Vila Formosa) só separa
+    quando a BASE do fundo tem um projeto forte para cada lugar. Endereço mal lido não separa."""
+    novos: list[Grupo] = []
+    for g in analise.grupos:
+        por_codigo: dict[str, list[str]] = {}
+        resto: list[str] = []
+        for c in g.folhas:
+            l = leituras[c]
+            sub = Grupo(obra=lido(l, "projeto") or g.obra, local=lido(l, "endereco"), cliente=lido(l, "cliente"))
+            forte = (casar_com_base(sub, base).get("forte") or {}).get("codigo") if sub.local else None
+            (por_codigo.setdefault(forte, []) if forte else resto).append(c)
+        if len(por_codigo) <= 1:
+            novos.append(g)
+            continue
+        maior = max(por_codigo, key=lambda k: len(por_codigo[k]))
+        for codigo, folhas in por_codigo.items():
+            primeira = leituras[folhas[0]]
+            n = Grupo(obra=g.obra, local=lido(primeira, "endereco"), cliente=g.cliente,
+                      folhas=folhas + (resto if codigo == maior else []))
+            n.ids = {i for f in n.folhas for i in identificadores(leituras[f])}
+            novos.append(n)
+    analise.grupos = sorted(novos, key=lambda g: (-len(g.folhas), g.folhas[0]))
+
+
+def _juntar_miudos(analise: "Analise", base: list[dict]) -> None:
+    """Grupo de 1–2 folhas cuja obra parece a de um grupo maior e que a base não manda para
+    OUTRO projeto: é leitura ruim do mesmo projeto (EDIFICIO MARAMBIA, RUA BAHIA), junta."""
+    for g in sorted(analise.grupos, key=lambda g: len(g.folhas)):
+        if len(g.folhas) > 2 or g not in analise.grupos:
+            continue
+        maiores = [m for m in analise.grupos if m is not g and len(m.folhas) > len(g.folhas)]
+        alvo = next((m for m in sorted(maiores, key=lambda m: -len(m.folhas))
+                     if (_parecidos(tokens_obra(g.obra), tokens_obra(m.obra), 0.6)
+                         or (not tokens_obra(g.obra) and _parecidos(tokens_lugar(g.local), tokens_lugar(m.local), 0.5)))),
+                    None)
+        if alvo is None:
+            continue
+        meu = (casar_com_base(g, base).get("forte") or {}).get("codigo") if base else None
+        dele = (casar_com_base(alvo, base).get("forte") or {}).get("codigo") if base else None
+        if meu and meu != dele:
+            continue
+        alvo.folhas += g.folhas
+        alvo.ids |= g.ids
+        analise.grupos.remove(g)
+
+
+def analisar(leituras: dict, proporcoes: dict | None = None, base: list[dict] | None = None) -> Analise:
+    """Agrupa as folhas do lote pelo carimbo. Não usa a pasta. `base` (projetos do fundo) decide
+    se obra igual em lugares diferentes são projetos diferentes."""
     proporcoes = proporcoes or {}
     analise = Analise()
     for codigo in sorted(leituras):
@@ -250,6 +311,10 @@ def analisar(leituras: dict, proporcoes: dict | None = None) -> Analise:
             if juntou:
                 break
     analise.grupos.sort(key=lambda g: (-len(g.folhas), g.folhas[0]))
+    if base:
+        _separar_por_base(analise, leituras, base)
+    _juntar_miudos(analise, base or [])
+    analise.grupos.sort(key=lambda g: (-len(g.folhas), g.folhas[0]))
 
     # Obras diferentes no MESMO endereço (cliente igual ou não dito): perguntar, não decidir.
     vistos: set[int] = set()
@@ -260,6 +325,9 @@ def analisar(leituras: dict, proporcoes: dict | None = None) -> Analise:
         for j in range(i + 1, len(analise.grupos)):
             b = analise.grupos[j]
             if j in vistos or not _parecidos(tokens_lugar(a.local), tokens_lugar(b.local), 0.5):
+                continue
+            # Só obras de verdade diferentes, com 2+ folhas cada (variante de leitura não é obra).
+            if len(a.folhas) < 2 or len(b.folhas) < 2 or _parecidos(tokens_obra(a.obra), tokens_obra(b.obra), 0.6):
                 continue
             ca, cb = tokens_obra(a.cliente), tokens_obra(b.cliente)
             if ca and cb and not _parecidos(ca, cb, 0.5):
@@ -288,11 +356,25 @@ def _partes_base(titulo: str) -> tuple[list[str], list[str]]:
     return tokens_obra(nome), tokens_lugar(lugar)
 
 
+def _frequencia(base: list[dict]) -> dict[str, int]:
+    """Em quantos projetos do fundo cada palavra do NOME aparece (SABESP em 4, Clube em 6...)."""
+    freq: dict[str, int] = {}
+    for p in base or []:
+        for t in set(_partes_base(str(p.get("projeto") or p.get("titulo") or ""))[0]):
+            freq[t] = freq.get(t, 0) + 1
+    return freq
+
+
 def casar_com_base(grupo: Grupo, base: list[dict], pista_pasta: str = "") -> dict:
-    """{'forte': {...}} | {'candidatos': [...]} | {} (nenhum). `base` = projetos do fundo."""
+    """{'forte': {...}} | {'candidatos': [...]} | {} (nenhum). `base` = projetos do fundo.
+
+    Palavra comum no fundo (SABESP, Clube, Edifício X em vários) sozinha não basta: precisa
+    do lugar ou de uma palavra rara. Nome inteiro da base no carimbo, com palavra rara, é forte
+    mesmo que o endereço escrito seja outro (o carimbo às vezes traz o endereço do escritório)."""
     obra = tokens_obra(grupo.obra) + tokens_obra(grupo.cliente) + tokens_obra(pista_pasta)
     lugar_lido = tokens_lugar(grupo.local)
     lugar = lugar_lido + tokens_lugar(pista_pasta)
+    freq = _frequencia(base)
     achados = []
     for p in base or []:
         titulo = str(p.get("projeto") or p.get("titulo") or "")
@@ -300,10 +382,10 @@ def casar_com_base(grupo: Grupo, base: list[dict], pista_pasta: str = "") -> dic
         if not titulo or not codigo:
             continue
         nome_b, lugar_b = _partes_base(titulo)
-        acerto_nome = comuns(nome_b, obra) if nome_b else 0
+        batem = [t for t in set(nome_b) if any(_igual(t, u) for u in obra)]
+        raras = [t for t in batem if freq.get(t, 0) <= 2]
         acerto_lugar = comuns(lugar_b, lugar) if lugar_b else 0
-        nome_ok = bool(nome_b) and acerto_nome / len(set(nome_b)) >= 0.5
-        # Base sem nome distintivo ("Ed. de Apartamentos, Rua Mangueira"): o lugar decide.
+        nome_ok = bool(nome_b) and len(batem) / len(set(nome_b)) >= 0.5 and (raras or acerto_lugar)
         if not nome_ok and not (not nome_b and acerto_lugar):
             continue
         motivos = []
@@ -311,20 +393,24 @@ def casar_com_base(grupo: Grupo, base: list[dict], pista_pasta: str = "") -> dic
             motivos.append(f"nome '{titulo.split(',')[0].strip()}' no carimbo/pasta")
         if acerto_lugar:
             motivos.append("mesmo lugar")
-        achados.append({"codigo": codigo, "titulo": titulo, "nome": acerto_nome, "lugar": acerto_lugar,
+        achados.append({"codigo": codigo, "titulo": titulo, "nome": len(batem), "lugar": acerto_lugar,
+                        "inteiro": bool(nome_b) and len(batem) == len(set(nome_b)) and bool(raras),
                         "tem_lugar": bool(lugar_b), "motivos": motivos})
     if not achados:
         return {}
     achados.sort(key=lambda a: (-(a["nome"] + a["lugar"]), a["codigo"]))
     if len(achados) == 1:
         a = achados[0]
-        if a["tem_lugar"] and lugar_lido and not a["lugar"]:
-            return {"candidatos": achados}   # o nome bate, o lugar escrito é outro: perguntar
+        if a["tem_lugar"] and lugar_lido and not a["lugar"] and not a["inteiro"]:
+            return {"candidatos": achados}   # só parte do nome bate e o lugar escrito é outro: perguntar
         return {"forte": a}
     com_lugar = [a for a in achados if a["lugar"]]
     if len(com_lugar) == 1 and all(a["tem_lugar"] for a in achados if a is not com_lugar[0]):
         return {"forte": com_lugar[0]}   # Sabesp Vila Alpina × Vila Formosa: o lugar escrito decide
-    return {"candidatos": com_lugar if len(com_lugar) >= 2 else achados}
+    inteiros = [a for a in achados if a["inteiro"]]
+    if len(inteiros) == 1 and not com_lugar:
+        return {"forte": inteiros[0]}
+    return {"candidatos": (com_lugar if len(com_lugar) >= 2 else achados)[:5]}
 
 
 def pista_da_pasta(nome_pasta: str) -> str:
