@@ -42,6 +42,8 @@ from .esquema import CAMPOS
 _log = logging.getLogger("cv2.entrada")
 
 PROCESSANDO, PRONTO, ERRO, AGUARDANDO = "processando", "pronto", "erro", "aguardando"
+# Parada do serviço no meio do lote: não é defeito do lote, volta à fila no próximo início.
+CANCELADO = "cancelado antes da leitura"
 MARCADORES = ("manifesto.json", "info_projeto.json", "status.json")
 PASTAS_DE_FORMATO = {
     "tif", "tiff", "jpg", "jpeg", "dng", "pdf", "png", "raw", "preview", "previews",
@@ -791,7 +793,8 @@ class Recebedor:
         fila = []
         for unidade in descobrir(self.raiz_entrada):
             ultimo = feitos.get(unidade.chave, {})
-            if ultimo.get("status") in (PRONTO, ERRO) and ultimo.get("assinatura") == unidade.assinatura():
+            if (ultimo.get("status") in (PRONTO, ERRO) and ultimo.get("motivo") != CANCELADO
+                    and ultimo.get("assinatura") == unidade.assinatura()):
                 continue  # nada mudou desde a última vez
             fila.append(unidade)
         return fila
@@ -983,7 +986,7 @@ class Recebedor:
             return falhar(f"falha de disco/rede ao copiar: {erro}")
 
         if cancelar is not None and cancelar.is_set():
-            return falhar("cancelado antes da leitura")
+            return falhar(CANCELADO)
         if not arquivados:  # tudo o que veio já estava no acervo: nada a ler nem a decidir
             from . import transferir as mod_transferir
 

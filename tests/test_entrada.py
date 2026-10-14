@@ -437,6 +437,21 @@ class TestFalhasNaoApagam(Base):
         # Erro não volta sozinho enquanto nada mudar na pasta
         self.assertEqual(self.recebedor().pendentes(), [])
 
+    def test_cancelado_pela_parada_do_servico_volta_a_fila(self):
+        import threading
+
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
+        r = self.recebedor()
+        parar = threading.Event()
+        parar.set()
+        res = r.processar(r.pendentes()[0], cancelar=parar)
+        self.assertEqual(res.status, entrada.ERRO)
+        self.assertEqual(res.motivo, entrada.CANCELADO)
+        self.assertTrue((pasta / "JPG" / "scan 001.jpg").exists())
+        # Mesma assinatura, mas foi só o serviço parando: lê de novo no próximo início
+        [r2] = self.rodar()
+        self.assertEqual(r2.status, entrada.PRONTO)
+
     def test_fundo_desconhecido_nao_cria_nada(self):
         pasta = self.scan("F099 - Fulano", "Casa", n=1, formatos=("jpg",))
         [r] = self.rodar()
