@@ -1206,10 +1206,25 @@ class Recebedor:
         vistos_sha: dict[str, str] = {}
         ja_arquivados: list[tuple[Path, Path, str, str]] = []
         copia = Andamento(ctx.lote_id, "copiando", sum(len(d.versoes) for d in documentos), estado_vigia)
+        # Hash do original guardado por (tamanho, mtime): nova tentativa do mesmo lote
+        # não relê 1050 TIFF pela rede só para recalcular o que já sabia (Golombeck2, 15/10).
+        hashes_caminho = catalogacao / "hashes_origem.json"
+        hashes: dict = ler_json(hashes_caminho, {}) or {}
+
+        def sha_origem(arquivo: Path) -> str:
+            info = arquivo.stat()
+            chave, assinatura_arq = origem_rel(arquivo), [info.st_size, info.st_mtime_ns]
+            guardado = hashes.get(chave)
+            if isinstance(guardado, list) and len(guardado) == 3 and guardado[:2] == assinatura_arq:
+                return guardado[2]
+            soma = sha256(arquivo)
+            hashes[chave] = [*assinatura_arq, soma]
+            return soma
+
         try:
             for doc in documentos:
                 copia.passo(len(doc.versoes))
-                shas = {v: sha256(v) for v in doc.versoes}
+                shas = {v: sha_origem(v) for v in doc.versoes}
                 if all(s in no_acervo for s in shas.values()):
                     ja_arquivados += [(v, no_acervo[sh], no_acervo[sh].stem, sh) for v, sh in shas.items()]
                     continue
@@ -1255,8 +1270,10 @@ class Recebedor:
                                              "destino": self._relativo(destino), "codigo": codigo_doc,
                                              "tipo": versao.suffix.lower().lstrip("."), "sha256": soma})
             gravar_json(mapa_caminho, mapa)
+            gravar_json(hashes_caminho, hashes)
         except OSError as erro:
             gravar_json(mapa_caminho, mapa)
+            gravar_json(hashes_caminho, hashes)
             return falhar(f"falha de disco/rede ao copiar: {erro}")
 
         if cancelar is not None and cancelar.is_set():
@@ -1297,19 +1314,35 @@ class Recebedor:
         preparo_caminho = catalogacao / "preparo.json"
         preparos: dict = ler_json(preparo_caminho, {}) or {}
         preparo = Andamento(ctx.lote_id, "preparando", len(por_codigo), estado_vigia)
+        nome_na_entrada = {destino: origem_rel(o) for o, destino, _c, _s in arquivados}
+        corrompidos: list[str] = []
         for codigo_doc, versoes in por_codigo.items():
             preparo.passo()
             leitura_jpg = cache / f"{codigo_doc}.jpg"
             if codigo_doc in preparos and leitura_jpg.exists():
                 continue
             melhor = formatos.Documento(codigo_doc, versoes).para_ler
-            bruta = formatos.imagem_de_leitura(melhor, bruta_dir / f"{codigo_doc}.jpg")
-            if bruta is None:
+            try:
+                bruta = formatos.imagem_de_leitura(melhor, bruta_dir / f"{codigo_doc}.jpg")
+                prep = mod_preparo.preparar(bruta, melhor, leitura_jpg, preview_dir / f"{codigo_doc}.jpg") \
+                    if bruta is not None else None
+            except (OSError, ValueError, SyntaxError) as erro:
+                if isinstance(erro, OSError) and erro.errno is not None:
+                    raise  # disco/rede de verdade: o vigia interrompe a rodada e tenta depois
+                # Imagem quebrada ("broken data stream…"): antes subia como OSError, o vigia
+                # achava que era o QNAP e recomeçava o lote para sempre (Golombeck2, 15/10).
+                _log.error("Lote %s: %s não abre (%s)", ctx.lote_id, nome_na_entrada.get(melhor, melhor.name), erro)
+                bruta, prep = None, None
+                detalhe_erro = f": {erro}"
+            else:
+                detalhe_erro = ""
+            if bruta is None or prep is None:
+                origem = nome_na_entrada.get(melhor, melhor.name)
+                corrompidos.append(origem)
                 erros_lote.append({"arquivo": codigo_doc, "categoria": "arquivo corrompido",
-                                   "gravidade": "corrigir", "origem": "CAMP Vision",
-                                   "detalhe": f"não abri {melhor.name} para leitura"})
+                                   "gravidade": "bloqueia", "origem": "CAMP Vision",
+                                   "detalhe": f"não abri {origem} para leitura{detalhe_erro}"})
                 continue
-            prep = mod_preparo.preparar(bruta, melhor, leitura_jpg, preview_dir / f"{codigo_doc}.jpg")
             preparos[codigo_doc] = {
                 "md5": prep.md5, "hash_perceptual": prep.hash_perceptual,
                 "rotacao": prep.orientacao.rotacao, "espelhada": prep.orientacao.espelhada,
@@ -1320,6 +1353,12 @@ class Recebedor:
             }
             bruta.unlink(missing_ok=True)
         gravar_json(preparo_caminho, preparos)
+        if corrompidos:
+            # Para antes de gastar API. Fica em erro (não volta sozinho) até o arquivo
+            # ser trocado ou tirado da entrada; o que já foi preparado não é refeito.
+            lista = ", ".join(corrompidos[:5]) + (f" e mais {len(corrompidos) - 5}" if len(corrompidos) > 5 else "")
+            return falhar(f"{len(corrompidos)} arquivo(s) corrompido(s), não abrem: {lista} — "
+                          "troque ou tire da entrada e use --refazer-lote")
 
         # JPG do acervo na orientação certa (giro/espelho decidido com certeza pelo
         # texto); o master TIF/DNG/PDF nunca é tocado. Antes do EXIF, que vem depois.

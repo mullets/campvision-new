@@ -783,6 +783,14 @@ class Vigia:
             try:
                 r = recebedor.processar(unidade, self.estado, self.cancelar)
             except OSError as erro:
+                if erro.errno is None:
+                    # Sem código de sistema não é disco/rede: é arquivo ruim (ex.: imagem
+                    # "broken data stream"). Tratar como QNAP recomeçava o lote para sempre.
+                    _log.error("Lote %s falhou: %s", unidade.relativo, erro)
+                    from . import entrada as _e
+                    _e.Estado(self.pasta_estado).anotar(unidade.chave, _e.ERRO, motivo=str(erro)[:300],
+                                                       assinatura=unidade.assinatura())
+                    continue
                 # QNAP somente leitura, cheio ou caído: não derruba o serviço
                 # (antes reiniciava em loop). Para a rodada e tenta de novo depois.
                 self.estado.situacao = "QNAP com problema"
