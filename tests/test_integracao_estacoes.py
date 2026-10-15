@@ -196,5 +196,33 @@ class TestManifesto(Base):
         self.assertTrue(entrada.conferir_manifesto(unidade))
 
 
+class TestHeartbeat(Base):
+    def test_situacao_vira_vocabulario_do_painel(self):
+        casos = {"copiando 7 de 38": "processando", "preparando 3 de 9": "processando",
+                 "gravando metadados (12)": "processando", "relendo": "processando",
+                 "consolidando": "processando", "montando planilha do acervo": "processando",
+                 "iniciando": "vigiando", "vigiando": "vigiando", "QNAP com problema": "erro",
+                 "pasta indisponível": "pasta indisponível",
+                 "serviço parado? (sem notícia há 9 min)": "erro", "algo novo": "processando"}
+        for situacao, esperado in casos.items():
+            self.assertEqual(vigia.estado_do_painel(situacao), esperado, situacao)
+            self.assertIn(vigia.estado_do_painel(situacao), vigia.ESTADOS_DO_PAINEL)
+
+    def test_heartbeat_leva_detalhe_e_estado_valido(self):
+        v = vigia.Vigia(self.config, None, self.estado, painel=self.painel)
+        v.estado.situacao = "copiando 7 de 38"
+        v._talvez_heartbeat(forcar=True)
+        hb = self.painel.heartbeats[-1]
+        self.assertEqual((hb["estado"], hb["detalhe"]), ("processando", {"situacao": "copiando 7 de 38"}))
+
+    def test_falha_de_heartbeat_e_logada_em_warning(self):
+        self.painel.heartbeat = lambda dados: False
+        self.painel.ultimo_erro = "POST /api/estacoes/heartbeat: HTTP 400"
+        v = vigia.Vigia(self.config, None, self.estado, painel=self.painel)
+        with self.assertLogs("cv2", level="WARNING") as logs:
+            v._talvez_heartbeat(forcar=True)
+        self.assertIn("Heartbeat", logs.output[0])
+
+
 if __name__ == "__main__":
     unittest.main()

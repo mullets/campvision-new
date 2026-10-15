@@ -1,6 +1,6 @@
 {
   "versao": 2,
-  "gerado_em": "2026-10-13T17:35:14-03:00",
+  "gerado_em": "2026-10-15T06:06:12+00:00",
   "teste": false,
   "projeto_codigo": "F026-P0001",
   "projeto_nome": "CASA DA PRAIA",
@@ -122,8 +122,8 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-13-01+f8c8a69",
-      "versao_prompt": "prancha:48f8c530",
+      "versao_cv2": "2026-10-15-01+bfb56b2",
+      "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
         "obra": "CASA DA PRAIA",
@@ -239,8 +239,8 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-13-01+f8c8a69",
-      "versao_prompt": "prancha:48f8c530",
+      "versao_cv2": "2026-10-15-01+bfb56b2",
+      "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
         "obra": "CASA DA PRAIA",
@@ -356,8 +356,8 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-13-01+f8c8a69",
-      "versao_prompt": "prancha:48f8c530",
+      "versao_cv2": "2026-10-15-01+bfb56b2",
+      "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
         "obra": "CASA DA PRAIA",
@@ -473,8 +473,8 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-13-01+f8c8a69",
-      "versao_prompt": "prancha:48f8c530",
+      "versao_cv2": "2026-10-15-01+bfb56b2",
+      "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
         "obra": "CASA DA PRAIA",
@@ -526,18 +526,18 @@
     "F026-P0001-1972-S01-D00002 é quase de F026-P0001-1972-S01-D00001 — publicar F026-P0001-1972-S01-D00001"
   ],
   "execucao": {
-    "versao_cv2": "2026-10-13-01+f8c8a69",
-    "contrato": "2.2",
+    "versao_cv2": "2026-10-15-01+bfb56b2",
+    "contrato": "2.3",
     "modelo": "claude-sonnet-5",
     "versao_prompt": {
-      "prancha": "48f8c530",
-      "fotografia": "554fca8b",
+      "prancha": "3349d9da",
+      "fotografia": "da623ca9",
       "textual": "b3df79d7"
     },
     "chamadas": 2,
     "tokens_entrada": 2000,
     "tokens_saida": 200,
     "custo_usd": 0.006,
-    "tempo_s": 3.6
+    "tempo_s": 0.3
   }
 }

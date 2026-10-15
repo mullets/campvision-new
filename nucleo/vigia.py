@@ -160,6 +160,28 @@ def escrever_status(caminho: Path, status: str, extra: dict | None = None) -> No
 
 
 MARCADORES_DE_PROJETO = ("status.json", "info_projeto.json")
+
+# Vocabulário de `estado` que o painel aceita no heartbeat (contrato C3).
+ESTADOS_DO_PAINEL = ("ocioso", "capturando", "finalizando", "backup", "processando",
+                     "erro", "vigiando", "pasta indisponível")
+
+
+def estado_do_painel(situacao: str) -> str:
+    """Situação interna do vigia (texto livre: "copiando 7 de 38") -> vocabulário do painel."""
+    texto = (situacao or "").strip().lower()
+    if texto in ESTADOS_DO_PAINEL:
+        return texto
+    if texto.startswith(("pasta indispon", "pasta indispon\u00edvel")):
+        return "pasta indisponível"
+    if texto.startswith(("iniciando", "vigiando", "aguardando")):
+        return "vigiando"
+    if texto.startswith(("qnap com problema", "servi\u00e7o parado", "erro", "falha", "limite de custo")):
+        return "erro"
+    if texto.startswith(("copiando", "preparando", "gravando", "relendo", "consolidando",
+                         "montando", "processando", "lendo", "conferindo")):
+        return "processando"
+    return "processando"  # fazendo algo que ainda não tem nome: nunca um texto que o painel recusa
+
 # Quanto maior, melhor a pasta de imagens. Preview/JPG ganha do arquivo
 
 # Palavras que denunciam a MATRIZ arquivística — a mesma prancha em TIFF, que
@@ -862,10 +884,12 @@ class Vigia:
             "entrada": bool(self.config.pasta_entrada) and Path(self.config.pasta_entrada).is_dir(),
             "acervo": bool(self.config.raiz_final) and Path(self.config.raiz_final).is_dir(),
         }
-        self.painel.heartbeat({
+        enviado = self.painel.heartbeat({
             "estacao_id": self.config.estacao_id, "tipo_estacao": "campvision",
             "app": "CAMP Vision 2", "versao": VERSAO_BUILD,
-            "estado": self.estado.situacao, "projeto": self.estado.projeto_atual,
+            "estado": estado_do_painel(self.estado.situacao),
+            "detalhe": {"situacao": self.estado.situacao},
+            "projeto": self.estado.projeto_atual,
             "progresso": {"feitos": self.estado.concluidos_no_projeto,
                           "total": self.estado.total_no_projeto},
             "fila": self.estado.fila,
@@ -875,6 +899,9 @@ class Vigia:
             "contrato": CONTRATO,
             "quarentena": self._estado_quarentena(),
         })
+        if enviado is False:
+            _log.warning("Heartbeat não aceito pelo painel (%s): %s", self.painel.url,
+                         getattr(self.painel, "ultimo_erro", "") or "sem detalhe")
         self.painel.reenviar()
 
     def _batimento(self) -> None:
@@ -884,7 +911,7 @@ class Vigia:
                 self._talvez_heartbeat()
                 self._salvar_estado()
             except Exception as erro:  # noqa: BLE001 - nunca derruba o vigia
-                _log.debug("batimento: %s", erro)
+                _log.warning("batimento: %s", erro)
             self.cancelar.wait(5)
 
     def atualizar_planilha_do_acervo(self) -> None:

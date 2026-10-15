@@ -43,6 +43,9 @@ class PainelFalso:
         return True
 
     def heartbeat(self, dados):
+        # Valida o que o painel valida (C3): `estado` só no vocabulário dele.
+        assert dados.get("estado") in vigia.ESTADOS_DO_PAINEL, f"estado fora do vocabulário: {dados.get('estado')!r}"
+        assert isinstance(dados.get("detalhe"), dict) and "situacao" in dados["detalhe"]
         self.heartbeats.append(dados)
         return True
 

@@ -3,8 +3,11 @@
   "estacao_id": "campvision2",
   "tipo_estacao": "campvision",
   "app": "CAMP Vision 2",
-  "versao": "2026-10-13-01",
+  "versao": "2026-10-15-01",
   "estado": "vigiando",
+  "detalhe": {
+   "situacao": "vigiando"
+  },
   "projeto": "",
   "progresso": {
    "feitos": 2,
@@ -21,7 +24,7 @@
    "entrada": true,
    "acervo": true
   },
-  "contrato": "2.2",
+  "contrato": "2.3",
   "quarentena": {
    "arquivos": 2,
    "gb": 0.0,
@@ -75,7 +78,7 @@
    "codigo": "F026-P0001",
    "pasta": "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - CASA DA PRAIA",
    "status": "pronto",
-   "em": "2026-10-13T17:35:14"
+   "em": "2026-10-15T06:06:12"
   }
  },
  "iniciado": {

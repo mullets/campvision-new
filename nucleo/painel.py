@@ -128,7 +128,10 @@ class Painel:
         return 200 <= status < 300
 
     def heartbeat(self, dados: dict) -> bool:
-        status, _ = self._chamar("POST", "/api/estacoes/heartbeat", dados)
+        status, resposta = self._chamar("POST", "/api/estacoes/heartbeat", dados)
+        if not 200 <= status < 300:
+            _log.warning("Heartbeat recusado (%s): %s", status or "sem conexão",
+                         resposta if resposta else self.ultimo_erro)
         return 200 <= status < 300
 
     def aviso(self, codigo: str, pasta: str, status_projeto: str) -> bool:
