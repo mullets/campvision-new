@@ -417,7 +417,7 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
 
     # Série: manifesto, senão a pasta de material no caminho.
     ctx.serie = _texto(dados, "serie").upper()
-    if not re.fullmatch(r"S(0[1-7]|99)", ctx.serie):
+    if not re.fullmatch(r"S(0[1-8]|99)", ctx.serie):
         ctx.serie = estrutura.serie_do_texto(_texto(dados, "tipo_material"))
     restantes: list[str] = []
     pulou_fundo = False

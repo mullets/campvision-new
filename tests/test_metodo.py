@@ -132,3 +132,18 @@ class TestBacktest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSerieS08(unittest.TestCase):
+    """CAMP-047: S08 = Redesenhos (S07 = Publicações)."""
+
+    def test_s08_redesenhos(self):
+        from nucleo import estrutura
+        self.assertEqual(estrutura.SERIES["S08"], "08 - Redesenhos")
+        self.assertEqual(estrutura.SERIES["S07"], "07 - Publicações")
+        self.assertEqual(estrutura.serie_do_texto("08 - Redesenhos"), "S08")
+        self.assertEqual(estrutura.serie_do_texto("Redesenhos do projeto"), "S08")
+        self.assertEqual(estrutura.serie_do_texto("S08"), "S08")
+        self.assertEqual(estrutura.serie_do_texto("07 - Publicações"), "S07")
+        self.assertEqual(estrutura.serie_do_texto("01 - Desenhos e pranchas"), "S01")
+        self.assertTrue(estrutura.CODIGO_DOCUMENTO.match("F029-P0001-1980-S08-D00001"))

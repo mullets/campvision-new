@@ -112,7 +112,7 @@ O repositório das estações Windows não está neste projeto. O que o vigia es
 - **Marca de fim:** um `manifesto.json` (qualquer conteúdo) ou um `status.json` com `status: "enviado_windows"` (ou `etapa: "enviado_windows"`: as duas chaves valem desde o contrato 2.3). Qualquer outro status conta como "sem marca".
 - **Campos lidos** do `manifesto.json`, que valem sobre o `info_projeto.json`:
   - `fundo_codigo` ou `fundo`;
-  - `serie` (só `S01`–`S07`, `S99`) ou `tipo_material`;
+  - `serie` (só `S01`–`S08`, `S99`) ou `tipo_material`;
   - `codigo` ou `projeto_codigo` (um `F0xx-P0xxx` completo vale como oficial);
   - `nome`, `titulo` ou `projeto`; `ano`; `cidade`;
   - `operador`; `operador_email` ou `email`; `estacao`; `tipo_estacao`;
@@ -347,7 +347,7 @@ Em todos os casos, **nada é apagado da entrada**. O lote não volta sozinho enq
 
 ### 5.2 Série
 
-Séries: S01 Desenhos e pranchas · S02 Documentos textuais · S03 Fotografias · S04 Negativos · S05 Slides · S06 Materiais e especificações · S07 Publicações · S99 Não identificado.
+Séries: S01 Desenhos e pranchas · S02 Documentos textuais · S03 Fotografias · S04 Negativos · S05 Slides · S06 Materiais e especificações · S07 Publicações · S08 Redesenhos · S99 Não identificado.
 
 Quando a estação não diz a série (5.1, item 4), três etapas corrigem:
 
@@ -652,7 +652,7 @@ Base `painel_url`, cabeçalho `X-Camp-Token` (de `CAMP_PAINEL_TOKEN`), timeout 8
 4. Etapa pelo `status`: pronto (e campvision_concluido, sem status) → **revisão**; processando (e enviado_windows) → processando; erro → erro; desconhecido → revisão com aviso. Um aviso "processando" devolve o lote para processando, a não ser que esteja publicado ou em rascunho.
 5. **Importa as folhas** só se a etapa é revisão, existe pacote e **o lote do painel não foi aprovado**.
 6. Na importação:
-   - só aceita séries **S01 a S06** (S07 e S99 são recusadas como problema);
+   - aceita séries **S01 a S08** e S99 (S07 Publicações, S08 Redesenhos; decisão CAMP-047);
    - **não mexe** em folha já revisada por uma pessoa nem em folha no site;
    - número D usado por **outro** lote → abre a decisão "lote colide" (adicionar ao fim, ignorar ou substituir);
    - número D já usado por outra folha **do mesmo lote** (ex.: a folha mudou de série, S01 → S03) → **recusa** ("o número D… já é de …");
@@ -983,7 +983,7 @@ Antes do recebimento pelo `100 - Scanners`, o vigia trabalhava direto numa pasta
 
 Encontrados na auditoria de 14/10 (nenhum foi corrigido ainda, salvo indicação):
 
-1. **Painel recusa folha que mudou de série** (S01 → S03 com o mesmo D, mesmo lote). Correção no `camp-painel` (`importador_lote.py`): renomear a folha existente do mesmo lote em vez de recusar. Caso do SESI Marília (F009-P0060).
+2. **Painel aceita S01–S08 e S99** (CAMP-047, segunda leva; S08 Redesenhos depende da migração do painel).
 2. **Painel aceita só S01–S06.** Folhas S07 (Publicações) e S99 (Não identificado) não entram.
 3. **Lote do Mac com várias séries** recebe uma série só.
 4. **Operador e estação do Mac não chegam:** o vigia lê só `manifesto.json`/`info_projeto.json`; o Mac usa `info_lote` (e `estacao_tipo` em vez de `tipo_estacao`).
