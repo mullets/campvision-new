@@ -19,6 +19,7 @@ projeto fica `erro` com o motivo. Contrato com o painel: docs/contrato-painel.md
 from __future__ import annotations
 
 import dataclasses
+import fnmatch
 import hashlib
 import json
 import logging
@@ -36,15 +37,32 @@ from . import estrutura, formatos, fundos as mod_fundos, info_projeto as mod_inf
 from . import preparo as mod_preparo
 from . import triagem as mod_triagem
 from . import metadados as mod_metadados
+from .atomico import gravar_json as _gravar_json_atomico
 from .config import VERSAO_BUILD, Config
 from .esquema import CAMPOS
 
 _log = logging.getLogger("cv2.entrada")
 
 PROCESSANDO, PRONTO, ERRO, AGUARDANDO = "processando", "pronto", "erro", "aguardando"
+DESCARTADO = "descartado"  # o painel respondeu 410 à reserva: o lote não vale mais (C7)
 # Parada do serviço no meio do lote: não é defeito do lote, volta à fila no próximo início.
 CANCELADO = "cancelado antes da leitura"
 MARCADORES = ("manifesto.json", "info_projeto.json", "status.json", "status_mac.json")
+# O Mac grava um info_lote_AAAAMMDD-HHMMSS_mac.json por lote: é marcador (metadado
+# da estação), não arquivo do lote — não vai para o acervo nem gera aviso de formato.
+_INFO_LOTE = "info_lote_*_mac.json"
+MARCAS_DE_FIM = {"enviado_windows", "enviado_mac"}
+
+
+def e_marcador(nome: str) -> bool:
+    return nome in MARCADORES or fnmatch.fnmatch(nome, _INFO_LOTE)
+
+
+def marcadores_da(pasta: Path) -> list[Path]:
+    """Os marcadores que existem na pasta (inclui info_lote_*_mac.json)."""
+    achados = [pasta / m for m in MARCADORES if (pasta / m).exists()]
+    achados += sorted(pasta.glob(_INFO_LOTE))
+    return achados
 PASTAS_DE_FORMATO = {
     "tif", "tiff", "jpg", "jpeg", "dng", "pdf", "png", "raw", "preview", "previews",
     "alta", "baixa", "alta resolucao", "baixa resolucao", "matriz", "master",
@@ -87,10 +105,7 @@ def sha256(caminho: Path) -> str:
 
 def gravar_json(caminho: Path, dados) -> None:
     """Temporário + rename: quem lê nunca pega o arquivo pela metade."""
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    temporario = caminho.with_name(f".{caminho.name}.tmp")
-    temporario.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporario, caminho)
+    _gravar_json_atomico(caminho, dados)
 
 
 def ler_json(caminho: Path, padrao=None):
@@ -113,7 +128,7 @@ class Unidade:
         return sorted(
             p for p in self.pasta.rglob("*")
             if p.is_file() and not any(x.startswith(".") for x in p.relative_to(self.pasta).parts)
-            and p.name not in MARCADORES
+            and not e_marcador(p.name)
         )
 
     def assinatura(self) -> str:
@@ -156,11 +171,11 @@ def descobrir(raiz: Path, profundidade_maxima: int = 6) -> list[Unidade]:
             _log.warning("Não consegui listar %s: %s", pasta, erro)
             return
         tem_arquivo = any(
-            f.is_file() and not f.name.startswith(".") and f.name not in MARCADORES
+            f.is_file() and not f.name.startswith(".") and not e_marcador(f.name)
             for f in filhos
         )
         subpastas = [f for f in filhos if f.is_dir() and not f.name.startswith((".", "_"))]
-        if tem_arquivo or any((pasta / m).exists() for m in MARCADORES) or (
+        if tem_arquivo or bool(marcadores_da(pasta)) or (
             subpastas and all(_e_pasta_de_formato(f.name) for f in subpastas)
         ):
             if pasta != raiz:
@@ -174,16 +189,22 @@ def descobrir(raiz: Path, profundidade_maxima: int = 6) -> list[Unidade]:
     return achadas
 
 
+def _marca_de_fim(pasta: Path) -> bool:
+    """status.json/status_mac.json com `status` OU `etapa` = enviado_windows/enviado_mac (C1)."""
+    for nome in ("status.json", "status_mac.json"):
+        dados = ler_json(pasta / nome, {})
+        if isinstance(dados, dict) and (
+                {str(dados.get("status", "")), str(dados.get("etapa", ""))} & MARCAS_DE_FIM):
+            return True
+    return False
+
+
 def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     """A estação terminou de mandar?"""
     arquivos = unidade.arquivos()
     if not arquivos:
         return False, "vazia"
-    status = ler_json(unidade.pasta / "status.json", {})
-    status_mac = ler_json(unidade.pasta / "status_mac.json", {})
-    marcada = (unidade.pasta / "manifesto.json").exists() or (
-        isinstance(status, dict) and status.get("status") == "enviado_windows"
-    ) or (isinstance(status_mac, dict) and status_mac.get("etapa") == "enviado_mac")
+    marcada = (unidade.pasta / "manifesto.json").exists() or _marca_de_fim(unidade.pasta)
     espera = config.espera_estabilidade_segundos if marcada else config.entrada_quieto_minutos * 60
     limite = time.time() - espera
     for arquivo in arquivos:
@@ -200,6 +221,59 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     if esperada is not None and len(arquivos) != esperada:
         return False, f"contagem {len(arquivos)} de {esperada}"
     return True, ""
+
+
+def serie_do_arquivo(arquivo: Path, unidade: Unidade, padrao: str) -> str:
+    """Série pela pasta de material (`03 - Fotografias/...`) dentro do lote; senão `padrao`."""
+    try:
+        partes = arquivo.relative_to(unidade.pasta).parts[:-1]
+    except ValueError:
+        return padrao
+    for parte in partes:
+        if _e_pasta_de_material(parte):
+            achada = estrutura.serie_do_texto(parte)
+            if achada:
+                return achada
+    return padrao
+
+
+def conferir_manifesto(unidade: Unidade) -> list[str]:
+    """Confere o manifesto.json das estações (C1): contagem, tamanho e SHA-256.
+
+    Devolve os problemas (lista vazia = íntegro ou sem o que conferir). Só LÊ:
+    quem chama decide parar o lote sem copiar nem apagar nada.
+    """
+    manifesto = ler_json(unidade.pasta / "manifesto.json", {})
+    if not isinstance(manifesto, dict) or not manifesto:
+        return []
+    problemas: list[str] = []
+    arquivos = unidade.arquivos()
+    esperada = _contagem_esperada(unidade)
+    if esperada is not None and len(arquivos) != esperada:
+        problemas.append(f"manifesto diz {esperada} arquivo(s); a pasta tem {len(arquivos)}")
+    listados = manifesto.get("arquivos")
+    if isinstance(listados, list):
+        relativos = {a.relative_to(unidade.pasta).as_posix(): a for a in arquivos}
+        for item in listados:
+            if not isinstance(item, dict) or not item.get("caminho"):
+                continue
+            caminho = str(item["caminho"]).replace("\\", "/").strip("/")
+            alvo = relativos.get(caminho) or next(
+                (a for rel, a in relativos.items() if rel.endswith("/" + caminho) or caminho.endswith("/" + rel)), None)
+            if alvo is None:
+                problemas.append(f"arquivo do manifesto não chegou: {caminho}")
+                continue
+            try:
+                tamanho = alvo.stat().st_size
+                if item.get("tamanho") not in (None, "") and int(item["tamanho"]) != tamanho:
+                    problemas.append(f"tamanho diferente do manifesto em {caminho}: {tamanho} != {item['tamanho']}")
+                    continue
+                esperado = str(item.get("sha256") or "").lower()
+                if esperado and sha256(alvo) != esperado:
+                    problemas.append(f"arquivo corrompido (SHA-256 diferente do manifesto): {caminho}")
+            except (OSError, ValueError, TypeError) as erro:
+                problemas.append(f"não consegui conferir {caminho}: {erro}")
+    return problemas
 
 
 def _contagem_esperada(unidade: Unidade) -> int | None:
@@ -231,6 +305,7 @@ class Contexto:
     lote_id: str = ""
     teste: bool = False
     serie_deduzida: bool = False
+    series: list[str] = field(default_factory=list)  # lote com mais de uma série (Mac): a de cada arquivo vem da pasta
     problemas: list[str] = field(default_factory=list)
 
     def como_dict(self) -> dict:
@@ -256,6 +331,20 @@ def lote_mac(pasta: Path) -> dict:
     return {}
 
 
+def dados_do_mac(mac: dict) -> dict:
+    """O que o info_lote do Mac acrescenta ao contexto (C1): operador, estação, tipo, séries."""
+    saida: dict = {}
+    for destino, origens in (("operador", ("operador",)), ("estacao", ("estacao_id", "estacao")),
+                             ("tipo_estacao", ("estacao_tipo", "tipo_estacao")),
+                             ("series", ("series",)),
+                             ("quantidade_documentos", ("quantidade_documentos",))):
+        for origem in origens:
+            if mac.get(origem) not in (None, "", []):
+                saida[destino] = mac[origem]
+                break
+    return saida
+
+
 def codigo_do_mac(dados: dict) -> str:
     """F009-P0060 quando o Mac escolheu um projeto que JÁ existe no painel.
 
@@ -278,7 +367,7 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     mac = lote_mac(unidade.pasta)
     bruto_info = mod_info.ler_bruto(unidade.pasta)
     traduzido = mod_info.ler(unidade.pasta)
-    dados = {**{k.split(".")[-1]: v for k, v in bruto_info.items()}, **manifesto}
+    dados = {**{k.split(".")[-1]: v for k, v in bruto_info.items()}, **dados_do_mac(mac), **manifesto}
 
     partes = [p for p in unidade.relativo.parts if not _e_pasta_de_formato(p)]
 
@@ -286,7 +375,7 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     # Fundo: pela TABELA, nunca chutado. O caminho (F022 - MSL - ...) e o campo
     # explícito do manifesto/info são duas fontes; se só uma identifica, vale ela;
     # se as duas identificam fundos DIFERENTES, é conflito e o lote para.
-    explicito = _texto(dados, "fundo_codigo", "fundo")
+    explicito = _texto(dados, "fundo_codigo", "codigo_fundo", "fundo")
     pelo_explicito = tabela.identificar(explicito) if explicito else None
     pelo_caminho = None
     for parte in partes:
@@ -320,12 +409,18 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
         # A estação disse a série: o Mac manda `series` no info_lote e a pasta de
         # material fica DENTRO do lote (P0060 - SESI/03 - Fotografias/...). Vale
         # ela; adivinhar pela imagem pôs 14 fotos claras em S01 (SESI, 14/10).
-        declaradas = {estrutura.serie_do_texto(str(s)) for s in (mac.get("series") or [])} - {""}
+        declaradas = {estrutura.serie_do_texto(str(s)) for s in (dados.get("series") or [])
+                      if isinstance(dados.get("series"), list)} - {""}
         if not declaradas and unidade.pasta.is_dir():
             declaradas = {estrutura.serie_do_texto(f.name) for f in unidade.pasta.iterdir()
                           if f.is_dir() and _e_pasta_de_material(f.name)} - {""}
         if len(declaradas) == 1:
-            ctx.serie = declaradas.pop()
+            ctx.serie = next(iter(declaradas))
+        elif len(declaradas) > 1:
+            # Lote misto (negativos + slides + fotos): cada arquivo leva a série da sua
+            # pasta de material (serie_do_arquivo); ctx.serie só cobre o que ficar solto.
+            ctx.series = sorted(declaradas)
+            ctx.serie = ctx.series[0]
     if not ctx.serie:
         # Sem pasta de material nem manifesto: a estação de fotografia/VueScan
         # manda foto; o resto (Contex, Universal) manda prancha. "99 - Não
@@ -352,6 +447,13 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     # Número P sozinho ("P0001", ou a pasta "P0001 - EXPO Brasil...") NÃO é
     # oficial (Rafa, 09/10): o código vem da reserva no painel. O número da
     # estação vira pista — vai para o painel na reserva e fica no lote.
+    if not ctx.codigo and not ctx.p_estacao:
+        # O P que a estação escreveu: numero_projeto (info/info_lote) ou identificacao_original.
+        for candidato in (_texto(dados, "numero_projeto"), _texto(dados, "identificacao_original")):
+            achado = re.match(r"^\s*P(\d{4})\b", candidato or "", re.IGNORECASE)
+            if achado:
+                ctx.p_estacao = f"P{achado.group(1)}"
+                break
     if not ctx.codigo and not ctx.p_estacao:
         for candidato in [nome, *reversed(restantes)]:
             achado = re.match(r"^\s*P(\d{4})\b", candidato or "", re.IGNORECASE)
@@ -381,9 +483,10 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     ctx.cidade = _texto(dados, "cidade") or traduzido.get("cidade", "")
     ctx.operador = _texto(dados, "operador")
     ctx.operador_email = _texto(dados, "operador_email", "email")
-    ctx.estacao = _texto(dados, "estacao")
-    ctx.tipo_estacao = _texto(dados, "tipo_estacao")
-    ctx.enviado_em = _texto(dados, "enviado_em", "horario", "data_envio")
+    ctx.estacao = _texto(dados, "estacao", "estacao_id") or traduzido.get("estacao", "")
+    ctx.tipo_estacao = _texto(dados, "tipo_estacao", "estacao_tipo") or traduzido.get("tipo_estacao", "")
+    ctx.enviado_em = (_texto(dados, "enviado_em", "horario", "data_envio", "finalizado_em")
+                      or traduzido.get("enviado_em", ""))
     ctx.lote_id = estrutura.limpar(
         _texto(dados, "lote_id", "lote")
         or f"{datetime.now():%Y%m%d-%H%M%S}-" + "_".join(unidade.relativo.parts[-3:]), 100
@@ -462,6 +565,53 @@ def conferir_exif(itens: list[tuple[Path, str]]) -> set[Path]:
         Path(d["SourceFile"]) for d in dados
         if str(d.get("Identifier", "")) == esperado.get(d.get("SourceFile", ""))
     }
+
+
+# ---- EXIF retomável (CAMP-010)
+
+PASSO_EXIF = "exif"  # estado local: o lote parou no meio da gravação de metadados
+EXIF_PENDENTE = "exif_pendente.json"
+
+
+def campos_do_exif(ctx: Contexto, codigo_doc: str, leitura, nome: str, nome_original: str) -> dict:
+    """Os campos que vão para o EXIF/XMP de um documento (mesmos no lote e na retomada)."""
+    campos = {c.rotulo: (leitura.valores.get(c.nome, "") if leitura else "") for c in CAMPOS}
+    campos.update({
+        "_credito": ctx.fundo.credito, "_codigo": codigo_doc, "_fundo": ctx.fundo.codigo,
+        "_autor": ctx.fundo.nome,
+        "_serie": codigo_doc.split("-")[3] if codigo_doc.count("-") >= 4 else ctx.serie,
+        "_operador": ctx.operador, "_estacao": ctx.estacao,
+        "_digitalizado_em": ctx.enviado_em, "_nome_original": nome_original,
+    })
+    if not campos.get("Projeto"):
+        campos["Projeto"] = nome
+    return campos
+
+
+def marcar_exif_pendente(catalogacao: Path, lote_id: str, destinos: list[Path], raiz_final: Path) -> None:
+    def rel(d: Path) -> str:
+        try:
+            return str(d.relative_to(raiz_final))
+        except ValueError:
+            return str(d)
+    gravar_json(catalogacao / EXIF_PENDENTE, {"lote_id": lote_id, "desde": _agora(),
+                                              "arquivos": [rel(d) for d in destinos]})
+
+
+def limpar_exif_pendente(catalogacao: Path) -> None:
+    (catalogacao / EXIF_PENDENTE).unlink(missing_ok=True)
+
+
+def exif_incompleto(pasta_projeto: Path, raiz_final: Path) -> list[Path]:
+    """Arquivos do projeto cujo EXIF ficou pela metade (marcador + conferência). [] = ok."""
+    marcador = ler_json(pasta_projeto / "catalogacao" / EXIF_PENDENTE, None)
+    if not isinstance(marcador, dict):
+        return []
+    alvos = [raiz_final / a for a in marcador.get("arquivos") or [] if (raiz_final / a).exists()]
+    if not alvos:
+        return []
+    ok = conferir_exif([(a, a.stem) for a in alvos])
+    return [a for a in alvos if a not in ok]
 
 
 # ================================================================ erros
@@ -840,6 +990,7 @@ class Recebedor:
                  tabela: mod_fundos.Tabela | None = None) -> None:
         self.config = config
         self.cliente = cliente
+        self._descartado = ""
         self.painel = painel
         self.livro = livro
         self.pasta_estado = pasta_estado
@@ -855,7 +1006,7 @@ class Recebedor:
         fila = []
         for unidade in descobrir(self.raiz_entrada):
             ultimo = feitos.get(unidade.chave, {})
-            if (ultimo.get("status") in (PRONTO, ERRO) and ultimo.get("motivo") != CANCELADO
+            if (ultimo.get("status") in (PRONTO, ERRO, DESCARTADO) and ultimo.get("motivo") != CANCELADO
                     and ultimo.get("assinatura") == unidade.assinatura()):
                 continue  # nada mudou desde a última vez
             fila.append(unidade)
@@ -902,6 +1053,17 @@ class Recebedor:
         ctx = contexto(unidade, self.tabela, self.config.serie_padrao)
         if ctx.problemas:
             motivo = "; ".join(ctx.problemas)
+            self.livro.anotar("erro", arquivo_origem=str(unidade.relativo), detalhe=motivo)
+            self.estado.anotar(unidade.chave, ERRO, motivo=motivo, assinatura=assinatura)
+            _log.error("Unidade %s: %s", unidade.relativo, motivo)
+            return Resultado(ERRO, motivo)
+
+        # Manifesto da estação (C1): arquivo corrompido/faltando vira erro ANTES de copiar
+        # qualquer coisa — nada é apagado da entrada.
+        quebrados = conferir_manifesto(unidade)
+        if quebrados:
+            motivo = "manifesto da estação não confere: " + "; ".join(quebrados[:5]) + (
+                f" (+{len(quebrados) - 5})" if len(quebrados) > 5 else "")
             self.livro.anotar("erro", arquivo_origem=str(unidade.relativo), detalhe=motivo)
             self.estado.anotar(unidade.chave, ERRO, motivo=motivo, assinatura=assinatura)
             _log.error("Unidade %s: %s", unidade.relativo, motivo)
@@ -990,7 +1152,9 @@ class Recebedor:
         if precisa and livre < precisa * 1.1 + 200 * 1024 * 1024:
             return falhar(f"espaço insuficiente no destino: o lote precisa de {precisa / 2**30:.1f} GB "
                           f"e há {livre / 2**30:.1f} GB livres")
-        documentos = formatos.agrupar(suportados)
+        multiserie = len(ctx.series) > 1
+        serie_de = (lambda a: serie_do_arquivo(a, unidade, ctx.serie)) if multiserie else (lambda a: ctx.serie)  # noqa: E731
+        documentos = formatos.agrupar(suportados, grupo=serie_de if multiserie else None)
         proximo = estrutura.proximo_documento(pasta)
         arquivados: list[tuple[Path, Path, str, str]] = []  # (origem, destino, código, sha)
         vistos_sha: dict[str, str] = {}
@@ -1007,7 +1171,7 @@ class Recebedor:
                 if ja:
                     codigo_doc = Path(ja[0]["destino"]).stem
                 else:
-                    codigo_doc = estrutura.codigo_documento(codigo, ctx.ano, ctx.serie, proximo)
+                    codigo_doc = estrutura.codigo_documento(codigo, ctx.ano, serie_de(doc.versoes[0]), proximo)
                     proximo += 1
                 for versao, soma in shas.items():
                     if soma in vistos_sha and vistos_sha[soma] != codigo_doc:
@@ -1019,7 +1183,7 @@ class Recebedor:
                         if destino.exists():
                             arquivados.append((versao, destino, codigo_doc, soma))
                             continue
-                    destino = estrutura.destino_documento(pasta, ctx.serie, codigo_doc, versao.suffix)
+                    destino = estrutura.destino_documento(pasta, serie_de(versao), codigo_doc, versao.suffix)
                     destino.parent.mkdir(parents=True, exist_ok=True)
                     if destino.exists() and sha256(destino) != soma:
                         return falhar(f"{destino.name} já existe com outro conteúdo")
@@ -1051,6 +1215,13 @@ class Recebedor:
 
         if cancelar is not None and cancelar.is_set():
             return falhar(CANCELADO)
+        if ja_arquivados:
+            # Já estavam no acervo (lote cortado antes do fim, reenvio): confere o EXIF e
+            # regrava SÓ o que faltar — nunca entrega arquivo sem metadado (CAMP-010).
+            faltou = self._garantir_exif(ja_arquivados, ctx, estado_vigia)
+            if faltou:
+                return falhar(f"EXIF conferido em {faltou[0]} de {faltou[1]} arquivo(s) já no acervo"
+                              + (f": {faltou[2]}" if faltou[2] else ""))
         if not arquivados:  # tudo o que veio já estava no acervo: nada a ler nem a decidir
             from . import transferir as mod_transferir
 
@@ -1159,7 +1330,8 @@ class Recebedor:
         evento = mod_vigia.processar(projeto, cfg_leitura, self.cliente, estado_vigia, cancelar)
         lote["custo_usd"] = round(evento.custo_usd, 4)
         if evento.falha:
-            return falhar(f"leitura falhou: {evento.falha}")
+            return falhar(evento.falha if evento.falha.startswith("limite de custo")
+                          else f"leitura falhou: {evento.falha}")
         leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
         # A leitura de prancha viu que era FOTO (a triagem achou que era papel) e já
         # releu como foto: a série acompanha. Só quando a estação não disse a série.
@@ -1210,7 +1382,10 @@ class Recebedor:
         do_lote = {c: leituras[c] for c in por_codigo if c in leituras}
         base = ((self.painel.contexto(ctx.fundo.codigo) or {}).get("projetos") or []) if self.painel.ligado else []
         analise = mod_ident.analisar(do_lote, {c: _proporcao(cache / f"{c}.jpg") for c in do_lote}, base)
+        self._descartado = ""
         plano, pendente = self._planejar(analise, ctx, unidade, do_lote, base)
+        if self._descartado:
+            return self._descartar(unidade, ctx, pasta, codigo, assinatura, self._descartado, resultado, lote)
         marcar_identidade(preparos, analise, plano, do_lote)
         gravar_json(preparo_caminho, preparos)
         gravar_json(catalogacao / "identificacao.json", {
@@ -1375,12 +1550,15 @@ class Recebedor:
             codigo = self.painel.reservar(
                 ctx.fundo.codigo, titulo, chave, ano=ctx.ano, cidade=ctx.cidade,
                 identificacao_original=(f"{ctx.p_estacao} - {ctx.projeto}" if ctx.p_estacao else ctx.projeto),
-                operador=ctx.operador, proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
+                p_estacao=ctx.p_estacao, operador=ctx.operador, proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
                 carimbo={"obra": g.obra, "local": g.local, "cliente": g.cliente,
                          "identificadores": sorted(g.ids), "folhas": len(g.folhas)},
                 **extra) or ""
             if not codigo:
                 pend = getattr(self.painel, "ultima_reserva", None) or {}
+                if pend.get("descartado"):
+                    self._descartado = str(pend.get("mensagem") or "lote descartado")
+                    return [], self._descartado
                 if extra.get("candidatos"):
                     lista = " × ".join(c["codigo"] for c in extra["candidatos"])
                     esperando.append(f"'{titulo}': qual projeto? ({lista}) — decisão no painel")
@@ -1424,6 +1602,21 @@ class Recebedor:
         return {"codigo": codigo.upper(), "nome": nome or grupo.titulo if grupo.folhas else (nome or ctx.projeto or codigo),
                 "documentos": list(grupo.folhas), "folhas_grupo": list(grupo.folhas), "grupo": grupo.titulo,
                 "motivo": motivo}
+
+    def _descartar(self, unidade: Unidade, ctx: Contexto, pasta: Path, codigo: str, assinatura: str,
+                   mensagem: str, resultado: Resultado, lote: dict) -> Resultado:
+        """410 do painel (C7): marca o lote como descartado e para de chamar. Não apaga a origem."""
+        motivo = f"descartado no painel: {mensagem}"
+        lote["status"] = DESCARTADO
+        gravar_json(pasta / "catalogacao" / "lotes" / f"{ctx.lote_id}.json", lote)
+        self._status(pasta, codigo, ERRO, ctx, motivo=motivo)
+        self.livro.anotar("descartado", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                          arquivo_origem=str(Path("100 - Scanners") / unidade.relativo), detalhe=motivo)
+        self.estado.anotar(unidade.chave, DESCARTADO, motivo=motivo, assinatura=assinatura, codigo=codigo)
+        _log.warning("Lote %s descartado pelo painel (410): %s — a origem em 100 - Scanners ficou como está.",
+                     ctx.lote_id, mensagem)
+        resultado.status, resultado.motivo, resultado.lote = DESCARTADO, motivo, lote
+        return resultado
 
     # ------------------------------------------------------------ conclusão (por projeto)
     def _concluir(self, unidade: Unidade, ctx: Contexto, pasta: Path, codigo: str, nome: str, lote: dict,
@@ -1541,23 +1734,26 @@ class Recebedor:
             if destino in ja_vistos or destino.suffix.lower() in formatos.SEM_EXIF:
                 continue
             ja_vistos.add(destino)
-            leitura = leituras.get(codigo_doc)
-            campos = {c.rotulo: (leitura.valores.get(c.nome, "") if leitura else "") for c in CAMPOS}
-            campos.update({
-                "_credito": ctx.fundo.credito, "_codigo": codigo_doc, "_fundo": ctx.fundo.codigo,
-                "_autor": ctx.fundo.nome,
-                "_serie": ctx.serie, "_operador": ctx.operador, "_estacao": ctx.estacao,
-                "_digitalizado_em": ctx.enviado_em, "_nome_original": origem.name,
-            })
-            if not campos.get("Projeto"):
-                campos["Projeto"] = nome
-            itens.append((destino, campos))
+            itens.append((destino, campos_do_exif(ctx, codigo_doc, leituras.get(codigo_doc), nome, origem.name)))
+        # Retomada de um lote cortado no EXIF: o que já está certo não é regravado.
+        retomada = (catalogacao / EXIF_PENDENTE).exists()
+        ja_certos = conferir_exif([(d, Path(d).stem) for d, _ in itens]) if retomada else set()
+        if ja_certos:
+            _log.info("Lote %s: retomando o EXIF — %d de %d arquivo(s) já estão certos.",
+                      ctx.lote_id, len(ja_certos), len(itens))
+        # Passo marcado ANTES de gravar: lote cortado aqui volta pelo EXIF, sem API (CAMP-010).
+        marcar_exif_pendente(catalogacao, ctx.lote_id, [d for d, _ in itens], self.raiz_final)
+        self.estado.anotar(unidade.chave, PASSO_EXIF, assinatura=assinatura, codigo=codigo, lote_id=ctx.lote_id)
         _log.info("Lote %s: gravando metadados em %d arquivo(s)…", ctx.lote_id, len(itens))
         if estado_vigia is not None:
             estado_vigia.situacao = f"gravando metadados ({len(itens)})"
-        gravados, avisos = mod_metadados.gravar_em_lote(itens, self.config.identidade())
+        gravados, avisos = mod_metadados.gravar_em_lote(
+            [(d, c) for d, c in itens if d not in ja_certos], self.config.identidade())
+        gravados += len(ja_certos)
         _log.info("Lote %s: conferindo metadados…", ctx.lote_id)
         conferidos = conferir_exif([(d, Path(d).stem) for d, _ in itens])
+        if len(conferidos) >= len(itens):
+            limpar_exif_pendente(catalogacao)
         lote["exif"] = {"total": len(itens), "gravados": gravados, "conferidos": len(conferidos),
                         "avisos": avisos}
         for destino, campos in itens:
@@ -1616,6 +1812,54 @@ class Recebedor:
         resultado.status, resultado.lote = PRONTO, lote
         return resultado
 
+    def _garantir_exif(self, ja_arquivados: list, ctx: Contexto, estado_vigia=None):
+        """Arquivos que já estavam no acervo: confere o XMP e regrava só o que faltar.
+
+        Devolve None quando está tudo certo (ou o config não exige EXIF), senão
+        (conferidos, total, aviso). Não usa API: as leituras vêm do leituras.json do projeto.
+        """
+        from . import planilha as mod_planilha
+
+        destinos: dict[Path, tuple[str, str]] = {}
+        for origem, destino, codigo_doc, _s in ja_arquivados:
+            if destino.suffix.lower() not in formatos.SEM_EXIF and destino.exists():
+                destinos.setdefault(destino, (codigo_doc, origem.name))
+        if not destinos:
+            return None
+        conferidos = conferir_exif([(d, d.stem) for d in destinos])
+        faltam = [d for d in destinos if d not in conferidos]
+        if not faltam:
+            for d in {d.parents[2] for d in destinos if len(d.parents) > 2}:
+                limpar_exif_pendente(d / "catalogacao")
+            return None
+        _log.info("Lote %s: %d de %d arquivo(s) já no acervo sem EXIF completo — regravando só esses.",
+                  ctx.lote_id, len(faltam), len(destinos))
+        if estado_vigia is not None:
+            estado_vigia.situacao = f"gravando metadados ({len(faltam)})"
+        leituras_por_projeto: dict[Path, dict] = {}
+        itens = []
+        for d in faltam:
+            projeto = d.parents[2]
+            if projeto not in leituras_por_projeto:
+                leituras_por_projeto[projeto] = {
+                    Path(l.arquivo).stem: l
+                    for l in mod_planilha.ler_json(projeto / "catalogacao" / "leituras.json")}
+            codigo_doc, nome_original = destinos[d]
+            itens.append((d, campos_do_exif(ctx, d.stem, leituras_por_projeto[projeto].get(d.stem),
+                                            estrutura.nome_sem_codigo(projeto.name), nome_original)))
+        gravados, avisos = mod_metadados.gravar_em_lote(itens, self.config.identidade())
+        ok_agora = conferir_exif([(d, d.stem) for d, _ in itens])
+        for d in ok_agora:
+            self.livro.anotar("exif_gravado", lote_id=ctx.lote_id, codigo_documento=d.stem,
+                              arquivo_destino=self._relativo(d), detalhe="regravado na retomada do lote")
+        if len(ok_agora) < len(faltam):
+            if self.config.entrada_exigir_exif:
+                return (len(destinos) - len(faltam) + len(ok_agora), len(destinos), avisos[-1] if avisos else "")
+            return None
+        for projeto in leituras_por_projeto:
+            limpar_exif_pendente(projeto / "catalogacao")
+        return None
+
     def _erros(self, catalogacao: Path, erros: list[dict]) -> None:
         gravar_json(catalogacao / "erros.json", erros)
 
@@ -1659,8 +1903,8 @@ class Recebedor:
             except OSError as erro:
                 _log.warning("Não apaguei %s: %s", origem, erro)
         if not sobrou:
-            for marcador in MARCADORES:
-                (unidade.pasta / marcador).unlink(missing_ok=True)
+            for marcador in marcadores_da(unidade.pasta):
+                marcador.unlink(missing_ok=True)
         # Remove pastas vazias de dentro para fora, sem subir acima da unidade.
         for pasta in sorted((p for p in unidade.pasta.rglob("*") if p.is_dir()),
                             key=lambda p: len(p.parts), reverse=True):

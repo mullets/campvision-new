@@ -69,7 +69,7 @@ def gerar(destino: Path) -> dict[str, Path]:
         with mock.patch.object(p, "_chamar", side_effect=lambda m, c, corpo=None: capturados.append((m, c, corpo))
                                or (200, {"codigo": "F026-P0001"})):
             p.reservar("F026", "Edifício Tarumã", "0" * 32, ano="1972", cidade="São Paulo",
-                       identificacao_original="P0001 - Edifício Tarumã", operador="Beatriz",
+                       identificacao_original="P0001 - Edifício Tarumã", p_estacao="P0001", operador="Beatriz",
                        proximo_p_local="F026-P0002",
                        carimbo={"obra": "Edifício Tarumã", "local": "R. Tarumã 120", "cliente": "",
                                 "identificadores": ["alvara 41928"], "folhas": 2},

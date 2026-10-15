@@ -15,9 +15,9 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-10-14-05"
+VERSAO_BUILD = "2026-10-15-10"
 # Versão do contrato com o painel (docs/contrato-painel.md). Mudou o formato = muda aqui.
-CONTRATO = "2.2"
+CONTRATO = "2.3"
 
 _log = logging.getLogger("cv2.config")
 
@@ -83,6 +83,10 @@ class Config:
 
     # --- Lote ---
     trabalhadores: int = 4
+    # Teto de gasto com a API (US$). 0 = sem limite. Estourou: a leitura PARA, o lote vira
+    # erro "limite de custo" (o checkpoint guarda o que já foi lido) e o heartbeat avisa.
+    limite_custo_dia_usd: float = 0.0
+    limite_custo_lote_usd: float = 0.0
     # Retoma de onde parou usando o checkpoint .jsonl; desligue para reprocessar tudo.
     retomar_checkpoint: bool = True
 

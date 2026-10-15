@@ -116,7 +116,7 @@ Sem ele o app funciona, mas não grava metadados nas imagens.
 ### 6. Primeira leitura
 
 ```bash
-python -m unittest discover -s tests -t .   # 316 testes, sem rede
+python -m unittest discover -s tests -t .   # 361 testes, sem rede
 python app.py                                # janela
 ```
 
@@ -662,7 +662,7 @@ python vigia.py --relatorio 2026-09-03   # regera um dia específico
 
 ## GitHub e auto-atualização
 
-O remoto já vem configurado (`git@github.com:mullets/campvision2.git`). Crie o
+O remoto já vem configurado (`git@github.com:mullets/campvision-new.git`). Crie o
 repositório **vazio** em https://github.com/new — sem README e sem .gitignore,
 senão o push conflita — e envie:
 

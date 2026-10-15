@@ -52,11 +52,15 @@ class Documento:
         return sorted(self.versoes, key=lambda p: (PREFERENCIA.index(p.suffix.lower()), str(p)))[0]
 
 
-def agrupar(arquivos: list[Path]) -> list[Documento]:
-    """Junta as versões pelo nome-base, mantendo a ordem da pasta original."""
+def agrupar(arquivos: list[Path], grupo=None) -> list[Documento]:
+    """Junta as versões pelo nome-base, mantendo a ordem da pasta original.
+
+    `grupo(arquivo)` separa universos: lote do Mac com várias séries tem `scan 001`
+    em Negativos e `scan 001` em Slides — documentos diferentes, não versões.
+    """
     por_base: dict[str, Documento] = {}
-    for arquivo in sorted(arquivos, key=lambda p: (p.stem.lower(), str(p))):
-        chave = arquivo.stem.lower()
+    for arquivo in sorted(arquivos, key=lambda p: (grupo(p) if grupo else "", p.stem.lower(), str(p))):
+        chave = (f"{grupo(arquivo)}|" if grupo else "") + arquivo.stem.lower()
         por_base.setdefault(chave, Documento(arquivo.stem)).versoes.append(arquivo)
     return list(por_base.values())
 

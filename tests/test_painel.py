@@ -18,6 +18,7 @@ class _Servidor:
         self.pedidos: list[tuple] = []
         self.aceitar_aviso = True
         self.resposta_reserva = (201, {"codigo": "F026-P0042"})
+        self.resposta_aviso = None
         dono = self
 
         class H(BaseHTTPRequestHandler):
@@ -42,6 +43,8 @@ class _Servidor:
                     self._r(*dono.resposta_reserva)
                 elif self.path.endswith("/iniciado") and getattr(dono, "encerrado", False):
                     self._r(409, {"detail": "Pedido já encerrado"})
+                elif self.path.endswith("/aviso") and dono.resposta_aviso:
+                    self._r(*dono.resposta_aviso)
                 elif self.path.endswith("/aviso") and not dono.aceitar_aviso:
                     self._r(503, {})
                 else:
@@ -82,12 +85,78 @@ class TestPainel(unittest.TestCase):
         self.assertIsNone(self.p.reservar("F026", "Tarumã", "a" * 32))
         self.assertTrue(self.p.ultima_reserva["pendente"])
         self.assertEqual(self.p.ultimo_erro, "Aguardando decisão no painel")
-        self.srv.resposta_reserva = (200, {"codigo": "F026-P0001", "existente": True})
+        self.srv.resposta_reserva = (200, {"codigo": "F026-P0001", "numero_projeto": "P0001", "existente": True})
         self.assertEqual(self.p.reservar("F026", "Tarumã", "a" * 32), "F026-P0001")
         self.assertTrue(self.p.ultima_reserva["existente"])
         self.srv.resposta_reserva = (200, {"codigo": "F026-P0043"})
         self.p.reservar("F026", "Outro", "b" * 32)
         self.assertFalse(self.p.ultima_reserva["existente"])
+
+    def test_reservar_manda_p_estacao(self):
+        self.p.reservar("F026", "Tarumã", "a" * 32, p_estacao="P0001", identificacao_original="P0001 - Tarumã")
+        corpo = self.srv.pedidos[-1][2]
+        self.assertEqual((corpo["p_estacao"], corpo["identificacao_original"]), ("P0001", "P0001 - Tarumã"))
+        self.p.reservar("F026", "Tarumã", "b" * 32)
+        self.assertNotIn("p_estacao", self.srv.pedidos[-1][2])
+
+    def test_existente_sem_numero_projeto_e_segurado(self):
+        # C2: o painel antigo reaproveitava o projeto só porque a estação escreveu "P0001 - ".
+        self.srv.resposta_reserva = (200, {"codigo": "F026-P0001", "existente": True})
+        with self.assertLogs("cv2.painel", level="WARNING"):
+            self.assertIsNone(self.p.reservar("F026", "Tarumã", "a" * 32, p_estacao="P0001"))
+        self.assertTrue(self.p.ultima_reserva["pendente"])
+        self.assertFalse(self.p.ultima_reserva["existente"])
+        self.assertIn("numero_projeto", self.p.ultimo_erro)
+
+    def test_reserva_410_descartado(self):
+        self.srv.resposta_reserva = (410, {"descartado": True, "mensagem": "Lote descartado pela equipe"})
+        with self.assertLogs("cv2.painel", level="WARNING"):
+            self.assertIsNone(self.p.reservar("F026", "Tarumã", "a" * 32))
+        self.assertTrue(self.p.ultima_reserva["descartado"])
+        self.assertFalse(self.p.ultima_reserva["pendente"])
+        self.assertEqual(self.p.ultima_reserva["mensagem"], "Lote descartado pela equipe")
+
+    def _aviso_com(self, status, corpo):
+        self.srv.resposta_aviso = (status, corpo)
+        return self.p.aviso("F026-P0001", "x", "pronto")
+
+    def test_aviso_4xx_nao_reenfileira(self):
+        with self.assertLogs("cv2.painel", level="WARNING"):
+            self.assertFalse(self._aviso_com(422, {"detail": "status inválido"}))
+        self.assertEqual(self.p.pendentes(), 0)
+
+    def test_aviso_5xx_reenfileira_com_limite(self):
+        self.assertFalse(self._aviso_com(503, {}))
+        self.assertEqual(self.p.pendentes(), 1)
+        from nucleo import painel as mod
+        with self.assertLogs("cv2.painel", level="WARNING"):
+            for _ in range(mod.MAX_TENTATIVAS_AVISO + 1):
+                self.p.reenviar()
+        self.assertEqual(self.p.pendentes(), 0)
+
+    def test_aviso_5xx_volta_a_entrar_quando_o_painel_responde(self):
+        self._aviso_com(500, {})
+        self.srv.resposta_aviso = (202, {"ok": True})
+        self.assertEqual(self.p.reenviar(), 1)
+        self.assertEqual(self.p.pendentes(), 0)
+        self.assertNotIn("_tentativas", self.srv.pedidos[-1][2])
+
+    def test_aviso_202_ok_false_vira_warning_com_motivo(self):
+        with self.assertLogs("cv2.painel", level="WARNING") as logs:
+            self.assertFalse(self._aviso_com(202, {"ok": False, "motivo": "pasta fora de ACERVOS_CAMP"}))
+        self.assertIn("pasta fora de ACERVOS_CAMP", logs.output[0])
+        self.assertEqual(self.p.pendentes(), 0)
+
+    def test_fila_e_gravada_de_forma_atomica(self):
+        self._aviso_com(503, {})
+        fila = Path(self.tmp.name) / "painel_pendentes.json"
+        self.assertTrue(fila.exists())
+        self.assertEqual(list(fila.parent.glob(".painel_pendentes*")), [])  # sem temporário esquecido
+        json.loads(fila.read_text())
+        from unittest import mock
+        with mock.patch("os.replace", side_effect=OSError("queda")):
+            self._aviso_com(503, {})  # falhar na troca não corrompe a fila anterior nem levanta
+        self.assertEqual(self.p.pendentes(), 1)
 
     def test_releitura_contrato_do_painel(self):
         self.assertTrue(self.p.releitura_iniciada(5, "campvision2"))

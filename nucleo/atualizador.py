@@ -112,6 +112,29 @@ def atualizar(repo: Path) -> tuple[bool, str]:
     return True, mensagem
 
 
+def confirmar_subida(repo: Path, pasta_estado: Path) -> bool:
+    """Marca "subi bem": a versão atual completou a 1ª rodada.
+
+    Apaga `subida_pendente` (o `atualizar.sh --boot` deixa de contar subidas) e grava
+    `subiu_bem` com o commit. Devolve True se havia uma subida pendente a confirmar.
+    """
+    codigo, atual = _git(repo, "rev-parse", "HEAD")
+    pendente = pasta_estado / "subida_pendente"
+    havia = pendente.exists()
+    try:
+        from .atomico import gravar_texto
+
+        if codigo == 0:
+            gravar_texto(pasta_estado / "subiu_bem", f"{atual}\n")
+        pendente.unlink(missing_ok=True)
+    except OSError as erro:
+        _log.warning("Não consegui marcar 'subi bem': %s", erro)
+        return False
+    if havia:
+        _log.info("Versão %s confirmada: completou a primeira rodada (subi bem).", atual[:7])
+    return havia
+
+
 def reiniciar_processo() -> None:  # pragma: no cover - troca o processo
     """Substitui o processo atual pelo mesmo comando, já com o código novo."""
     _log.info("Reiniciando para carregar o código atualizado…")

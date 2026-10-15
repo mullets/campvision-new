@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .atomico import gravar_json
 from . import estrutura, identidade as mod_ident, planilha as mod_planilha
 from . import releitura as mod_rel, transferir as mod_transferir
 
@@ -107,8 +108,7 @@ def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict],
         if g["acao"] == "perguntar":       # a pessoa decide: não publica até lá, mas não é "outra obra"
             for c in g["folhas"]:
                 preparos.setdefault(c, {}).setdefault("identidade", {})["divergente"] = g is not dono
-    (pasta / "catalogacao" / "preparo.json").write_text(json.dumps(preparos, ensure_ascii=False, indent=1),
-                                                       encoding="utf-8")
+    gravar_json(pasta / "catalogacao" / "preparo.json", preparos, indent=1)
     pasta_fundo = pasta.parents[1]
     for g in plano["grupos"]:
         if g["acao"] != "mover":
@@ -124,8 +124,7 @@ def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict],
         for novo in trocas.values():   # no projeto certo, a folha é do projeto
             ident = prep_d.setdefault(novo, {}).setdefault("identidade", {})
             ident.update(divergente=False, sem_identificacao=False)
-        (destino / "catalogacao" / "preparo.json").write_text(json.dumps(prep_d, ensure_ascii=False, indent=1),
-                                                             encoding="utf-8")
+        gravar_json(destino / "catalogacao" / "preparo.json", prep_d, indent=1)
         _mover_leituras(pasta, destino, trocas)
         tocados.add(g["destino"])
     for c in sorted(tocados):
@@ -137,8 +136,7 @@ def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict],
         if alvo is not None and painel is not None:
             painel.aviso(c, str(alvo.relative_to(raiz_final)), "pronto")
     salvo = {k: v for k, v in plano.items() if not k.startswith("_")}
-    (pasta / "catalogacao" / "reidentificacao.json").write_text(json.dumps(salvo, ensure_ascii=False, indent=1),
-                                                               encoding="utf-8")
+    gravar_json(pasta / "catalogacao" / "reidentificacao.json", salvo, indent=1)
     return sorted(tocados)
 
 

@@ -3,8 +3,11 @@
   "estacao_id": "campvision2",
   "tipo_estacao": "campvision",
   "app": "CAMP Vision 2",
-  "versao": "2026-10-13-01",
+  "versao": "2026-10-15-10",
   "estado": "vigiando",
+  "detalhe": {
+   "situacao": "vigiando"
+  },
   "projeto": "",
   "progresso": {
    "feitos": 2,
@@ -21,7 +24,7 @@
    "entrada": true,
    "acervo": true
   },
-  "contrato": "2.2",
+  "contrato": "2.3",
   "quarentena": {
    "arquivos": 2,
    "gb": 0.0,
@@ -39,6 +42,7 @@
    "ano": "1972",
    "cidade": "São Paulo",
    "identificacao_original": "P0001 - Edifício Tarumã",
+   "p_estacao": "P0001",
    "operador": "Beatriz",
    "proximo_p_local": "F026-P0002",
    "carimbo": {
@@ -75,7 +79,7 @@
    "codigo": "F026-P0001",
    "pasta": "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - CASA DA PRAIA",
    "status": "pronto",
-   "em": "2026-10-13T17:35:14"
+   "em": "2026-10-15T06:26:04"
   }
  },
  "iniciado": {

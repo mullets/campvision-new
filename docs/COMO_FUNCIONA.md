@@ -109,7 +109,7 @@ O que o vigia usa do Mac:
 O repositório das estações Windows não está neste projeto. O que o vigia espera delas:
 
 - **Pastas:** `100 - Scanners/<fundo>/<material>/<projeto>/`, opcionalmente com `TIF/`, `JPG/`, `DNG/`, `PDF/` dentro. A ordem de material e projeto tanto faz.
-- **Marca de fim:** um `manifesto.json` (qualquer conteúdo) ou um `status.json` com `status: "enviado_windows"`. Qualquer outro status conta como "sem marca".
+- **Marca de fim:** um `manifesto.json` (qualquer conteúdo) ou um `status.json` com `status: "enviado_windows"` (ou `etapa: "enviado_windows"`: as duas chaves valem desde o contrato 2.3). Qualquer outro status conta como "sem marca".
 - **Campos lidos** do `manifesto.json`, que valem sobre o `info_projeto.json`:
   - `fundo_codigo` ou `fundo`;
   - `serie` (só `S01`–`S07`, `S99`) ou `tipo_material`;
@@ -638,7 +638,7 @@ Base `painel_url`, cabeçalho `X-Camp-Token` (de `CAMP_PAINEL_TOKEN`), timeout 8
 | `POST /api/campvision/aviso` | ver abaixo |
 | `GET /api/estacoes/pedidos-releitura` + `POST …/{id}/iniciado` + `POST …/{id}/concluido` | a cada rodada ([9.3](#93-pedidos-de-releitura-ler-dados-agora)) |
 
-**Heartbeat:** `estacao_id, tipo_estacao, app, versao, estado` (texto livre: vigiando, processando, copiando N de M, gravando metadados, relendo, QNAP com problema…), `projeto, progresso, fila, hoje` (projetos, imagens, erros, custo), `montagens` (entrada, acervo), `contrato, quarentena`. Heartbeat perdido **não** é guardado.
+**Heartbeat:** `estacao_id, tipo_estacao, app, versao, estado` (vocabulário do painel: vigiando, processando, erro, pasta indisponível; a frase livre ("copiando 7 de 38", "gravando metadados", "relendo", "QNAP com problema") vai em `detalhe.situacao`; alerta de custo em `detalhe.alerta`), `projeto, progresso, fila, hoje` (projetos, imagens, erros, custo), `montagens` (entrada, acervo), `contrato, quarentena`. Heartbeat perdido não é guardado, mas a falha agora é logada (WARNING).
 
 **Aviso** = `{codigo, pasta, status}`. É mandado em toda gravação de `status.json` de projeto definitivo (processando, pronto, erro), no fim de cada releitura, no `--avisar-painel`, no `--consertar-acervo` e no `--reidentificar --sim`. Nunca para código provisório. Se o painel não responder, o aviso fica em `~/.campvision2/painel_pendentes.json` (só o último de cada projeto) e é reenviado depois de cada heartbeat.
 
@@ -715,7 +715,7 @@ python3 -c "import json,pathlib; d=json.loads((pathlib.Path.home()/'.campvision2
 
 | Comando | O que faz |
 |---|---|
-| `./atualizar.sh` | espera o lote (só enquanto o estado é exatamente "processando" ou "consolidando", até 1 h), puxa o código, instala dependências, faz backup, roda os testes, reinicia, abre o log |
+| `./atualizar.sh` | espera o vigia ficar `vigiando` (qualquer lote em andamento, inclusive copiando/preparando/gravando metadados; aborta após 1 h), puxa o código, instala dependências, faz backup, roda os testes, reinicia, abre o log |
 | `./atualizar.sh --agora` | não espera o lote |
 | `./atualizar.sh --voltar` | volta para a versão anterior **e fixa** nela (pausa a auto-atualização até a próxima atualização manual); não roda testes |
 | `./atualizar.sh --versao X` | vai para um commit ou tag e fixa |
@@ -989,7 +989,7 @@ Encontrados na auditoria de 14/10 (nenhum foi corrigido ainda, salvo indicação
 4. **Operador e estação do Mac não chegam:** o vigia lê só `manifesto.json`/`info_projeto.json`; o Mac usa `info_lote` (e `estacao_tipo` em vez de `tipo_estacao`).
 5. **Pasta do Mac fica no `100 - Scanners`** com `status_mac.json`, porque o `info_lote` (não suportado) sobra. O próximo envio para o mesmo projeto já nasce "marcado" (espera só 45 s); um arquivo grande copiando por mais de 45 s pode ser pego pela metade (inferência do código, não observado).
 6. **Falha durante reinício** que não seja "cancelado antes da leitura" fica em erro e precisa de `--refazer-lote`.
-7. **`atualizar.sh` não espera** durante "copiando", "preparando" ou "gravando metadados" (só espera "processando"/"consolidando").
+7. ~~`atualizar.sh` não espera durante "copiando"…~~ Corrigido no contrato 2.3: só reinicia com o vigia `vigiando`; ao subir 3 vezes sem confirmar (`subiu_bem`) o `--boot` volta a versão anterior. Servidores já instalados precisam rodar `sudo ./instalar.sh` de novo para o unit ganhar o `ExecStartPre`.
 8. **Lote que já estava no acervo não regrava EXIF** (Itatiba F016-P0024, 14/10).
 9. **EXIF `_serie`** usa a série do lote, não a de cada documento renomeado (não é gravada numa etiqueta própria hoje, mas fica errada se passar a ser).
 10. **Instalador não configura `caminho_replica`** (quarentena nunca esvazia) nem instala `jpegtran`/`rawpy` (o primeiro `atualizar.sh` instala).
@@ -1038,5 +1038,5 @@ Encontrados na auditoria de 14/10 (nenhum foi corrigido ainda, salvo indicação
 
 ## 17. Testes e contrato
 
-- `python -m unittest discover -s tests -t .` — 316 testes, sem rede (cliente da API falso, imagens geradas na hora). O `atualizar.sh` roda os mesmos testes antes de trocar a versão no servidor.
+- `python -m unittest discover -s tests -t .` — 361 testes, sem rede (cliente da API falso, imagens geradas na hora). O `atualizar.sh` roda os mesmos testes antes de trocar a versão no servidor.
 - **Contrato com o painel:** versão em `CONTRATO` (`config.py`, hoje 2.2), mandada no heartbeat. Exemplos reais em `docs/contrato/exemplos/` (heartbeat, reservar, aviso, iniciado, concluído, pacote, erros, propostas, decisões, status, info_projeto, orientação). O teste `TestContrato` falha se um campo mudar sem subir o `CONTRATO`. Para regenerar: `python -m tests.contrato_exemplos`.

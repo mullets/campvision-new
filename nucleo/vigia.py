@@ -26,6 +26,7 @@ from pathlib import Path
 from . import atualizador, caminho as mod_caminho, eventos as mod_eventos, grupos, imagem
 from . import info_projeto as mod_info, lote, planilha
 from . import relatorio_diario
+from .atomico import gravar_json
 from .config import CONTRATO, VERSAO_BUILD, Config
 from .planilha import LIMIAR_ATENCAO
 from .visao import ClienteAPI
@@ -121,6 +122,7 @@ class EstadoVigia:
     ultima_atualizacao_codigo: str = "—"
     proximo_relatorio: str = "—"
     ultimas_linhas: list[str] = field(default_factory=list)
+    alerta: str = ""  # ex.: "limite de custo ..." — vai no heartbeat até o problema passar
 
     def anotar(self, texto: str) -> None:
         carimbo = datetime.now().strftime("%H:%M:%S")
@@ -138,7 +140,8 @@ def ler_status(caminho: Path) -> str:
     if isinstance(dados, str):
         return dados
     if isinstance(dados, dict):
-        return str(dados.get("status", ""))
+        # As estações antigas só gravavam `etapa` (C1); as novas gravam as duas.
+        return str(dados.get("status") or dados.get("etapa") or "")
     return ""
 
 
@@ -155,10 +158,32 @@ def escrever_status(caminho: Path, status: str, extra: dict | None = None) -> No
     atual["status"] = status
     atual["campvision2_em"] = datetime.now().isoformat(timespec="seconds")
     atual.update(extra or {})
-    caminho.write_text(json.dumps(atual, indent=2, ensure_ascii=False), encoding="utf-8")
+    gravar_json(caminho, atual)
 
 
 MARCADORES_DE_PROJETO = ("status.json", "info_projeto.json")
+
+# Vocabulário de `estado` que o painel aceita no heartbeat (contrato C3).
+ESTADOS_DO_PAINEL = ("ocioso", "capturando", "finalizando", "backup", "processando",
+                     "erro", "vigiando", "pasta indisponível")
+
+
+def estado_do_painel(situacao: str) -> str:
+    """Situação interna do vigia (texto livre: "copiando 7 de 38") -> vocabulário do painel."""
+    texto = (situacao or "").strip().lower()
+    if texto in ESTADOS_DO_PAINEL:
+        return texto
+    if texto.startswith(("pasta indispon", "pasta indispon\u00edvel")):
+        return "pasta indisponível"
+    if texto.startswith(("iniciando", "vigiando", "aguardando")):
+        return "vigiando"
+    if texto.startswith(("qnap com problema", "servi\u00e7o parado", "erro", "falha", "limite de custo")):
+        return "erro"
+    if texto.startswith(("copiando", "preparando", "gravando", "relendo", "consolidando",
+                         "montando", "processando", "lendo", "conferindo")):
+        return "processando"
+    return "processando"  # fazendo algo que ainda não tem nome: nunca um texto que o painel recusa
+
 # Quanto maior, melhor a pasta de imagens. Preview/JPG ganha do arquivo
 
 # Palavras que denunciam a MATRIZ arquivística — a mesma prancha em TIFF, que
@@ -349,8 +374,7 @@ def marcar_fase(pasta: Path, config: Config, extra: dict | None = None) -> None:
     dados["fase_em"] = datetime.now().isoformat(timespec="seconds")
     dados.update(extra or {})
     dados.setdefault("status", config.status_pronto)
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+    gravar_json(caminho, dados)
 
 
 def limpar_fase(pasta: Path) -> bool:
@@ -370,7 +394,7 @@ def limpar_fase(pasta: Path) -> bool:
         return False
     dados.pop("fase", None)
     dados.pop("fase_em", None)
-    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+    gravar_json(caminho, dados)
     return True
 
 
@@ -486,14 +510,27 @@ def processar(
                 estado.concluidos_no_projeto = p.concluidos
                 estado.total_no_projeto = p.total
 
+        limites = []
+        if config.limite_custo_lote_usd > 0:
+            limites.append(config.limite_custo_lote_usd)
+        if config.limite_custo_dia_usd > 0:
+            limites.append(config.limite_custo_dia_usd - (estado.custo_hoje if estado else 0.0))
         resultado = lote.executar(
             projeto.pasta_imagens, config, cliente,
             ao_progredir=progresso, cancelar=cancelar,
             arquivos=projeto.arquivos(config, so_estaveis=True),
             pasta_checkpoint=projeto.pasta,
+            limite_usd=min(limites) if limites else None,
         )
         t_in = resultado.progresso.tokens_entrada
         t_out = resultado.progresso.tokens_saida
+        if resultado.limite_custo:
+            evento.custo_usd = config.custo_estimado_usd(t_in, t_out)
+            evento.pranchas = len(resultado.leituras)
+            evento.falha = f"limite de custo: {resultado.limite_custo}"
+            _log.error("Projeto %s: %s", projeto.nome, evento.falha)
+            evento.duracao_segundos = int(time.monotonic() - comeco)
+            return evento
 
         if config.consolidar_por_projeto and resultado.leituras:
             if estado:
@@ -603,6 +640,7 @@ class Vigia:
             reserva=pasta_estado / "registro_reserva",
         )
         self._recebedor_obj = None
+        self._subida_confirmada = False
         self._ultimo_heartbeat = -1e9
 
     # ------------------------------------------------------------ tarefas
@@ -611,6 +649,8 @@ class Vigia:
             return
         if datetime.now() < self._proxima_atualizacao:
             return
+        if self.estado.situacao not in ("vigiando", "iniciando"):
+            return  # só atualiza (e reinicia) com o vigia ocioso: nunca no meio de um lote
         self._proxima_atualizacao = datetime.now() + timedelta(
             minutes=self.config.intervalo_atualizacao_minutos
         )
@@ -623,6 +663,13 @@ class Vigia:
         if atualizou:
             self.estado.anotar(f"código atualizado ({mensagem}), reiniciando")
             atualizador.reiniciar_processo()
+
+    def _confirmar_subida(self) -> None:
+        """Depois da 1ª rodada completa: marca "subi bem" (o rollback automático para de contar)."""
+        if self._subida_confirmada or not self.repo:
+            return
+        self._subida_confirmada = True
+        atualizador.confirmar_subida(self.repo, self.pasta_estado)
 
     def _talvez_relatorio(self) -> None:
         if datetime.now() < self._proximo_relatorio:
@@ -750,7 +797,13 @@ class Vigia:
                                                    assinatura=unidade.assinatura())
                 continue
             self.estado.fila = max(0, self.estado.fila - 1)
-            if r.status == mod_entrada.AGUARDANDO:
+            if r.status == mod_entrada.ERRO and r.motivo.startswith("limite de custo"):
+                self.estado.alerta = r.motivo
+                self.estado.anotar(f"{unidade.relativo}: {r.motivo}"[:120])
+                self._talvez_heartbeat(forcar=True)
+            elif r.status == mod_entrada.PRONTO:
+                self.estado.alerta = ""
+            if r.status in (mod_entrada.AGUARDANDO, mod_entrada.DESCARTADO):
                 continue
             feitos += 1
             contagens = r.lote.get("contagens", {})
@@ -861,10 +914,13 @@ class Vigia:
             "entrada": bool(self.config.pasta_entrada) and Path(self.config.pasta_entrada).is_dir(),
             "acervo": bool(self.config.raiz_final) and Path(self.config.raiz_final).is_dir(),
         }
-        self.painel.heartbeat({
+        enviado = self.painel.heartbeat({
             "estacao_id": self.config.estacao_id, "tipo_estacao": "campvision",
             "app": "CAMP Vision 2", "versao": VERSAO_BUILD,
-            "estado": self.estado.situacao, "projeto": self.estado.projeto_atual,
+            "estado": "erro" if self.estado.alerta else estado_do_painel(self.estado.situacao),
+            "detalhe": {"situacao": self.estado.situacao,
+                        **({"alerta": self.estado.alerta} if self.estado.alerta else {})},
+            "projeto": self.estado.projeto_atual,
             "progresso": {"feitos": self.estado.concluidos_no_projeto,
                           "total": self.estado.total_no_projeto},
             "fila": self.estado.fila,
@@ -874,6 +930,9 @@ class Vigia:
             "contrato": CONTRATO,
             "quarentena": self._estado_quarentena(),
         })
+        if enviado is False:
+            _log.warning("Heartbeat não aceito pelo painel (%s): %s", self.painel.url,
+                         getattr(self.painel, "ultimo_erro", "") or "sem detalhe")
         self.painel.reenviar()
 
     def _batimento(self) -> None:
@@ -883,7 +942,7 @@ class Vigia:
                 self._talvez_heartbeat()
                 self._salvar_estado()
             except Exception as erro:  # noqa: BLE001 - nunca derruba o vigia
-                _log.debug("batimento: %s", erro)
+                _log.warning("batimento: %s", erro)
             self.cancelar.wait(5)
 
     def atualizar_planilha_do_acervo(self) -> None:
@@ -909,12 +968,14 @@ class Vigia:
         while not self.cancelar.is_set():
             if date.today() != ultimo_dia:  # virou o dia: zera o painel
                 ultimo_dia = date.today()
+                self.estado.alerta = ""
                 self._recarregar_contadores_do_dia()
             if self.config.varre_pasta_vigiada and not raiz.is_dir():
                 self.estado.situacao = "pasta indisponível"
                 self.estado.anotar(diagnosticar_pasta(raiz))
             else:
                 self.uma_rodada()
+                self._confirmar_subida()
             self.livro.descarregar_reserva()
             # Fora de qualquer lote: é a hora segura de puxar código novo.
             # Sem isto, um vigia ocioso — que é o estado normal dele — nunca

@@ -11,6 +11,7 @@ provisória redundante só sai porque o destino já tem os mesmos bytes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import shutil
 from pathlib import Path
 
 from . import estrutura
+from .atomico import gravar_texto
 from .lote import NOME_CHECKPOINT
 
 _log = logging.getLogger("cv2.transferir")
@@ -35,6 +37,24 @@ def _gravar(caminho: Path, dados) -> None:
     tmp = caminho.with_name(f".{caminho.name}.tmp")
     tmp.write_text(json.dumps(dados, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, caminho)
+
+
+def _sha256(caminho: Path) -> str:
+    h = hashlib.sha256()
+    with open(caminho, "rb") as f:
+        for bloco in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def _mesmo_destino(item, raiz_final: Path, alvo: Path) -> bool:
+    """O mapa do destino diz que ESTE conteúdo (mesmo SHA de origem) foi copiado para `alvo`."""
+    if not isinstance(item, dict) or not item.get("destino"):
+        return False
+    try:
+        return (raiz_final / item["destino"]).resolve() == alvo.resolve()
+    except OSError:
+        return False
 
 
 def _trocar(texto: str, trocas: list[tuple[str, str]]) -> str:
@@ -86,8 +106,11 @@ def transferir(raiz_final: Path, pasta_estado: Path, origem: Path, destino: Path
             continue
         alvo = estrutura.destino_documento(destino, novo.split("-")[3], novo, arquivo.suffix)
         if alvo.exists():
-            if alvo.stat().st_size == arquivo.stat().st_size:
-                arquivo.unlink()          # o destino já tem estes bytes (conferido pelo SHA no mapa)
+            # Só apaga a cópia provisória se o SHA-256 PROVA que o destino tem os mesmos bytes
+            # (ou o mapa do destino registra este mesmo conteúdo ali): tamanho igual não basta.
+            soma = _sha256(arquivo)
+            if soma == _sha256(alvo) or _mesmo_destino(mapa_d.get(soma), raiz_final, alvo):
+                arquivo.unlink()
                 movidos[arquivo] = alvo
                 continue
             raise FileExistsError(f"{alvo.name} já existe com outro conteúdo — transferência abortada")
@@ -129,7 +152,7 @@ def transferir(raiz_final: Path, pasta_estado: Path, origem: Path, destino: Path
             except ValueError:
                 continue
             (vao if stem in docs else ficam).append(_trocar(linha, trocas_texto) if stem in docs else linha)
-        ck_o.write_text("".join(f"{l}\n" for l in ficam), encoding="utf-8")
+        gravar_texto(ck_o, "".join(f"{l}\n" for l in ficam))
         if vao:
             with ck_d.open("a", encoding="utf-8") as f:
                 f.writelines(f"{l}\n" for l in vao)
@@ -147,7 +170,7 @@ def transferir(raiz_final: Path, pasta_estado: Path, origem: Path, destino: Path
         dados = _ler(lote, {}) or {}
         dados["arquivos"] = [a for a in dados.get("arquivos", []) if a.get("codigo") in docs]
         texto = _trocar(json.dumps(dados, ensure_ascii=False, indent=1), trocas_texto)
-        alvo.write_text(texto, encoding="utf-8")
+        gravar_texto(alvo, texto)
 
     if livro is not None:
         for antigo, atual in movidos.items():

@@ -445,7 +445,10 @@ def _comando_diagnostico(config: Config, fundo: str) -> int:
     from nucleo import releitura as _rel
 
     raiz = Path(config.raiz_final)
+    from nucleo import entrada as _entrada
+
     total = {"documentos": 0, "lidos": 0, "vazias_ou_sem_leitura": 0, "sem_jpg": 0, "sem_pacote": 0}
+    exif_incompleto: list[tuple[str, int]] = []
     print(f"{'projeto':<12} {'docs':>5} {'lidos':>5} {'erro':>5} {'carimbo':>7} {'vazias':>6} {'semJPG':>6}  pacote")
     for pasta in _rel.projetos(raiz, fundo):
         d = _rel.diagnostico(pasta)
@@ -454,6 +457,14 @@ def _comando_diagnostico(config: Config, fundo: str) -> int:
         for k in ("documentos", "lidos", "vazias_ou_sem_leitura", "sem_jpg"):
             total[k] += d[k]
         total["sem_pacote"] += d["pacote"] != "v2"
+        faltando = _entrada.exif_incompleto(pasta, raiz)
+        if faltando:
+            exif_incompleto.append((d["codigo"], len(faltando)))
+    if exif_incompleto:
+        print(f"EXIF INCOMPLETO em {len(exif_incompleto)} projeto(s) (lote cortado durante a gravação; "
+              "o vigia retoma sozinho quando o lote voltar à fila):")
+        for codigo, n in exif_incompleto:
+            print(f"  {codigo}: {n} arquivo(s) sem XMP conferido")
     if config.pasta_entrada and Path(config.pasta_entrada).is_dir():
         from nucleo import quarentena as _q
 
@@ -744,6 +755,18 @@ def main(argv: list[str] | None = None) -> int:
     registro.configurar(PASTA_ESTADO / "vigia.log")
     logging.getLogger("cv2").info("CAMP Vision 2 build %s", VERSAO_BUILD)
 
+    conserto = bool(args.reclassificar or args.organizar_formatos
+                    or (args.reidentificar and args.sim)
+                    or (args.consertar_acervo is not None and args.sim))
+    trava_conserto = None
+    if conserto:
+        from nucleo import instancia as _instancia
+
+        trava_conserto, recusa = _instancia.travar_conserto(PASTA_ESTADO)
+        if recusa:
+            print(f"Não rodei: {recusa}", file=sys.stderr)
+            return 1
+
     if args.identidade:
         return _comando_identidade(config)
     if args.refazer:
@@ -855,6 +878,14 @@ def main(argv: list[str] | None = None) -> int:
         cliente = ClienteAnthropic(config)
     except RuntimeError as erro:
         print(erro, file=sys.stderr)
+        return 1
+
+    from nucleo import instancia as _instancia
+
+    trava = _instancia.travar_servico(PASTA_ESTADO)  # segura até o processo sair
+    if trava is None:
+        print("Já há outra instância do vigia (ou um comando de conserto) rodando — "
+              f"lock em {PASTA_ESTADO / _instancia.NOME_LOCK}. Nada foi iniciado.", file=sys.stderr)
         return 1
 
     vigilante = mod_vigia.Vigia(config, cliente, PASTA_ESTADO, repo=RAIZ_REPO)
