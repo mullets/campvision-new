@@ -58,6 +58,15 @@ def e_marcador(nome: str) -> bool:
     return nome in MARCADORES or fnmatch.fnmatch(nome, _INFO_LOTE)
 
 
+# Cópia em andamento / resto de cópia interrompida das estações: `X.tif.copiando` (Windows e Mac) e `status.json.<id>.tmp`
+# (gravação atômica). Nunca são arquivo do lote: não contam, não são copiados e não viram "formato não suportado".
+SUFIXOS_PARCIAIS = (".copiando", ".tmp")
+
+
+def e_parcial(nome: str) -> bool:
+    return nome.lower().endswith(SUFIXOS_PARCIAIS)
+
+
 def marcadores_da(pasta: Path) -> list[Path]:
     """Os marcadores que existem na pasta (inclui info_lote_*_mac.json)."""
     achados = [pasta / m for m in MARCADORES if (pasta / m).exists()]
@@ -128,8 +137,11 @@ class Unidade:
         return sorted(
             p for p in self.pasta.rglob("*")
             if p.is_file() and not any(x.startswith(".") for x in p.relative_to(self.pasta).parts)
-            and not e_marcador(p.name)
+            and not e_marcador(p.name) and not e_parcial(p.name)
         )
+
+    def parciais(self) -> list[Path]:
+        return [p for p in self.pasta.rglob("*") if p.is_file() and e_parcial(p.name)]
 
     def assinatura(self) -> str:
         h = hashlib.sha1()
@@ -171,7 +183,7 @@ def descobrir(raiz: Path, profundidade_maxima: int = 6) -> list[Unidade]:
             _log.warning("Não consegui listar %s: %s", pasta, erro)
             return
         tem_arquivo = any(
-            f.is_file() and not f.name.startswith(".") and not e_marcador(f.name)
+            f.is_file() and not f.name.startswith(".") and not e_marcador(f.name) and not e_parcial(f.name)
             for f in filhos
         )
         subpastas = [f for f in filhos if f.is_dir() and not f.name.startswith((".", "_"))]
@@ -204,6 +216,15 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     arquivos = unidade.arquivos()
     if not arquivos:
         return False, "vazia"
+    # `.copiando` escrito há menos que a espera = a estação ainda está copiando: espera. Mais antigo = resto de cópia
+    # interrompida: é ignorado (não conta, não é copiado) em vez de travar o lote para sempre.
+    recente = time.time() - config.espera_estabilidade_segundos
+    for parcial in unidade.parciais():
+        try:
+            if parcial.stat().st_mtime > recente:
+                return False, "cópia em andamento (.copiando recente)"
+        except OSError:
+            return False, "arquivo sumiu durante a leitura"
     marcada = (unidade.pasta / "manifesto.json").exists() or _marca_de_fim(unidade.pasta)
     espera = config.espera_estabilidade_segundos if marcada else config.entrada_quieto_minutos * 60
     limite = time.time() - espera
@@ -218,7 +239,10 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
         except OSError:
             return False, "arquivo sumiu durante a leitura"
     esperada = _contagem_esperada(unidade)
-    if esperada is not None and len(arquivos) != esperada:
+    # O manifesto.json tem nome fixo: um 2º lote no mesmo projeto, enviado antes de o CV2 pegar o 1º, o sobrescreve e ele passa
+    # a descrever só o lote mais novo. Por isso a contagem é um PISO: menos que o manifesto = ainda chegando; mais = há arquivos
+    # de um lote anterior (já conferidos pela estação) que entram junto.
+    if esperada is not None and len(arquivos) < esperada:
         return False, f"contagem {len(arquivos)} de {esperada}"
     return True, ""
 
@@ -249,7 +273,7 @@ def conferir_manifesto(unidade: Unidade) -> list[str]:
     problemas: list[str] = []
     arquivos = unidade.arquivos()
     esperada = _contagem_esperada(unidade)
-    if esperada is not None and len(arquivos) != esperada:
+    if esperada is not None and len(arquivos) < esperada:
         problemas.append(f"manifesto diz {esperada} arquivo(s); a pasta tem {len(arquivos)}")
     listados = manifesto.get("arquivos")
     if isinstance(listados, list):
