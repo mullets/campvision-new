@@ -19,6 +19,7 @@ projeto fica `erro` com o motivo. Contrato com o painel: docs/contrato-painel.md
 from __future__ import annotations
 
 import dataclasses
+import fnmatch
 import hashlib
 import json
 import logging
@@ -45,6 +46,21 @@ PROCESSANDO, PRONTO, ERRO, AGUARDANDO = "processando", "pronto", "erro", "aguard
 # Parada do serviço no meio do lote: não é defeito do lote, volta à fila no próximo início.
 CANCELADO = "cancelado antes da leitura"
 MARCADORES = ("manifesto.json", "info_projeto.json", "status.json", "status_mac.json")
+# O Mac grava um info_lote_AAAAMMDD-HHMMSS_mac.json por lote: é marcador (metadado
+# da estação), não arquivo do lote — não vai para o acervo nem gera aviso de formato.
+_INFO_LOTE = "info_lote_*_mac.json"
+MARCAS_DE_FIM = {"enviado_windows", "enviado_mac"}
+
+
+def e_marcador(nome: str) -> bool:
+    return nome in MARCADORES or fnmatch.fnmatch(nome, _INFO_LOTE)
+
+
+def marcadores_da(pasta: Path) -> list[Path]:
+    """Os marcadores que existem na pasta (inclui info_lote_*_mac.json)."""
+    achados = [pasta / m for m in MARCADORES if (pasta / m).exists()]
+    achados += sorted(pasta.glob(_INFO_LOTE))
+    return achados
 PASTAS_DE_FORMATO = {
     "tif", "tiff", "jpg", "jpeg", "dng", "pdf", "png", "raw", "preview", "previews",
     "alta", "baixa", "alta resolucao", "baixa resolucao", "matriz", "master",
@@ -113,7 +129,7 @@ class Unidade:
         return sorted(
             p for p in self.pasta.rglob("*")
             if p.is_file() and not any(x.startswith(".") for x in p.relative_to(self.pasta).parts)
-            and p.name not in MARCADORES
+            and not e_marcador(p.name)
         )
 
     def assinatura(self) -> str:
@@ -156,11 +172,11 @@ def descobrir(raiz: Path, profundidade_maxima: int = 6) -> list[Unidade]:
             _log.warning("Não consegui listar %s: %s", pasta, erro)
             return
         tem_arquivo = any(
-            f.is_file() and not f.name.startswith(".") and f.name not in MARCADORES
+            f.is_file() and not f.name.startswith(".") and not e_marcador(f.name)
             for f in filhos
         )
         subpastas = [f for f in filhos if f.is_dir() and not f.name.startswith((".", "_"))]
-        if tem_arquivo or any((pasta / m).exists() for m in MARCADORES) or (
+        if tem_arquivo or bool(marcadores_da(pasta)) or (
             subpastas and all(_e_pasta_de_formato(f.name) for f in subpastas)
         ):
             if pasta != raiz:
@@ -174,16 +190,22 @@ def descobrir(raiz: Path, profundidade_maxima: int = 6) -> list[Unidade]:
     return achadas
 
 
+def _marca_de_fim(pasta: Path) -> bool:
+    """status.json/status_mac.json com `status` OU `etapa` = enviado_windows/enviado_mac (C1)."""
+    for nome in ("status.json", "status_mac.json"):
+        dados = ler_json(pasta / nome, {})
+        if isinstance(dados, dict) and (
+                {str(dados.get("status", "")), str(dados.get("etapa", ""))} & MARCAS_DE_FIM):
+            return True
+    return False
+
+
 def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     """A estação terminou de mandar?"""
     arquivos = unidade.arquivos()
     if not arquivos:
         return False, "vazia"
-    status = ler_json(unidade.pasta / "status.json", {})
-    status_mac = ler_json(unidade.pasta / "status_mac.json", {})
-    marcada = (unidade.pasta / "manifesto.json").exists() or (
-        isinstance(status, dict) and status.get("status") == "enviado_windows"
-    ) or (isinstance(status_mac, dict) and status_mac.get("etapa") == "enviado_mac")
+    marcada = (unidade.pasta / "manifesto.json").exists() or _marca_de_fim(unidade.pasta)
     espera = config.espera_estabilidade_segundos if marcada else config.entrada_quieto_minutos * 60
     limite = time.time() - espera
     for arquivo in arquivos:
@@ -200,6 +222,45 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     if esperada is not None and len(arquivos) != esperada:
         return False, f"contagem {len(arquivos)} de {esperada}"
     return True, ""
+
+
+def conferir_manifesto(unidade: Unidade) -> list[str]:
+    """Confere o manifesto.json das estações (C1): contagem, tamanho e SHA-256.
+
+    Devolve os problemas (lista vazia = íntegro ou sem o que conferir). Só LÊ:
+    quem chama decide parar o lote sem copiar nem apagar nada.
+    """
+    manifesto = ler_json(unidade.pasta / "manifesto.json", {})
+    if not isinstance(manifesto, dict) or not manifesto:
+        return []
+    problemas: list[str] = []
+    arquivos = unidade.arquivos()
+    esperada = _contagem_esperada(unidade)
+    if esperada is not None and len(arquivos) != esperada:
+        problemas.append(f"manifesto diz {esperada} arquivo(s); a pasta tem {len(arquivos)}")
+    listados = manifesto.get("arquivos")
+    if isinstance(listados, list):
+        relativos = {a.relative_to(unidade.pasta).as_posix(): a for a in arquivos}
+        for item in listados:
+            if not isinstance(item, dict) or not item.get("caminho"):
+                continue
+            caminho = str(item["caminho"]).replace("\\", "/").strip("/")
+            alvo = relativos.get(caminho) or next(
+                (a for rel, a in relativos.items() if rel.endswith("/" + caminho) or caminho.endswith("/" + rel)), None)
+            if alvo is None:
+                problemas.append(f"arquivo do manifesto não chegou: {caminho}")
+                continue
+            try:
+                tamanho = alvo.stat().st_size
+                if item.get("tamanho") not in (None, "") and int(item["tamanho"]) != tamanho:
+                    problemas.append(f"tamanho diferente do manifesto em {caminho}: {tamanho} != {item['tamanho']}")
+                    continue
+                esperado = str(item.get("sha256") or "").lower()
+                if esperado and sha256(alvo) != esperado:
+                    problemas.append(f"arquivo corrompido (SHA-256 diferente do manifesto): {caminho}")
+            except (OSError, ValueError, TypeError) as erro:
+                problemas.append(f"não consegui conferir {caminho}: {erro}")
+    return problemas
 
 
 def _contagem_esperada(unidade: Unidade) -> int | None:
@@ -256,6 +317,20 @@ def lote_mac(pasta: Path) -> dict:
     return {}
 
 
+def dados_do_mac(mac: dict) -> dict:
+    """O que o info_lote do Mac acrescenta ao contexto (C1): operador, estação, tipo, séries."""
+    saida: dict = {}
+    for destino, origens in (("operador", ("operador",)), ("estacao", ("estacao_id", "estacao")),
+                             ("tipo_estacao", ("estacao_tipo", "tipo_estacao")),
+                             ("series", ("series",)),
+                             ("quantidade_documentos", ("quantidade_documentos",))):
+        for origem in origens:
+            if mac.get(origem) not in (None, "", []):
+                saida[destino] = mac[origem]
+                break
+    return saida
+
+
 def codigo_do_mac(dados: dict) -> str:
     """F009-P0060 quando o Mac escolheu um projeto que JÁ existe no painel.
 
@@ -278,7 +353,7 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     mac = lote_mac(unidade.pasta)
     bruto_info = mod_info.ler_bruto(unidade.pasta)
     traduzido = mod_info.ler(unidade.pasta)
-    dados = {**{k.split(".")[-1]: v for k, v in bruto_info.items()}, **manifesto}
+    dados = {**{k.split(".")[-1]: v for k, v in bruto_info.items()}, **dados_do_mac(mac), **manifesto}
 
     partes = [p for p in unidade.relativo.parts if not _e_pasta_de_formato(p)]
 
@@ -286,7 +361,7 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     # Fundo: pela TABELA, nunca chutado. O caminho (F022 - MSL - ...) e o campo
     # explícito do manifesto/info são duas fontes; se só uma identifica, vale ela;
     # se as duas identificam fundos DIFERENTES, é conflito e o lote para.
-    explicito = _texto(dados, "fundo_codigo", "fundo")
+    explicito = _texto(dados, "fundo_codigo", "codigo_fundo", "fundo")
     pelo_explicito = tabela.identificar(explicito) if explicito else None
     pelo_caminho = None
     for parte in partes:
@@ -353,6 +428,13 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     # oficial (Rafa, 09/10): o código vem da reserva no painel. O número da
     # estação vira pista — vai para o painel na reserva e fica no lote.
     if not ctx.codigo and not ctx.p_estacao:
+        # O P que a estação escreveu: numero_projeto (info/info_lote) ou identificacao_original.
+        for candidato in (_texto(dados, "numero_projeto"), _texto(dados, "identificacao_original")):
+            achado = re.match(r"^\s*P(\d{4})\b", candidato or "", re.IGNORECASE)
+            if achado:
+                ctx.p_estacao = f"P{achado.group(1)}"
+                break
+    if not ctx.codigo and not ctx.p_estacao:
         for candidato in [nome, *reversed(restantes)]:
             achado = re.match(r"^\s*P(\d{4})\b", candidato or "", re.IGNORECASE)
             if achado:
@@ -381,9 +463,10 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
     ctx.cidade = _texto(dados, "cidade") or traduzido.get("cidade", "")
     ctx.operador = _texto(dados, "operador")
     ctx.operador_email = _texto(dados, "operador_email", "email")
-    ctx.estacao = _texto(dados, "estacao")
-    ctx.tipo_estacao = _texto(dados, "tipo_estacao")
-    ctx.enviado_em = _texto(dados, "enviado_em", "horario", "data_envio")
+    ctx.estacao = _texto(dados, "estacao", "estacao_id") or traduzido.get("estacao", "")
+    ctx.tipo_estacao = _texto(dados, "tipo_estacao", "estacao_tipo") or traduzido.get("tipo_estacao", "")
+    ctx.enviado_em = (_texto(dados, "enviado_em", "horario", "data_envio", "finalizado_em")
+                      or traduzido.get("enviado_em", ""))
     ctx.lote_id = estrutura.limpar(
         _texto(dados, "lote_id", "lote")
         or f"{datetime.now():%Y%m%d-%H%M%S}-" + "_".join(unidade.relativo.parts[-3:]), 100
@@ -902,6 +985,17 @@ class Recebedor:
         ctx = contexto(unidade, self.tabela, self.config.serie_padrao)
         if ctx.problemas:
             motivo = "; ".join(ctx.problemas)
+            self.livro.anotar("erro", arquivo_origem=str(unidade.relativo), detalhe=motivo)
+            self.estado.anotar(unidade.chave, ERRO, motivo=motivo, assinatura=assinatura)
+            _log.error("Unidade %s: %s", unidade.relativo, motivo)
+            return Resultado(ERRO, motivo)
+
+        # Manifesto da estação (C1): arquivo corrompido/faltando vira erro ANTES de copiar
+        # qualquer coisa — nada é apagado da entrada.
+        quebrados = conferir_manifesto(unidade)
+        if quebrados:
+            motivo = "manifesto da estação não confere: " + "; ".join(quebrados[:5]) + (
+                f" (+{len(quebrados) - 5})" if len(quebrados) > 5 else "")
             self.livro.anotar("erro", arquivo_origem=str(unidade.relativo), detalhe=motivo)
             self.estado.anotar(unidade.chave, ERRO, motivo=motivo, assinatura=assinatura)
             _log.error("Unidade %s: %s", unidade.relativo, motivo)
@@ -1659,8 +1753,8 @@ class Recebedor:
             except OSError as erro:
                 _log.warning("Não apaguei %s: %s", origem, erro)
         if not sobrou:
-            for marcador in MARCADORES:
-                (unidade.pasta / marcador).unlink(missing_ok=True)
+            for marcador in marcadores_da(unidade.pasta):
+                marcador.unlink(missing_ok=True)
         # Remove pastas vazias de dentro para fora, sem subir acima da unidade.
         for pasta in sorted((p for p in unidade.pasta.rglob("*") if p.is_dir()),
                             key=lambda p: len(p.parts), reverse=True):

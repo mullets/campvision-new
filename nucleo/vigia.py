@@ -138,7 +138,8 @@ def ler_status(caminho: Path) -> str:
     if isinstance(dados, str):
         return dados
     if isinstance(dados, dict):
-        return str(dados.get("status", ""))
+        # As estações antigas só gravavam `etapa` (C1); as novas gravam as duas.
+        return str(dados.get("status") or dados.get("etapa") or "")
     return ""
 
 

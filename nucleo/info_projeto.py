@@ -43,6 +43,15 @@ for _campo, _nomes in {
             "dataprojeto", "periodo"),
     "tipo": ("tipo", "tipologia", "categoria", "especie", "tipodocumental"),
     "observacoes": ("observacoes", "obs", "notas", "descricao", "resumo"),
+    # Chaves que as estações gravam (C1). `numero_projeto` NÃO é o nome do projeto
+    # e `codigo_fundo` NÃO é o escritório: antes caíam em projeto/escritorio.
+    "numero_projeto": ("numeroprojeto", "nprojeto", "nroprojeto"),
+    "projeto_ja_existia": ("projetojaexistia",),
+    "fundo_codigo": ("fundocodigo", "codigofundo"),
+    "codigo": ("codigo", "projetocodigo", "codigoprojeto"),
+    "estacao": ("estacao", "estacaoid"),
+    "tipo_estacao": ("tipoestacao", "estacaotipo"),
+    "enviado_em": ("enviadoem", "finalizadoem"),
 }.items():
     for _nome in _nomes:
         ALIASES[_nome] = _campo
