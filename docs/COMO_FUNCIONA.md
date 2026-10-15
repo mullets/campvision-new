@@ -923,6 +923,7 @@ Recusa publicar se houver chave real ou `config.json` versionado, roda os testes
 |---|---|---|
 | `pasta_vigiada` | "" | pasta de projetos a vigiar |
 | `processar_pasta_vigiada` | null | null = só quando não há `pasta_entrada` |
+| `desligar_modo_antigo` | false | CAMP-024: true desliga o modo antigo (`pasta_vigiada`, `fase`, `--marcar-fase`, `--refazer`) mesmo sem `pasta_entrada`. Estações continuam: `status`/`etapa` enviado_windows/enviado_mac seguem valendo no `100 - Scanners` |
 | `raiz_de_montagem` | "" | onde os compartilhamentos montam (`/Volumes`, `/mnt`) |
 | `exigir_status_json` | true | só processa `status: enviado_windows` |
 | `criar_status_ausente` | true | cria `status.json` em pasta que não tem |

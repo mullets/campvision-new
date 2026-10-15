@@ -187,6 +187,8 @@ def _avisar_painel(config: Config, codigo: str) -> str:
 
 
 def _comando_refazer(config: Config, alvo: str) -> int:
+    if _modo_antigo_desligado(config, "--refazer"):
+        return 1
     if not config.pasta_vigiada or not Path(config.pasta_vigiada).is_dir():
         print("Defina a pasta primeiro: --pasta /caminho", file=sys.stderr)
         return 1
@@ -277,7 +279,17 @@ def _comando_planilha_geral(config: Config) -> int:
     return 0
 
 
+def _modo_antigo_desligado(config: Config, comando: str) -> bool:
+    if getattr(config, "desligar_modo_antigo", False):
+        print(f"{comando}: o modo antigo (pasta_vigiada/fase) está desligado (desligar_modo_antigo).",
+              file=sys.stderr)
+        return True
+    return False
+
+
 def _comando_marcar_fase(config: Config) -> int:
+    if _modo_antigo_desligado(config, "--marcar-fase"):
+        return 1
     if not config.pasta_vigiada:
         print("Nenhuma pasta definida. Rode com --pasta /caminho.", file=sys.stderr)
         return 1
