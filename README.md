@@ -256,7 +256,8 @@ em quatro passadas — só a 2 chama o modelo:
    "corrigida" pelo consenso.
 4. **Derivação** (código): ano só da data escrita; tipo de desenho pelos 15
    detectores (§5.2); ficha de documentação ≠ obra; autoria divergente contra
-   titular + coautores do fundo; duplicatas; `pacote_tainacan.json` e checklist
+   titular + coautores do fundo (não bloqueia: publica com a ressalva
+   "autoria não confirmada"); duplicatas; `pacote_tainacan.json` e checklist
    de aceite.
 
 Validação: `vigia.py --backtest CURADO.csv` compara com a base curada à mão

@@ -432,7 +432,7 @@ Em dúvida, nada muda e a foto continua para conferir. O painel usa `orientacao_
 - lote de teste;
 - retirado por decisão humana.
 
-**`retirados`** (fora de `documentos` no pacote): autoria divergente (sem volta), decisão "retirar", e problemas de identificação (projeto divergente, sem identificação, capa) — estes voltam com uma decisão "publicar". Duplicata, ficha e teste ficam em `documentos` com `publicavel: false`. Ressalvas e "fora do período" nunca bloqueiam.
+**`retirados`** (fora de `documentos` no pacote): decisão "retirar", e problemas de identificação (projeto divergente, sem identificação, capa) — estes voltam com uma decisão "publicar". Duplicata, ficha e teste ficam em `documentos` com `publicavel: false`. Ressalvas e "fora do período" nunca bloqueiam.
 
 **Decisões humanas:** `vigia.py --decisao CODIGO --acao retirar|publicar|nota --motivo "…" --por NOME` grava em `catalogacao/decisoes.json` (vale a mais recente) e no livro.
 
@@ -578,11 +578,11 @@ UTF-8 com BOM, vírgula, ordenado por grupo e folha. Colunas: Código, Arquivo, 
 
 ### 7.5 Erros, relatório e aceite
 
-**`erros.json`:** categorias metadado, autoria divergente, duplicata, projeto errado, série, espelhado, orientação, arquivo corrompido; gravidade bloqueia, corrigir ou aviso.
+**`erros.json`:** categorias metadado, autoria divergente, duplicata, projeto errado, série, espelhado, orientação, arquivo corrompido; gravidade bloqueia, corrigir ou aviso. Autoria divergente é `corrigir` (contrato 2.4): a folha fica em `documentos`, publicável, com a ressalva "autoria não confirmada: <o que o carimbo diz>".
 
 **`relatorio.txt`**, sempre nas 8 partes: 1) origem × saída; 2) séries; 3) duplicatas; 4) autoria, projeto divergente, sem identificação, capas; 5) o que precisa de gente (orientação, série); 6) folhas faltantes pelo total do carimbo (ex.: "C-3/12"); 7) ressalvas; 8) retirados e não suportados. Termina com a linha de execução (versão, contrato, modelo, chamadas, tokens, custo, tempo, prompts).
 
-**`lotes/<lote>.json` → `aceite`:** `contagem_origem_igual_saida`, `sem_autoria_divergente`, `orientacao_incerta_zerada`, `serie_incerta_zerada`, `exif_conferido`, `publicavel`, `pendencias`. Quem decide a publicação é o painel.
+**`lotes/<lote>.json` → `aceite`:** `contagem_origem_igual_saida`, `folhas_autoria_nao_confirmada` (contagem, não bloqueia), `orientacao_incerta_zerada`, `serie_incerta_zerada`, `exif_conferido`, `publicavel`, `pendencias`. Quem decide a publicação é o painel.
 
 **`status.json` no "pronto":** `codigo, status, status_em, lote_atual, lotes_prontos, imagens, folhas, com_carimbo, a_revisar, erros_bloqueantes, versao_cv2`. Valores de `status`: `processando`, `aguardando` (só na pasta provisória), `pronto`, `erro`.
 

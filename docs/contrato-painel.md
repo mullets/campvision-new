@@ -2,7 +2,7 @@
 
 **Contrato 2.3 — 15/10/2026** (integração com as estações; ver §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
 
-- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.3"`.
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.4"`.
 - Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
   - Para regenerar: `python -m tests.contrato_exemplos`.
 - Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
@@ -133,7 +133,7 @@ Valores de `status`, nesta ordem:
   {
     "arquivo": "F002-P0002-1975-S01-D00017.tif",
     "categoria": "autoria divergente",
-    "gravidade": "bloqueia",
+    "gravidade": "corrigir",
     "origem": "CAMP Vision",
     "detalhe": "carimbo diz Joaquim Barretto Arquitetos Associados"
   }
@@ -297,13 +297,13 @@ Publicar só itens com `publicavel: true`.
 ### 9.4 Aceite do lote
 
 `catalogacao/lotes/<lote>.json` ganha `aceite`: `contagem_origem_igual_saida`,
-`sem_autoria_divergente`, `orientacao_incerta_zerada`, `exif_conferido`,
-`publicavel` e `pendencias`. O `status` continua `pronto` quando o trabalho do CV2
+`orientacao_incerta_zerada`, `exif_conferido`,
+`publicavel`, `pendencias` e `folhas_autoria_nao_confirmada` (contrato 2.4: autoria divergente deixou de bloquear; é aviso). O `status` continua `pronto` quando o trabalho do CV2
 acabou; o painel usa `aceite.publicavel` + `erros_bloqueantes` para liberar.
 
 ### 9.5 Erros novos em `erros.json`
 
-`autoria divergente` (bloqueia, agora contra titular + coautores),
+`autoria divergente` (corrigir desde o contrato 2.4: a folha segue publicável com a ressalva "autoria não confirmada: <carimbo>"; agora contra titular + coautores),
 `duplicata` (exata ou perceptual, corrigir), `espelhado` (aviso, preview já
 corrigido), `orientação` (aviso: orientação incerta, conferir na folha de
 contatos), `metadado` com ressalvas de leitura (ex.: "ano lido 1985, a série
@@ -336,7 +336,7 @@ O `pacote_tainacan.json` passa a seguir o esquema D.3, com `"versao": 2`.
   - `programa_sugerido`, `natureza_sugerida` e `sugestao`: são sempre sugestões; quem grava é gente.
   - `capa_sugerida`.
 - `documentos` (o antigo `itens` continua igual): `titulo` já limpo (CV-21) e `titulo_lido` literal; `codigo_unidade`, `revisao`; `data_lida`, `data_iso`, `data_sugerida`, `data_outlier`; `rastreio` (de onde veio cada campo); `fotografo` (do `info_projeto.json`, senão "fotógrafo não identificado"); `confianca_rotacao`; `projeto_divergente`; `decisao`.
-- `retirados`: folhas com autoria divergente ou retiradas por decisão humana. Não entram em `documentos` (CV-06 e CV-25).
+- `retirados`: folhas retiradas por decisão humana ou com projeto divergente/sem identificação/capa (autoria divergente NÃO retira mais: fica em `documentos`, `publicavel: true`, `autoria_divergente: true`, ressalva "autoria não confirmada: ..."). Não entram em `documentos` (CV-06 e CV-25).
 - `propostas`: obras distintas na pasta pelo código de unidade (CV-08) e fotos sem obra agrupadas por semelhança (CV-22). A mesma coisa vai em `catalogacao/propostas.json`.
 - `teste: true`: lote de teste; nenhum documento é publicável.
 

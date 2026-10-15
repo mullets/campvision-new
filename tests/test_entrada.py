@@ -351,22 +351,25 @@ class TestMetodoNoRecebimento(Base):
         self.assertIn("_campvision", primeiro["preview"])
         self.assertEqual(list(res.pasta_projeto.rglob("*.jpg")).__len__(), 2 + 1,  # 2 docs + contatos
                          "nenhuma imagem extra dentro do projeto")
-        # autoria de outro arquiteto bloqueia
+        # CAMP-046: autoria divergente NÃO bloqueia: erro `corrigir`, folha publicável com ressalva
         erros = json.loads((cat / "erros.json").read_text())
-        self.assertTrue(any(e["categoria"] == "autoria divergente" and e["gravidade"] == "bloqueia" for e in erros))
+        self.assertTrue(any(e["categoria"] == "autoria divergente" and e["gravidade"] == "corrigir" for e in erros))
+        self.assertFalse(any(e["categoria"] == "autoria divergente" and e["gravidade"] == "bloqueia" for e in erros))
         pacote = json.loads((cat / "pacote_tainacan.json").read_text())
-        # CV-06: autoria divergente sai do pacote de publicação e vai para "retirados".
-        self.assertEqual(len(pacote["documentos"]), 0)
-        self.assertEqual(len(pacote["retirados"]), 2)
-        self.assertFalse(pacote["retirados"][0]["publicavel"])
-        self.assertIn("autoria divergente", pacote["retirados"][0]["bloqueios"])
-        self.assertEqual(pacote["retirados"][0]["credito"],
+        self.assertEqual(len(pacote["documentos"]), 2)
+        self.assertEqual(len(pacote["retirados"]), 0)
+        d0 = pacote["documentos"][0]
+        self.assertTrue(d0["publicavel"])
+        self.assertTrue(d0["autoria_divergente"])
+        self.assertNotIn("autoria divergente", d0["bloqueios"])
+        self.assertTrue(any(r.startswith("autoria não confirmada:") for r in d0["ressalvas"]))
+        self.assertEqual(d0["credito"],
                          "Acervo Sami Bussab/CAMP - Casa da Arquitetura Moderna Paulista")
         lote = json.loads(next((cat / "lotes").glob("*.json")).read_text())
-        self.assertFalse(lote["aceite"]["publicavel"])
-        self.assertIn("sem_autoria_divergente", lote["aceite"]["pendencias"])
+        self.assertNotIn("sem_autoria_divergente", lote["aceite"]["pendencias"])
+        self.assertEqual(lote["aceite"]["folhas_autoria_nao_confirmada"], 2)
         status = json.loads((res.pasta_projeto / "status.json").read_text())
-        self.assertGreaterEqual(status["erros_bloqueantes"], 2)
+        self.assertEqual(status["erros_bloqueantes"], 0)
         # CSV com as colunas do método
         cabecalho = (cat / "catalogacao.csv").read_text(encoding="utf-8-sig").splitlines()[0]
         for coluna in ("Autoria divergente", "Duplicata de", "Orientação incerta", "Transcrição integral"):
