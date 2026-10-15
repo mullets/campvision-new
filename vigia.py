@@ -509,7 +509,7 @@ def _comando_reidentificar(config: Config, alvo: str, sim: bool) -> int:
     perguntas = sum(1 for p in planos for g in p["grupos"] if g["acao"] == "perguntar")
     print(f"\n{len(planos)} projeto(s): {len(mexe)} com mudança, {perguntas} grupo(s) para uma pessoa decidir.")
     if not sim:
-        print("Nada foi feito. Para aplicar, repita com --sim (só depois das rotas de mesclar/mover do painel).")
+        print("Nada foi feito (simulação é o padrão). Para aplicar, repita com --sim.")
         return 0
     livro = Livro(raiz)
     for plano in mexe:
@@ -649,7 +649,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--reconferir-tipo", action="store_true",
                    help="Recalcula o tipo de desenho e REGRAVA o gravado (método §9.2; CAMP-051)")
     p.add_argument("--simular", action="store_true",
-                   help="Com --reconferir-tipo: só lista o que mudaria, sem regravar")
+                   help="Com --reconferir-tipo ou --reidentificar: só lista o que mudaria, sem regravar")
     p.add_argument("--reclassificar", metavar="F0xx-P000x",
                    help="Troca a série (--serie) e/ou o ano (--ano) dos documentos de um projeto")
     p.add_argument("--serie", metavar="S01", help="Série nova para --reclassificar")
@@ -759,7 +759,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("cv2").info("CAMP Vision 2 build %s", VERSAO_BUILD)
 
     conserto = bool(args.reclassificar or args.organizar_formatos
-                    or (args.reidentificar and args.sim)
+                    or (args.reidentificar and args.sim and not args.simular)
                     or (args.consertar_acervo is not None and args.sim))
     trava_conserto = None
     if conserto:
@@ -816,7 +816,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.consertar_acervo is not None:
         return _comando_consertar(config, args.consertar_acervo, args.escopo, args.sim)
     if args.reidentificar:
-        return _comando_reidentificar(config, args.reidentificar, args.sim)
+        return _comando_reidentificar(config, args.reidentificar, args.sim and not args.simular)
     if args.reler:
         from nucleo import releitura as _rel
         from nucleo.livro import Livro

@@ -11,8 +11,15 @@ cada grupo com a base do fundo e mostra o plano. Com `--sim`:
   pacote de publicação (retirados), com o que o carimbo diz;
 - refaz os pacotes e avisa o painel de cada projeto tocado.
 
-Nada é apagado. Folha já publicada no site muda de código: rode com `--sim` só
-depois que o painel tiver as rotas de mesclar/mover (cartão 156 do painel).
+Nada é apagado. Folha já publicada no site muda de código; o painel recusa (409) mover
+folha pública sem despublicar antes.
+
+CAMP-009 — painel: depois de mover os arquivos, `aplicar` grava
+`catalogacao/reidentificacao_painel.json` com as chamadas das rotas do painel
+(`POST /api/itens/mover`, `/api/projetos/{origem}/mesclar-em`; admin, por cookie de
+sessão — o token da estação não vale). Só CHAMA se houver `CAMP_PAINEL_SESSAO`;
+sem ela o arquivo é o roteiro para fazer pela tela. O aviso por projeto continua.
+Sem `--sim` (ou com `--simular`) nada é regravado nem chamado.
 """
 
 from __future__ import annotations
@@ -89,6 +96,31 @@ def texto(plano: dict) -> str:
     return "\n".join(linhas)
 
 
+def chamadas_painel(origem: str, destino: str, trocas: dict, folhas_origem: list[str]) -> dict:
+    """Rota certa para uma mudança: projeto inteiro → mesclar-em; parte → itens/mover. `trocas` = {código antigo: novo}."""
+    antigos = sorted(trocas)
+    inteiro = bool(folhas_origem) and set(folhas_origem) <= set(antigos)
+    if inteiro:
+        return {"rota": f"POST /api/projetos/{origem}/mesclar-em", "corpo": {"destino": destino,
+                "motivo": f"reidentificado pelo carimbo"}, "origem": origem, "destino": destino, "folhas": antigos}
+    return {"rota": "POST /api/itens/mover", "corpo": {"itens": antigos, "destino": destino,
+            "motivo": "reidentificado pelo carimbo"}, "origem": origem, "destino": destino, "folhas": antigos}
+
+
+def avisar_painel_das_mudancas(painel, chamadas: list[dict]) -> list[dict]:
+    """Chama as rotas só com sessão de admin; registra o resultado de cada uma. Nunca levanta."""
+    for c in chamadas:
+        if not (painel is not None and getattr(painel, "ligado", False) and getattr(painel, "sessao", "")):
+            c["resultado"] = "não chamado (sem CAMP_PAINEL_SESSAO): faça pela tela do painel"
+            continue
+        if c["rota"].endswith("mesclar-em"):
+            status, dados = painel.mesclar_projeto(c["origem"], c["destino"], c["corpo"]["motivo"])
+        else:
+            status, dados = painel.mover_folhas(c["destino"], c["corpo"]["itens"], c["corpo"]["motivo"])
+        c["resultado"] = {"http": status, "resposta": dados if isinstance(dados, dict) else None}
+    return chamadas
+
+
 def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict], livro, painel, tabela=None) -> list[str]:
     """Move o que tem destino forte, marca o resto no preparo, refaz os pacotes. Devolve os projetos tocados."""
     from .entrada import marcar_identidade
@@ -110,6 +142,7 @@ def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict],
                 preparos.setdefault(c, {}).setdefault("identidade", {})["divergente"] = g is not dono
     gravar_json(pasta / "catalogacao" / "preparo.json", preparos, indent=1)
     pasta_fundo = pasta.parents[1]
+    chamadas: list[dict] = []
     for g in plano["grupos"]:
         if g["acao"] != "mover":
             continue
@@ -126,6 +159,7 @@ def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict],
             ident.update(divergente=False, sem_identificacao=False)
         gravar_json(destino / "catalogacao" / "preparo.json", prep_d, indent=1)
         _mover_leituras(pasta, destino, trocas)
+        chamadas.append(chamadas_painel(codigo, g["destino"], trocas, list(leituras)))
         tocados.add(g["destino"])
     for c in sorted(tocados):
         try:
@@ -135,6 +169,9 @@ def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict],
         alvo = mod_rel.mod_renomear.achar_projeto(raiz_final, c)
         if alvo is not None and painel is not None:
             painel.aviso(c, str(alvo.relative_to(raiz_final)), "pronto")
+    if chamadas:
+        chamadas = avisar_painel_das_mudancas(painel, chamadas)
+        gravar_json(pasta / "catalogacao" / "reidentificacao_painel.json", chamadas, indent=1)
     salvo = {k: v for k, v in plano.items() if not k.startswith("_")}
     gravar_json(pasta / "catalogacao" / "reidentificacao.json", salvo, indent=1)
     return sorted(tocados)

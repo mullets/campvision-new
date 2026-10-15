@@ -349,6 +349,30 @@ class TestReidentificar(TestPontaAPontaIdentidade):
         self.assertEqual(len(pacote["documentos"]), 2)
         self.assertEqual(pacote["projeto_codigo"], "F026-P0089")
         self.assertIn(("F026-P0089", "pronto"), {(a[0], a[2]) for a in painel.avisos})
+        # CAMP-009: roteiro das rotas do painel (sem CAMP_PAINEL_SESSAO nada é chamado)
+        chamadas = json.loads((pasta / "catalogacao" / "reidentificacao_painel.json").read_text())
+        self.assertEqual(sorted(c["destino"] for c in chamadas), ["F026-P0087", "F026-P0089"])
+        self.assertTrue(all(c["rota"] == "POST /api/itens/mover" for c in chamadas))
+        self.assertTrue(all(str(c["resultado"]).startswith("não chamado") for c in chamadas))
+
+    def test_chamadas_painel_rota_e_so_com_sessao(self):
+        from nucleo import reidentificar as r
+
+        parcial = r.chamadas_painel("F026-P0001", "F026-P0087", {"a": "x"}, ["a", "b"])
+        self.assertEqual(parcial["rota"], "POST /api/itens/mover")
+        self.assertEqual(parcial["corpo"]["itens"], ["a"])
+
+        class P:
+            ligado = True
+            sessao = ""
+            def __init__(self): self.n = 0
+            def mover_folhas(self, *a): self.n += 1; return 200, {"movidos": []}
+        sem = P()
+        r.avisar_painel_das_mudancas(sem, [dict(parcial)])
+        self.assertEqual(sem.n, 0)
+        com = P(); com.sessao = "abc"
+        [c] = r.avisar_painel_das_mudancas(com, [dict(parcial)])
+        self.assertEqual((com.n, c["resultado"]["http"]), (1, 200))
 
 
 if __name__ == "__main__":
