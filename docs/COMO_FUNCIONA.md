@@ -422,7 +422,7 @@ Em dúvida, nada muda e a foto continua para conferir. O painel usa `orientacao_
 - textual: "<Tipo documental> — <assunto>" e "(remetente, data)" nas cartas;
 - **título para publicar** (`titulo_publicacao`): tira nome do projeto e da pasta e passa texto todo em maiúsculas para frase normal.
 
-**Bloqueios** (`projeto.py`; `publicavel = sem bloqueio`):
+- (autoria divergente deixou de bloquear no contrato 2.4: vira ressalva);
 - autoria divergente;
 - projeto divergente ("o carimbo diz '…'");
 - sem identificação (pasta com várias obras);
