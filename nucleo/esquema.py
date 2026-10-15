@@ -105,6 +105,8 @@ class Leitura:
     anotacoes_manuscritas: list[str] = field(default_factory=list)
     observacoes_leitura: list[str] = field(default_factory=list)
     foto: dict[str, Any] = field(default_factory=dict)
+    # CAMP-019: {"rotacao", "orientacao_clara"} pedidos ao modelo numa prancha sem texto.
+    orientacao_modelo: dict[str, Any] = field(default_factory=dict)
     # Preparo (§2) e consolidação (§4)
     md5: str = ""
     hash_perceptual: str = ""
@@ -195,8 +197,10 @@ def _campo_schema(descricao: str) -> dict[str, Any]:
     }
 
 
-def esquema_ferramenta() -> dict[str, Any]:
-    """Esquema da leitura de PRANCHA (§3.2). Cada campo: {valor, confianca, alternativas, onde}."""
+def esquema_ferramenta(com_orientacao: bool = False) -> dict[str, Any]:
+    """Esquema da leitura de PRANCHA (§3.2). Cada campo: {valor, confianca, alternativas, onde}.
+
+    `com_orientacao` (CAMP-019, opcional): acrescenta rotacao + orientacao_clara."""
     propriedades: dict[str, Any] = {
         "legivel": {"type": "boolean", "description": "false se a folha não dá para ler."},
         "tem_carimbo": {"type": "boolean", "description": "true se há carimbo/legenda de título."},
@@ -213,6 +217,11 @@ def esquema_ferramenta() -> dict[str, Any]:
         "anotacoes_manuscritas": {"type": "array", "items": {"type": "string"}},
         "observacoes_de_leitura": {"type": "array", "items": {"type": "string"}},
     })
+    if com_orientacao:
+        propriedades["rotacao"] = {"type": "integer", "enum": [0, 90, 180, 270],
+                                   "description": "Graus no sentido horário para a folha ficar em pé."}
+        propriedades["orientacao_clara"] = {"type": "boolean",
+                                            "description": "true só quando o lado de cima é evidente."}
     return {
         "name": "registrar_prancha",
         "description": "Registra a transcrição de uma prancha de arquitetura.",

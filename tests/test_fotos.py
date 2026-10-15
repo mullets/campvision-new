@@ -81,6 +81,55 @@ class TestLeitorVeFoto(unittest.TestCase):
         self.assertEqual(l.modo, "prancha")
 
 
+class TestOrientacaoDePranchaSemTexto(unittest.TestCase):
+    """CAMP-019: croqui sem texto — o OCR fica incerto; o modelo (se o config pedir) decide com certeza."""
+
+    CROQUI = {"legivel": True, "tem_carimbo": False, "e_fotografia": False, "transcricao_integral": "",
+              "rotacao": 90, "orientacao_clara": True}
+
+    def ler(self, config, resposta):
+        with TemporaryDirectory() as tmp:
+            caminho = foto_clara(Path(tmp) / "F026-P0001-1972-S01-D00001.jpg")
+            cliente = ClienteFalso([resposta])
+            return visao.LeitorDeCarimbo(config, cliente).ler(caminho), cliente
+
+    def test_desligado_por_padrao_nao_pede(self):
+        l, cliente = self.ler(Config(), self.CROQUI)
+        self.assertFalse(Config().orientar_prancha_pelo_modelo)
+        self.assertNotIn("orientacao", l.versao_prompt)
+        self.assertEqual(l.orientacao_modelo.get("orientacao_clara"), True)  # o que veio é guardado; o pedido é que não sai
+
+    def test_ligado_guarda_orientacao_e_gira_so_com_certeza(self):
+        self.assertIn("orientacao_clara", visao.esquema_ferramenta(True)["input_schema"]["properties"])
+        self.assertNotIn("orientacao_clara", visao.esquema_ferramenta()["input_schema"]["properties"])
+        l, _ = self.ler(Config(orientar_prancha_pelo_modelo=True), self.CROQUI)
+        self.assertEqual(l.orientacao_modelo, {"rotacao": 90, "orientacao_clara": True})
+        self.assertTrue(l.versao_prompt.endswith("+orientacao"))
+        with TemporaryDirectory() as tmp:
+            jpg = foto_clara(Path(tmp) / "a.jpg", 300, 200)
+            prep = {"rotacao": 0, "incerta": True}
+            self.assertTrue(derivados.orientar_pela_foto(prep, l.orientacao_modelo, [jpg], []))
+            self.assertEqual((prep["rotacao"], prep["incerta"]), (90, False))
+            with Image.open(jpg) as a:
+                self.assertEqual(a.size, (200, 300))
+
+    def test_duvida_do_modelo_continua_incerta(self):
+        l, _ = self.ler(Config(orientar_prancha_pelo_modelo=True), dict(self.CROQUI, orientacao_clara=False))
+        prep = {"rotacao": 0, "incerta": True}
+        self.assertFalse(derivados.orientar_pela_foto(prep, l.orientacao_modelo, [], []))
+        self.assertTrue(prep["incerta"])
+
+    def test_ocr_certo_nao_e_contrariado_pelo_modelo(self):
+        l, _ = self.ler(Config(orientar_prancha_pelo_modelo=True), self.CROQUI)
+        prep = {"rotacao": 270, "incerta": False}
+        self.assertFalse(derivados.orientar_pela_foto(prep, l.orientacao_modelo, [], []))
+        self.assertEqual(prep["rotacao"], 270)
+
+    def test_rotacao_invalida_vira_zero(self):
+        l, _ = self.ler(Config(orientar_prancha_pelo_modelo=True), dict(self.CROQUI, rotacao=45))
+        self.assertEqual(l.orientacao_modelo["rotacao"], 0)
+
+
 class TestOrientarPelaFoto(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()

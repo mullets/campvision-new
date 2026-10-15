@@ -146,6 +146,11 @@ class Config:
     # Série quando a pasta do scanner não diz o material: S01 (desenhos e
     # pranchas), que é o grosso do acervo. Estação de foto vira S03 sozinha.
     serie_padrao: str = "S01"
+    # CAMP-019: prancha SEM texto (croqui) não tem como o OCR decidir a orientação. Ligado,
+    # a leitura da prancha também devolve rotacao + orientacao_clara (mesma regra da foto:
+    # só gira com certeza, e só onde o OCR deixou "incerta"). Desligado por padrão até medir
+    # com gabarito (--avaliar) em croquis reais.
+    orientar_prancha_pelo_modelo: bool = False
     # Lote só vira "pronto" com o EXIF conferido em TODAS as cópias.
     entrada_exigir_exif: bool = True
     # Depois de "pronto" (cópia conferida por hash + EXIF), apaga o original

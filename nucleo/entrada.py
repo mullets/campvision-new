@@ -1395,8 +1395,8 @@ class Recebedor:
         girou_foto = False
         for codigo_doc, versoes in por_codigo.items():
             l = leituras.get(codigo_doc)
-            if l is not None and l.foto and mod_derivados.orientar_pela_foto(
-                    preparos.get(codigo_doc), l.foto, versoes,
+            if l is not None and (l.foto or l.orientacao_modelo) and mod_derivados.orientar_pela_foto(
+                    preparos.get(codigo_doc), l.foto or l.orientacao_modelo, versoes,
                     [cache / f"{codigo_doc}.jpg", preview_dir / f"{codigo_doc}.jpg"]):
                 girou_foto = True
                 prep = preparos[codigo_doc]
