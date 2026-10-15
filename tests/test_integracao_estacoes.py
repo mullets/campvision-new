@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nucleo import entrada, fundos, vigia
+from nucleo.livro import Livro
 from tests.test_entrada import Base
 
 
@@ -222,6 +223,29 @@ class TestHeartbeat(Base):
         with self.assertLogs("cv2", level="WARNING") as logs:
             v._talvez_heartbeat(forcar=True)
         self.assertIn("Heartbeat", logs.output[0])
+
+
+class TestDescartado(Base):
+    def test_410_marca_o_lote_descartado_e_para_de_chamar(self):
+        chamadas = []
+
+        def reservar(fundo, titulo, chave, **extra):
+            chamadas.append(extra)
+            self.painel.ultima_reserva = {"pendente": False, "existente": False, "descartado": True,
+                                          "mensagem": "Lote descartado pela equipe"}
+            return None
+
+        self.painel.reservar = reservar
+        pasta = self.scan("F026 - SBU Sami Bussab", "01 - Desenhos e pranchas", "Casa Nova 1980", n=1)
+        [r] = self.rodar()
+        self.assertEqual(r.status, entrada.DESCARTADO, r.motivo)
+        self.assertEqual(len(chamadas), 1)
+        self.assertTrue(pasta.exists())  # nada apagado da entrada
+        self.assertIn("descartado", [l["acao"] for l in Livro(self.acervo).todas()])
+        ultimo = entrada.Estado(self.estado).ultimos()
+        self.assertEqual(next(iter(ultimo.values()))["status"], "descartado")
+        self.assertEqual(self.rodar(), [])  # a fila ignora o lote descartado (mesma assinatura)
+        self.assertEqual(len(chamadas), 1)
 
 
 # Corpo REAL de GET /api/estacoes/contexto do camp-painel (tests/teste_backend.py, F099).

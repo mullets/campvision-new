@@ -773,7 +773,7 @@ class Vigia:
                                                    assinatura=unidade.assinatura())
                 continue
             self.estado.fila = max(0, self.estado.fila - 1)
-            if r.status == mod_entrada.AGUARDANDO:
+            if r.status in (mod_entrada.AGUARDANDO, mod_entrada.DESCARTADO):
                 continue
             feitos += 1
             contagens = r.lote.get("contagens", {})

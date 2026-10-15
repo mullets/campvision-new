@@ -15,12 +15,18 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 _log = logging.getLogger("cv2.painel")
+
+# Aviso que o painel recusa com 5xx volta para a fila, mas não para sempre (C7).
+MAX_TENTATIVAS_AVISO = 20
+# 4xx é recusa definitiva (repetir não adianta), menos estes: o painel só pediu para esperar.
+_TRANSITORIOS = (408, 425, 429)
 
 
 def _numero_do_projeto(dados: dict) -> str:
@@ -98,6 +104,16 @@ class Painel:
         # uma pessoa (sem código; tentar de novo com a mesma chave); 200 com
         # existente=true = "é o mesmo projeto", o material entra no que já existe.
         self.ultima_reserva = {"pendente": False, "existente": False, "mensagem": ""}
+        if status == 410:
+            # C7: o painel descartou este projeto/lote. Não é erro nem espera: o CV2
+            # marca o lote como descartado e para de chamar.
+            mensagem = str((dados or {}).get("mensagem") if isinstance(dados, dict) else "") or \
+                "lote descartado no painel"
+            self.ultima_reserva = {"pendente": False, "existente": False, "descartado": True,
+                                   "mensagem": mensagem}
+            self.ultimo_erro = mensagem
+            _log.warning("Reserva descartada pelo painel (410): %s", mensagem)
+            return None
         if status == 202 and isinstance(dados, dict):
             mensagem = str(dados.get("mensagem") or "aguardando decisão no painel (projeto parecido)")
             self.ultima_reserva = {"pendente": True, "existente": False, "mensagem": mensagem,
@@ -161,11 +177,26 @@ class Painel:
         """Pede ao painel para reler só esta pasta. Falhou: guarda para depois."""
         corpo = {"codigo": codigo, "pasta": pasta, "status": status_projeto,
                  "em": datetime.now().isoformat(timespec="seconds")}
-        status, _ = self._chamar("POST", "/api/campvision/aviso", corpo)
+        status, dados = self._chamar("POST", "/api/campvision/aviso", corpo)
+        veredito = self._veredito_do_aviso(corpo, status, dados)
+        if veredito == "reenfileirar":
+            self._enfileirar(corpo)
+        return veredito == "ok"
+
+    @staticmethod
+    def _veredito_do_aviso(corpo: dict, status: int, dados) -> str:
+        """'ok' | 'descartar' | 'reenfileirar' (C7)."""
         if 200 <= status < 300:
-            return True
-        self._enfileirar(corpo)
-        return False
+            if isinstance(dados, dict) and dados.get("ok") is False:
+                _log.warning("Aviso de %s aceito mas com ok:false — %s", corpo.get("codigo"),
+                             dados.get("motivo") or dados)
+                return "descartar"
+            return "ok"
+        if status == 0 or status >= 500 or status in _TRANSITORIOS:
+            return "reenfileirar"
+        _log.warning("Aviso de %s recusado pelo painel (HTTP %s): %s — não será reenviado",
+                     corpo.get("codigo"), status, dados)
+        return "descartar"
 
     # ------------------------------------------------------------ fila
     def _ler_fila(self) -> dict:
@@ -182,7 +213,10 @@ class Painel:
             return
         try:
             self.fila.parent.mkdir(parents=True, exist_ok=True)
-            self.fila.write_text(json.dumps(fila, ensure_ascii=False, indent=1), encoding="utf-8")
+            # Atômico: temporário + rename. Queda no meio nunca deixa a fila pela metade.
+            temporario = self.fila.with_name(f".{self.fila.name}.tmp")
+            temporario.write_text(json.dumps(fila, ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(temporario, self.fila)
         except OSError as erro:
             _log.warning("Fila de avisos não gravada: %s", erro)
 
@@ -201,12 +235,22 @@ class Painel:
             return 0
         enviados = 0
         for codigo, corpo in list(fila.items()):
-            status, _ = self._chamar("POST", "/api/campvision/aviso", corpo)
-            if 200 <= status < 300:
+            enviavel = {k: v for k, v in corpo.items() if not k.startswith("_")}
+            status, dados = self._chamar("POST", "/api/campvision/aviso", enviavel)
+            veredito = self._veredito_do_aviso(enviavel, status, dados)
+            if veredito == "ok":
                 fila.pop(codigo)
                 enviados += 1
+            elif veredito == "descartar":
+                fila.pop(codigo)
             elif status == 0:
                 break  # painel fora: não insiste nos outros agora
+            else:  # 5xx: conta a tentativa e desiste no limite
+                corpo["_tentativas"] = int(corpo.get("_tentativas", 0)) + 1
+                if corpo["_tentativas"] >= MAX_TENTATIVAS_AVISO:
+                    _log.warning("Aviso de %s descartado após %d tentativas (HTTP %s)",
+                                 codigo, corpo["_tentativas"], status)
+                    fila.pop(codigo)
         self._gravar_fila(fila)
         return enviados
 

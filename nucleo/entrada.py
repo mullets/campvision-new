@@ -43,6 +43,7 @@ from .esquema import CAMPOS
 _log = logging.getLogger("cv2.entrada")
 
 PROCESSANDO, PRONTO, ERRO, AGUARDANDO = "processando", "pronto", "erro", "aguardando"
+DESCARTADO = "descartado"  # o painel respondeu 410 à reserva: o lote não vale mais (C7)
 # Parada do serviço no meio do lote: não é defeito do lote, volta à fila no próximo início.
 CANCELADO = "cancelado antes da leitura"
 MARCADORES = ("manifesto.json", "info_projeto.json", "status.json", "status_mac.json")
@@ -923,6 +924,7 @@ class Recebedor:
                  tabela: mod_fundos.Tabela | None = None) -> None:
         self.config = config
         self.cliente = cliente
+        self._descartado = ""
         self.painel = painel
         self.livro = livro
         self.pasta_estado = pasta_estado
@@ -938,7 +940,7 @@ class Recebedor:
         fila = []
         for unidade in descobrir(self.raiz_entrada):
             ultimo = feitos.get(unidade.chave, {})
-            if (ultimo.get("status") in (PRONTO, ERRO) and ultimo.get("motivo") != CANCELADO
+            if (ultimo.get("status") in (PRONTO, ERRO, DESCARTADO) and ultimo.get("motivo") != CANCELADO
                     and ultimo.get("assinatura") == unidade.assinatura()):
                 continue  # nada mudou desde a última vez
             fila.append(unidade)
@@ -1304,7 +1306,10 @@ class Recebedor:
         do_lote = {c: leituras[c] for c in por_codigo if c in leituras}
         base = ((self.painel.contexto(ctx.fundo.codigo) or {}).get("projetos") or []) if self.painel.ligado else []
         analise = mod_ident.analisar(do_lote, {c: _proporcao(cache / f"{c}.jpg") for c in do_lote}, base)
+        self._descartado = ""
         plano, pendente = self._planejar(analise, ctx, unidade, do_lote, base)
+        if self._descartado:
+            return self._descartar(unidade, ctx, pasta, codigo, assinatura, self._descartado, resultado, lote)
         marcar_identidade(preparos, analise, plano, do_lote)
         gravar_json(preparo_caminho, preparos)
         gravar_json(catalogacao / "identificacao.json", {
@@ -1475,6 +1480,9 @@ class Recebedor:
                 **extra) or ""
             if not codigo:
                 pend = getattr(self.painel, "ultima_reserva", None) or {}
+                if pend.get("descartado"):
+                    self._descartado = str(pend.get("mensagem") or "lote descartado")
+                    return [], self._descartado
                 if extra.get("candidatos"):
                     lista = " × ".join(c["codigo"] for c in extra["candidatos"])
                     esperando.append(f"'{titulo}': qual projeto? ({lista}) — decisão no painel")
@@ -1518,6 +1526,21 @@ class Recebedor:
         return {"codigo": codigo.upper(), "nome": nome or grupo.titulo if grupo.folhas else (nome or ctx.projeto or codigo),
                 "documentos": list(grupo.folhas), "folhas_grupo": list(grupo.folhas), "grupo": grupo.titulo,
                 "motivo": motivo}
+
+    def _descartar(self, unidade: Unidade, ctx: Contexto, pasta: Path, codigo: str, assinatura: str,
+                   mensagem: str, resultado: Resultado, lote: dict) -> Resultado:
+        """410 do painel (C7): marca o lote como descartado e para de chamar. Não apaga a origem."""
+        motivo = f"descartado no painel: {mensagem}"
+        lote["status"] = DESCARTADO
+        gravar_json(pasta / "catalogacao" / "lotes" / f"{ctx.lote_id}.json", lote)
+        self._status(pasta, codigo, ERRO, ctx, motivo=motivo)
+        self.livro.anotar("descartado", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                          arquivo_origem=str(Path("100 - Scanners") / unidade.relativo), detalhe=motivo)
+        self.estado.anotar(unidade.chave, DESCARTADO, motivo=motivo, assinatura=assinatura, codigo=codigo)
+        _log.warning("Lote %s descartado pelo painel (410): %s — a origem em 100 - Scanners ficou como está.",
+                     ctx.lote_id, mensagem)
+        resultado.status, resultado.motivo, resultado.lote = DESCARTADO, motivo, lote
+        return resultado
 
     # ------------------------------------------------------------ conclusão (por projeto)
     def _concluir(self, unidade: Unidade, ctx: Contexto, pasta: Path, codigo: str, nome: str, lote: dict,
