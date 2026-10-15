@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 import shutil
@@ -621,6 +622,19 @@ class TestVigia(Base):
     def test_varredura_antiga_desligada_quando_ha_entrada(self):
         self.assertFalse(self.config.varre_pasta_vigiada)
         self.assertTrue(Config(pasta_vigiada="/x").varre_pasta_vigiada)
+
+    def test_desligar_modo_antigo_vale_mesmo_sem_entrada_e_com_true(self):
+        self.assertTrue(Config(pasta_vigiada="/x").varre_pasta_vigiada)       # padrão: nada muda
+        self.assertFalse(Config(pasta_vigiada="/x", desligar_modo_antigo=True).varre_pasta_vigiada)
+        self.assertFalse(Config(pasta_vigiada="/x", processar_pasta_vigiada=True,
+                                desligar_modo_antigo=True).varre_pasta_vigiada)
+
+    def test_estacoes_antigas_continuam_com_modo_antigo_desligado(self):
+        """O recebimento por 100 - Scanners segue aceitando status/etapa das estações."""
+        cfg = dataclasses.replace(self.config, desligar_modo_antigo=True)
+        self.assertIn("enviado_windows", entrada.MARCAS_DE_FIM)
+        self.assertIn("enviado_mac", entrada.MARCAS_DE_FIM)
+        self.assertEqual(cfg.pasta_entrada, self.config.pasta_entrada)
 
 
 if __name__ == "__main__":

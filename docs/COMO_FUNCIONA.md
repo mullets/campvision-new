@@ -923,6 +923,7 @@ Recusa publicar se houver chave real ou `config.json` versionado, roda os testes
 |---|---|---|
 | `pasta_vigiada` | "" | pasta de projetos a vigiar |
 | `processar_pasta_vigiada` | null | null = só quando não há `pasta_entrada` |
+| `desligar_modo_antigo` | false | CAMP-024: true desliga o modo antigo (`pasta_vigiada`, `fase`, `--marcar-fase`, `--refazer`) mesmo sem `pasta_entrada`. Estações continuam: `status`/`etapa` enviado_windows/enviado_mac seguem valendo no `100 - Scanners` |
 | `raiz_de_montagem` | "" | onde os compartilhamentos montam (`/Volumes`, `/mnt`) |
 | `exigir_status_json` | true | só processa `status: enviado_windows` |
 | `criar_status_ausente` | true | cria `status.json` em pasta que não tem |
@@ -997,7 +998,7 @@ Encontrados na auditoria de 14/10 (nenhum foi corrigido ainda, salvo indicação
 12. **Mensagem do `--reler`** diz "sem sobrescrever nada", mas ele regrava a catalogação (guardando o antes).
 13. **Painel responde 202 a todo aviso**, mesmo quando ignora a pasta; e 410 no `/reservar` deixa o lote aguardando para sempre.
 14. **Chaves de config sem efeito** (seção 12) ainda aparecem no `config.json`.
-15. **Orientação de prancha sem texto** (croqui) continua só pelo OCR.
+15. **Orientação de prancha sem texto** (croqui): pelo OCR, como sempre. CAMP-019 acrescentou, atrás de `orientar_prancha_pelo_modelo` (config, **desligado**), o pedido de `rotacao` + `orientacao_clara` na MESMA chamada da prancha (sem chamada extra; só alguns tokens a mais por folha). Só gira onde o OCR deixou `incerta` e o modelo diz `orientacao_clara=true` (mesma regra da foto); dúvida continua marcada. **Falta (precisa de croquis reais e chave):** medir com gabarito antes de ligar por padrão; aceite do card = lote de croquis girados com ≥ 90% em pé. O `--avaliar` hoje compara campos, não rotação: o gabarito de giro ainda não existe.
 16. **Levantamento** dos projetos de foto que entraram como S01 ou sem descrição antes da versão 2026-10-14-04.
 
 ---

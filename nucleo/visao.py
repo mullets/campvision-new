@@ -57,6 +57,15 @@ REGRAS
 
 Devolva chamando a ferramenta registrar_prancha."""
 
+INSTRUCOES_ORIENTACAO = """
+
+10. Em "rotacao", diga quantos graus no sentido HORÁRIO a folha precisa girar para
+    ficar em pé (texto, carimbo, cota e desenho legíveis na posição normal de
+    leitura): 0, 90, 180 ou 270. "orientacao_clara" é true só quando não há dúvida
+    (texto legível, carimbo, cotas, escala gráfica, norte, figura humana ou
+    vegetação com topo evidente). Croqui abstrato, planta sem texto ou traço sem
+    direção definida → false. Na dúvida, false."""
+
 INSTRUCOES_FOTO = """Você vai descrever UMA fotografia de acervo de arquitetura.
 
 REGRAS
@@ -219,6 +228,13 @@ def _lista(valor: Any) -> list[str]:
     return [str(valor).strip()] if _texto(valor) else []
 
 
+def _inteiro(valor: Any) -> int:
+    try:
+        return int(valor or 0) % 360
+    except (TypeError, ValueError):
+        return 0
+
+
 def _para_leitura(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
     """Converte a saída da ferramenta em Leitura, sem confiar na forma.
 
@@ -231,6 +247,10 @@ def _para_leitura(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
         leitura.rotacao = int(entrada.get("rotacao", 0) or 0) % 360
     except (TypeError, ValueError):
         leitura.rotacao = 0
+    if "orientacao_clara" in entrada:    # CAMP-019: só vem quando o config pediu
+        giro = _inteiro(entrada.get("rotacao"))
+        leitura.orientacao_modelo = {"rotacao": giro if giro in (0, 90, 180, 270) else 0,
+                                     "orientacao_clara": entrada.get("orientacao_clara") is True}
     leitura.transcricao_integral = _texto(entrada.get("transcricao_integral"))
     leitura.materiais_citados = _lista(entrada.get("materiais_citados"))
     leitura.anotacoes_manuscritas = _lista(entrada.get("anotacoes_manuscritas"))
@@ -352,7 +372,8 @@ class LeitorDeCarimbo:
     def __init__(self, config: Config, cliente: ClienteAPI) -> None:
         self.config = config
         self.cliente = cliente
-        self.ferramenta = esquema_ferramenta()
+        self.orienta_prancha = bool(getattr(config, "orientar_prancha_pelo_modelo", False))
+        self.ferramenta = esquema_ferramenta(self.orienta_prancha)
         self.ferramenta_foto = esquema_fotografia()
         self.ferramenta_texto = esquema_textual()
 
@@ -362,7 +383,8 @@ class LeitorDeCarimbo:
         resultado = Leitura(arquivo=caminho.name)
         modo = modo or modo_do_arquivo(caminho.name)
         resultado.versao_cv2 = _VERSAO_CACHE.setdefault("v", versao_completa())
-        resultado.versao_prompt = f"{modo}:{VERSAO_PROMPT.get(modo, '')}"
+        resultado.versao_prompt = f"{modo}:{VERSAO_PROMPT.get(modo, '')}" + (
+            "+orientacao" if modo == "prancha" and self.orienta_prancha else "")
         resultado.modelo = getattr(self.config, "modelo", "")
         try:
             original = img_mod.abrir(caminho)
@@ -375,7 +397,8 @@ class LeitorDeCarimbo:
             pedido, ferramenta, instrucoes, converter = {
                 "fotografia": ("Descreva esta fotografia.", self.ferramenta_foto, INSTRUCOES_FOTO, _para_foto),
                 "textual": ("Transcreva este documento.", self.ferramenta_texto, INSTRUCOES_TEXTO, _para_textual),
-            }.get(modo, ("Transcreva esta prancha.", self.ferramenta, INSTRUCOES, _para_leitura))
+            }.get(modo, ("Transcreva esta prancha.", self.ferramenta,
+                              INSTRUCOES + (INSTRUCOES_ORIENTACAO if self.orienta_prancha else ""), _para_leitura))
             mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": pedido}]}]
             entrada, t_in, t_out = self.cliente.chamar(mensagens, ferramenta, instrucoes)
             resultado.tokens_entrada, resultado.tokens_saida, resultado.passes = t_in, t_out, 1

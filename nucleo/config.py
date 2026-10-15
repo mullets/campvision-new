@@ -146,6 +146,11 @@ class Config:
     # Série quando a pasta do scanner não diz o material: S01 (desenhos e
     # pranchas), que é o grosso do acervo. Estação de foto vira S03 sozinha.
     serie_padrao: str = "S01"
+    # CAMP-019: prancha SEM texto (croqui) não tem como o OCR decidir a orientação. Ligado,
+    # a leitura da prancha também devolve rotacao + orientacao_clara (mesma regra da foto:
+    # só gira com certeza, e só onde o OCR deixou "incerta"). Desligado por padrão até medir
+    # com gabarito (--avaliar) em croquis reais.
+    orientar_prancha_pelo_modelo: bool = False
     # Lote só vira "pronto" com o EXIF conferido em TODAS as cópias.
     entrada_exigir_exif: bool = True
     # Depois de "pronto" (cópia conferida por hash + EXIF), apaga o original
@@ -161,6 +166,12 @@ class Config:
     # A varredura antiga (status.json "enviado_windows" na pasta_vigiada).
     # None = automática: ligada só quando não há pasta_entrada.
     processar_pasta_vigiada: bool | None = None
+    # CAMP-024: desliga de vez o modo antigo (pasta_vigiada + status.json "enviado_windows" →
+    # "campvision_concluido" + `fase`), mesmo sem pasta_entrada e mesmo com
+    # processar_pasta_vigiada=true. NÃO mexe no que as estações gravam (status/etapa
+    # enviado_windows/enviado_mac continuam valendo no recebimento por 100 - Scanners).
+    # Desligado por padrão: ligar só depois de confirmar que nenhum projeto depende do modo antigo.
+    desligar_modo_antigo: bool = False
 
     # --- Painel de administração (docs/contrato-painel.md) ---
     painel_url: str = ""
@@ -267,6 +278,8 @@ class Config:
 
     @property
     def varre_pasta_vigiada(self) -> bool:
+        if self.desligar_modo_antigo:
+            return False
         if self.processar_pasta_vigiada is None:
             return not self.pasta_entrada
         return bool(self.processar_pasta_vigiada)

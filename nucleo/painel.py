@@ -27,6 +27,8 @@ _log = logging.getLogger("cv2.painel")
 MAX_TENTATIVAS_AVISO = 20
 # 4xx é recusa definitiva (repetir não adianta), menos estes: o painel só pediu para esperar.
 _TRANSITORIOS = (408, 425, 429)
+# Rotas do painel que exigem usuário admin (cookie de sessão), não o token da estação.
+_ROTAS_ADMIN = ("/api/itens/mover", "/api/projetos/")
 
 
 def _numero_do_projeto(dados: dict) -> str:
@@ -50,6 +52,9 @@ class Painel:
         self.ultimo_erro = ""
         self.ultima_reserva: dict = {"pendente": False, "existente": False, "mensagem": ""}
         self.ultimo_ok: str = ""
+        # Sessão de ADMIN do painel (cookie camp_sessao), só para as rotas de mover/mesclar
+        # (CAMP-009). O token da estação NÃO vale nelas. Vazio = o CV2 não chama essas rotas.
+        self.sessao = os.environ.get("CAMP_PAINEL_SESSAO", "")
 
     @property
     def ligado(self) -> bool:
@@ -67,6 +72,8 @@ class Painel:
             pedido.add_header("Content-Type", "application/json; charset=utf-8")
         if self.token:
             pedido.add_header("X-Camp-Token", self.token)
+        if self.sessao and caminho.startswith(_ROTAS_ADMIN):
+            pedido.add_header("Cookie", f"camp_sessao={self.sessao}")
         try:
             with urllib.request.urlopen(pedido, timeout=self.timeout) as resposta:
                 bruto = resposta.read().decode("utf-8") or "null"
@@ -165,6 +172,14 @@ class Painel:
         corpo = {"ok": ok, "mensagem": (mensagem or "")[:500], **resumo}
         status, _ = self._chamar("POST", f"/api/estacoes/pedidos-releitura/{pedido_id}/concluido", corpo)
         return 200 <= status < 300
+
+    def mover_folhas(self, destino: str, itens: list[str], motivo: str = "") -> tuple[int, dict | None]:
+        """POST /api/itens/mover (admin). Painel antigo/sem sessão: (status, corpo) para registrar; nunca levanta."""
+        return self._chamar("POST", "/api/itens/mover", {"itens": itens, "destino": destino, "motivo": motivo})
+
+    def mesclar_projeto(self, origem: str, destino: str, motivo: str = "") -> tuple[int, dict | None]:
+        """POST /api/projetos/{origem}/mesclar-em (admin)."""
+        return self._chamar("POST", f"/api/projetos/{origem}/mesclar-em", {"destino": destino, "motivo": motivo})
 
     def heartbeat(self, dados: dict) -> bool:
         status, resposta = self._chamar("POST", "/api/estacoes/heartbeat", dados)
