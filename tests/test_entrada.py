@@ -492,6 +492,49 @@ class TestFalhasNaoApagam(Base):
         self.assertFalse(ok)
         self.assertEqual(motivo, "arquivos ainda chegando")
 
+    def _manifesto(self, pasta: Path, n: int) -> None:
+        (pasta / "manifesto.json").write_text(json.dumps({"versao": 1, "contagens": {"arquivos": n}}), encoding="utf-8")
+
+    def test_copiando_antigo_nao_conta_nem_trava_o_lote(self):
+        # resto de cópia interrompida (`X.jpg.copiando`) não é arquivo do lote: não entra na contagem do manifesto
+        self.config.espera_estabilidade_segundos = 0
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
+        self._manifesto(pasta, 2)
+        (pasta / "JPG" / "scan 003.jpg.copiando").write_bytes(b"parcial")
+        unidade = entrada.descobrir(self.scanners)[0]
+        self.assertEqual(len(unidade.arquivos()), 2)
+        ok, motivo = entrada.pronta(unidade, self.config)
+        self.assertTrue(ok, motivo)
+
+    def test_copiando_recente_faz_esperar(self):
+        self.config.espera_estabilidade_segundos = 3600
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
+        self._manifesto(pasta, 2)
+        (pasta / "JPG" / "scan 003.jpg.copiando").write_bytes(b"em andamento")
+        ok, motivo = entrada.pronta(entrada.descobrir(self.scanners)[0], self.config)
+        self.assertFalse(ok)
+        self.assertIn("copiando", motivo)
+
+    def test_manifesto_do_2o_lote_nao_trava_o_1o(self):
+        # o manifesto.json tem nome fixo: o 2º lote o sobrescreve e ele passa a contar só o lote mais novo (2) enquanto a
+        # pasta já tem os dois lotes (4). Mais arquivos que o manifesto = lote anterior junto, não é motivo para esperar.
+        self.config.espera_estabilidade_segundos = 0
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("tif", "jpg"))
+        self._manifesto(pasta, 2)
+        unidade = entrada.descobrir(self.scanners)[0]
+        self.assertEqual(len(unidade.arquivos()), 4)
+        ok, motivo = entrada.pronta(unidade, self.config)
+        self.assertTrue(ok, motivo)
+        self.assertEqual(entrada.conferir_manifesto(unidade), [])
+
+    def test_manifesto_com_menos_arquivos_que_o_declarado_continua_esperando(self):
+        self.config.espera_estabilidade_segundos = 0
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
+        self._manifesto(pasta, 5)
+        ok, motivo = entrada.pronta(entrada.descobrir(self.scanners)[0], self.config)
+        self.assertFalse(ok)
+        self.assertEqual(motivo, "contagem 2 de 5")
+
     def test_etapas_longas_aparecem_no_log(self):
         self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
         with self.assertLogs("cv2.entrada", level="INFO") as log:
