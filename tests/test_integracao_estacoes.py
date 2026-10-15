@@ -6,11 +6,13 @@ As estruturas abaixo copiam o que sistema_windows.py (`_escrever_info_local`,
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 from nucleo import entrada, fundos, vigia
 from nucleo.livro import Livro
@@ -192,6 +194,92 @@ class TestLoteMistoDoMac(Base):
             self.assertEqual(len(achados), 2, pasta)
             self.assertTrue(all(f"-{serie}-" in a.name for a in achados))
         self.assertFalse(projeto.exists())
+
+
+class TestExifRetomavel(Base):
+    """CAMP-010: lote cortado no meio do EXIF volta sem API e só regrava o que faltou."""
+
+    MARCA = b"\nXMP-CV2-OK"
+
+    def fake_exif(self, falhar_no_segundo=False):
+        gravados = []
+
+        def gravar(itens, identidade):
+            for i, (d, _c) in enumerate(itens):
+                if falhar_no_segundo and i == 1:
+                    raise OSError("QNAP caiu no meio do EXIF")
+                with open(d, "ab") as f:  # muda o hash, como o exiftool muda
+                    f.write(self.MARCA)
+                gravados.append(d.name)
+            return len(itens), []
+
+        def conferir(itens):
+            return {p for p, _ in itens if p.read_bytes().endswith(self.MARCA)}
+        return gravar, conferir, gravados
+
+    def processar(self, r, gravar, conferir):
+        with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=gravar), \
+                mock.patch.object(entrada, "conferir_exif", side_effect=conferir):
+            return [r.processar(u) for u in r.pendentes()]
+
+    def test_corte_no_exif_retoma_sem_api_e_regrava_so_o_que_faltou(self):
+        origem = self.scan("F026 - SBU Sami Bussab", "01 - Desenhos e pranchas", "Casa Nova 1980",
+                           n=3, formatos=("jpg",))
+        r = self.recebedor()
+        gravar, conferir, gravados = self.fake_exif(falhar_no_segundo=True)
+        with self.assertRaises(OSError):
+            self.processar(r, gravar, conferir)
+        self.assertEqual(len(gravados), 1)  # só o primeiro ficou com EXIF
+        chamadas_api = len(r.cliente.chamadas)
+        self.assertTrue(origem.exists())  # nada apagado da entrada
+        projeto = next((self.acervo / "F026 - SBU Sami Bussab" / "01 - Projetos").iterdir())
+        self.assertTrue((projeto / "catalogacao" / "exif_pendente.json").exists())
+        self.assertEqual(entrada.Estado(self.estado).ultimos()[
+            next(iter(entrada.Estado(self.estado).ultimos()))]["status"], entrada.PASSO_EXIF)
+        with mock.patch.object(entrada, "conferir_exif", side_effect=conferir):
+            self.assertEqual(len(entrada.exif_incompleto(projeto, self.acervo)), 2)
+
+        # --diagnostico lista o projeto com EXIF incompleto
+        import contextlib
+        import io
+        import vigia as comando
+        sem_entrada = dataclasses.replace(self.config, pasta_entrada="")
+        saida = io.StringIO()
+        with mock.patch.object(entrada, "conferir_exif", side_effect=conferir), contextlib.redirect_stdout(saida):
+            comando._comando_diagnostico(sem_entrada, "")
+        self.assertIn("EXIF INCOMPLETO em 1 projeto", saida.getvalue())
+        self.assertIn("F026-P0001: 2 arquivo(s)", saida.getvalue())
+
+        gravar2, conferir2, gravados2 = self.fake_exif()
+        r2 = self.recebedor()
+        r2.cliente = r.cliente
+        [res] = self.processar(r2, gravar2, conferir2)
+        self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+        self.assertEqual(len(r.cliente.chamadas), chamadas_api)  # sem gastar API
+        self.assertEqual(len(gravados2), 2)  # só os 2 que faltavam
+        self.assertEqual(sorted(gravados2), sorted(set(gravados2)))
+        self.assertFalse(set(gravados2) & set(gravados))
+        self.assertFalse((projeto / "catalogacao" / "exif_pendente.json").exists())
+        with mock.patch.object(entrada, "conferir_exif", side_effect=conferir2):
+            self.assertEqual(entrada.exif_incompleto(projeto, self.acervo), [])
+        self.assertFalse(origem.exists())
+        todos = sorted(p for p in projeto.rglob("*.jpg"))
+        self.assertEqual(len(todos), 3)  # nada duplicado
+        self.assertTrue(all(p.read_bytes().endswith(self.MARCA) for p in todos))
+
+    def test_arquivos_ja_no_acervo_sem_exif_sao_regravados(self):
+        self.scan("F026 - SBU Sami Bussab", "01 - Desenhos e pranchas", "Casa Nova 1980", n=2, formatos=("jpg",))
+        # 1ª passada: EXIF "não gravado" (exiftool ausente) -> erro, mas arquivos ficam no acervo
+        gravar0 = lambda itens, ident: (0, ["sem exiftool"])  # noqa: E731
+        self.config.entrada_exigir_exif = True
+        [r0] = self.processar(self.recebedor(), gravar0, lambda itens: set())
+        self.assertEqual(r0.status, entrada.ERRO)
+        for chave in entrada.Estado(self.estado).ultimos():
+            entrada.Estado(self.estado).anotar(chave, "refazer")  # como --refazer-lote
+        gravar, conferir, gravados = self.fake_exif()
+        [res] = self.processar(self.recebedor(), gravar, conferir)
+        self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+        self.assertEqual(len(gravados), 2)
 
 
 class TestManifesto(Base):

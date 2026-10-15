@@ -569,6 +569,53 @@ def conferir_exif(itens: list[tuple[Path, str]]) -> set[Path]:
     }
 
 
+# ---- EXIF retomável (CAMP-010)
+
+PASSO_EXIF = "exif"  # estado local: o lote parou no meio da gravação de metadados
+EXIF_PENDENTE = "exif_pendente.json"
+
+
+def campos_do_exif(ctx: Contexto, codigo_doc: str, leitura, nome: str, nome_original: str) -> dict:
+    """Os campos que vão para o EXIF/XMP de um documento (mesmos no lote e na retomada)."""
+    campos = {c.rotulo: (leitura.valores.get(c.nome, "") if leitura else "") for c in CAMPOS}
+    campos.update({
+        "_credito": ctx.fundo.credito, "_codigo": codigo_doc, "_fundo": ctx.fundo.codigo,
+        "_autor": ctx.fundo.nome,
+        "_serie": codigo_doc.split("-")[3] if codigo_doc.count("-") >= 4 else ctx.serie,
+        "_operador": ctx.operador, "_estacao": ctx.estacao,
+        "_digitalizado_em": ctx.enviado_em, "_nome_original": nome_original,
+    })
+    if not campos.get("Projeto"):
+        campos["Projeto"] = nome
+    return campos
+
+
+def marcar_exif_pendente(catalogacao: Path, lote_id: str, destinos: list[Path], raiz_final: Path) -> None:
+    def rel(d: Path) -> str:
+        try:
+            return str(d.relative_to(raiz_final))
+        except ValueError:
+            return str(d)
+    gravar_json(catalogacao / EXIF_PENDENTE, {"lote_id": lote_id, "desde": _agora(),
+                                              "arquivos": [rel(d) for d in destinos]})
+
+
+def limpar_exif_pendente(catalogacao: Path) -> None:
+    (catalogacao / EXIF_PENDENTE).unlink(missing_ok=True)
+
+
+def exif_incompleto(pasta_projeto: Path, raiz_final: Path) -> list[Path]:
+    """Arquivos do projeto cujo EXIF ficou pela metade (marcador + conferência). [] = ok."""
+    marcador = ler_json(pasta_projeto / "catalogacao" / EXIF_PENDENTE, None)
+    if not isinstance(marcador, dict):
+        return []
+    alvos = [raiz_final / a for a in marcador.get("arquivos") or [] if (raiz_final / a).exists()]
+    if not alvos:
+        return []
+    ok = conferir_exif([(a, a.stem) for a in alvos])
+    return [a for a in alvos if a not in ok]
+
+
 # ================================================================ erros
 
 def enriquecer(leituras: dict, preparos: dict, fundo) -> None:
@@ -1170,6 +1217,13 @@ class Recebedor:
 
         if cancelar is not None and cancelar.is_set():
             return falhar(CANCELADO)
+        if ja_arquivados:
+            # Já estavam no acervo (lote cortado antes do fim, reenvio): confere o EXIF e
+            # regrava SÓ o que faltar — nunca entrega arquivo sem metadado (CAMP-010).
+            faltou = self._garantir_exif(ja_arquivados, ctx, estado_vigia)
+            if faltou:
+                return falhar(f"EXIF conferido em {faltou[0]} de {faltou[1]} arquivo(s) já no acervo"
+                              + (f": {faltou[2]}" if faltou[2] else ""))
         if not arquivados:  # tudo o que veio já estava no acervo: nada a ler nem a decidir
             from . import transferir as mod_transferir
 
@@ -1681,24 +1735,26 @@ class Recebedor:
             if destino in ja_vistos or destino.suffix.lower() in formatos.SEM_EXIF:
                 continue
             ja_vistos.add(destino)
-            leitura = leituras.get(codigo_doc)
-            campos = {c.rotulo: (leitura.valores.get(c.nome, "") if leitura else "") for c in CAMPOS}
-            campos.update({
-                "_credito": ctx.fundo.credito, "_codigo": codigo_doc, "_fundo": ctx.fundo.codigo,
-                "_autor": ctx.fundo.nome,
-                "_serie": codigo_doc.split("-")[3] if codigo_doc.count("-") >= 4 else ctx.serie,
-                "_operador": ctx.operador, "_estacao": ctx.estacao,
-                "_digitalizado_em": ctx.enviado_em, "_nome_original": origem.name,
-            })
-            if not campos.get("Projeto"):
-                campos["Projeto"] = nome
-            itens.append((destino, campos))
+            itens.append((destino, campos_do_exif(ctx, codigo_doc, leituras.get(codigo_doc), nome, origem.name)))
+        # Retomada de um lote cortado no EXIF: o que já está certo não é regravado.
+        retomada = (catalogacao / EXIF_PENDENTE).exists()
+        ja_certos = conferir_exif([(d, Path(d).stem) for d, _ in itens]) if retomada else set()
+        if ja_certos:
+            _log.info("Lote %s: retomando o EXIF — %d de %d arquivo(s) já estão certos.",
+                      ctx.lote_id, len(ja_certos), len(itens))
+        # Passo marcado ANTES de gravar: lote cortado aqui volta pelo EXIF, sem API (CAMP-010).
+        marcar_exif_pendente(catalogacao, ctx.lote_id, [d for d, _ in itens], self.raiz_final)
+        self.estado.anotar(unidade.chave, PASSO_EXIF, assinatura=assinatura, codigo=codigo, lote_id=ctx.lote_id)
         _log.info("Lote %s: gravando metadados em %d arquivo(s)…", ctx.lote_id, len(itens))
         if estado_vigia is not None:
             estado_vigia.situacao = f"gravando metadados ({len(itens)})"
-        gravados, avisos = mod_metadados.gravar_em_lote(itens, self.config.identidade())
+        gravados, avisos = mod_metadados.gravar_em_lote(
+            [(d, c) for d, c in itens if d not in ja_certos], self.config.identidade())
+        gravados += len(ja_certos)
         _log.info("Lote %s: conferindo metadados…", ctx.lote_id)
         conferidos = conferir_exif([(d, Path(d).stem) for d, _ in itens])
+        if len(conferidos) >= len(itens):
+            limpar_exif_pendente(catalogacao)
         lote["exif"] = {"total": len(itens), "gravados": gravados, "conferidos": len(conferidos),
                         "avisos": avisos}
         for destino, campos in itens:
@@ -1756,6 +1812,54 @@ class Recebedor:
 
         resultado.status, resultado.lote = PRONTO, lote
         return resultado
+
+    def _garantir_exif(self, ja_arquivados: list, ctx: Contexto, estado_vigia=None):
+        """Arquivos que já estavam no acervo: confere o XMP e regrava só o que faltar.
+
+        Devolve None quando está tudo certo (ou o config não exige EXIF), senão
+        (conferidos, total, aviso). Não usa API: as leituras vêm do leituras.json do projeto.
+        """
+        from . import planilha as mod_planilha
+
+        destinos: dict[Path, tuple[str, str]] = {}
+        for origem, destino, codigo_doc, _s in ja_arquivados:
+            if destino.suffix.lower() not in formatos.SEM_EXIF and destino.exists():
+                destinos.setdefault(destino, (codigo_doc, origem.name))
+        if not destinos:
+            return None
+        conferidos = conferir_exif([(d, d.stem) for d in destinos])
+        faltam = [d for d in destinos if d not in conferidos]
+        if not faltam:
+            for d in {d.parents[2] for d in destinos if len(d.parents) > 2}:
+                limpar_exif_pendente(d / "catalogacao")
+            return None
+        _log.info("Lote %s: %d de %d arquivo(s) já no acervo sem EXIF completo — regravando só esses.",
+                  ctx.lote_id, len(faltam), len(destinos))
+        if estado_vigia is not None:
+            estado_vigia.situacao = f"gravando metadados ({len(faltam)})"
+        leituras_por_projeto: dict[Path, dict] = {}
+        itens = []
+        for d in faltam:
+            projeto = d.parents[2]
+            if projeto not in leituras_por_projeto:
+                leituras_por_projeto[projeto] = {
+                    Path(l.arquivo).stem: l
+                    for l in mod_planilha.ler_json(projeto / "catalogacao" / "leituras.json")}
+            codigo_doc, nome_original = destinos[d]
+            itens.append((d, campos_do_exif(ctx, d.stem, leituras_por_projeto[projeto].get(d.stem),
+                                            estrutura.nome_sem_codigo(projeto.name), nome_original)))
+        gravados, avisos = mod_metadados.gravar_em_lote(itens, self.config.identidade())
+        ok_agora = conferir_exif([(d, d.stem) for d, _ in itens])
+        for d in ok_agora:
+            self.livro.anotar("exif_gravado", lote_id=ctx.lote_id, codigo_documento=d.stem,
+                              arquivo_destino=self._relativo(d), detalhe="regravado na retomada do lote")
+        if len(ok_agora) < len(faltam):
+            if self.config.entrada_exigir_exif:
+                return (len(destinos) - len(faltam) + len(ok_agora), len(destinos), avisos[-1] if avisos else "")
+            return None
+        for projeto in leituras_por_projeto:
+            limpar_exif_pendente(projeto / "catalogacao")
+        return None
 
     def _erros(self, catalogacao: Path, erros: list[dict]) -> None:
         gravar_json(catalogacao / "erros.json", erros)
