@@ -5,7 +5,7 @@ nome está escrito na folha. Inferir biografia, contexto, autoria ou "ano prová
 pelo estilo" é adivinhação e está proibido.
 
 - ano: só de data escrita (4 dígitos, ou dd.mm.aa → 19aa com a data completa);
-- tipo de desenho: 15 detectores com limite de palavra, ordem canônica, até 3,
+- tipo de desenho: 14 detectores com limite de palavra, ordem canônica, até 3,
   Implantação suprime Planta, nenhum gatilho → vazio (§5.2);
 - documento ≠ obra: títulos que descrevem documento são marcados antes de
   qualquer classificação de obra (§5.5);
@@ -38,7 +38,8 @@ def ano_da_data(data: str) -> str:
 
 # ---------------------------------------------------------------- tipo de desenho
 
-ORDEM = ("Implantação", "Planta", "Corte", "Elevação", "Fachada", "Detalhe", "Estrutura",
+TIPO_ELEVACAO_FACHADA = "Elevação/Fachada"  # CAMP-051: Elevação e Fachada são um tipo só
+ORDEM = ("Implantação", "Planta", "Corte", TIPO_ELEVACAO_FACHADA, "Detalhe", "Estrutura",
          "Instalações", "Mobiliário", "Perspectiva", "Croqui", "Fotografia", "Levantamento",
          "Documento", "Tabela")
 
@@ -50,8 +51,7 @@ GATILHOS: dict[str, tuple[str, ...]] = {
     "Planta": (r"planta\w*", r"pav", r"pavimento", r"terreo", r"andar", r"cobertura",
                r"lay-?out", r"subsolo", r"mezanino", r"sobreloja"),
     "Corte": (r"corte\w*", r"secao"),
-    "Elevação": (r"elevac\w*",),
-    "Fachada": (r"fachada\w*",),
+    TIPO_ELEVACAO_FACHADA: (r"elevac\w*", r"fachada\w*"),
     "Detalhe": (r"detalhe\w*", r"ampliac\w*", r"esquadria"),
     "Estrutura": (r"estrutur\w*", r"forma", r"formas", r"armac\w*", r"fundac\w*", r"viga\w*",
                   r"pilar\w*", r"laje", r"concreto", r"sapata", r"baldrame"),

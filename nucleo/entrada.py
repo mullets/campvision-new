@@ -247,6 +247,27 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     return True, ""
 
 
+MINUTOS_LOTE_INCOMPLETO = 30  # CAMP-051/aviso: faltando arquivo do manifesto há mais que isto → alerta
+
+
+def lote_incompleto_parado(unidade: Unidade, motivo: str, minutos: int = MINUTOS_LOTE_INCOMPLETO,
+                           agora: float | None = None) -> str:
+    """Texto de alerta quando o lote tem MENOS arquivos que o manifesto e nada chega há `minutos`.
+
+    `pronta()` devolve "contagem N de M" e o lote espera; sem isto esperava em silêncio para sempre."""
+    if not motivo.startswith("contagem "):
+        return ""
+    try:
+        ultimo = max(max(a.stat().st_mtime, a.stat().st_ctime) for a in unidade.arquivos())
+    except (OSError, ValueError):
+        return ""
+    parado = ((agora if agora is not None else time.time()) - ultimo) / 60
+    if parado < minutos:
+        return ""
+    return (f"lote {unidade.relativo} incompleto: {motivo}; nada chega há {int(parado)} min — "
+            "conferir a cópia na estação")
+
+
 def serie_do_arquivo(arquivo: Path, unidade: Unidade, padrao: str) -> str:
     """Série pela pasta de material (`03 - Fotografias/...`) dentro do lote; senão `padrao`."""
     try:
@@ -417,7 +438,7 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
 
     # Série: manifesto, senão a pasta de material no caminho.
     ctx.serie = _texto(dados, "serie").upper()
-    if not re.fullmatch(r"S(0[1-7]|99)", ctx.serie):
+    if not re.fullmatch(r"S(0[1-8]|99)", ctx.serie):
         ctx.serie = estrutura.serie_do_texto(_texto(dados, "tipo_material"))
     restantes: list[str] = []
     pulou_fundo = False
@@ -802,9 +823,9 @@ def erros_das_leituras(leituras) -> list[dict]:
             add(nome, "metadado", "corrigir", f"leitura falhou: {l.erro}")
             continue
         if l.autoria_divergente:
-            add(nome, "autoria divergente", "bloqueia",
+            add(nome, "autoria divergente", "corrigir",
                 f"carimbo diz '{(l.lidos_originais or l.valores).get('arquiteto', '')}' — "
-                "não é titular nem coautor do fundo; não publicar")
+                "não é titular nem coautor do fundo; publica com ressalva 'autoria não confirmada'")
         if l.duplicata_de:
             add(nome, "duplicata", "corrigir", f"{l.tipo_duplicata} de {l.duplicata_de} — só a única publica")
         if l.suspeita_grupo:
@@ -941,7 +962,7 @@ def relatorio_lote(codigo: str, nome: str, lote: dict, leituras: dict, por_codig
     secao(3, "Duplicatas (publica só a única)", [
         f"{c} é {l.tipo_duplicata} de {l.duplicata_de} — publicar {l.duplicata_de}"
         for c, l in sorted(do_lote.items()) if l.duplicata_de])
-    secao(4, "Autoria divergente, projeto divergente, sem identificação e capas (não publicar)", [
+    secao(4, "Autoria divergente (publica com ressalva), projeto divergente, sem identificação e capas (estes não publicam)", [
         *(f"{c}: autoria divergente — carimbo '{(l.lidos_originais or l.valores).get('arquiteto', '')}'"
           for c, l in sorted(do_lote.items()) if l.autoria_divergente),
         *(f"{c}: projeto divergente — o carimbo diz '{_diz(l)}'"
@@ -984,7 +1005,6 @@ def checklist_aceite(por_codigo: dict, leituras: dict, erros: list[dict], lote: 
     exif = lote.get("exif", {})
     itens = {
         "contagem_origem_igual_saida": len(do_lote) == len(por_codigo),
-        "sem_autoria_divergente": not any(l.autoria_divergente for l in do_lote),
         "duplicatas_marcadas": True,
         "orientacao_incerta_zerada": not any(l.orientacao_incerta for l in do_lote),
         "serie_incerta_zerada": not any(l.serie_incerta for l in do_lote),
@@ -993,6 +1013,8 @@ def checklist_aceite(por_codigo: dict, leituras: dict, erros: list[dict], lote: 
     }
     itens["publicavel"] = all(itens.values())
     itens["pendencias"] = [k for k, v in itens.items() if v is False]
+    # CAMP-046: autoria divergente não bloqueia; é aviso (N folhas com autoria não confirmada)
+    itens["folhas_autoria_nao_confirmada"] = sum(1 for l in do_lote if l.autoria_divergente)
     return itens
 
 

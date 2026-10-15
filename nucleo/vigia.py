@@ -797,6 +797,16 @@ class Vigia:
                                                    assinatura=unidade.assinatura())
                 continue
             self.estado.fila = max(0, self.estado.fila - 1)
+            if r.status == mod_entrada.AGUARDANDO:
+                faltando = mod_entrada.lote_incompleto_parado(unidade, r.motivo)
+                if faltando:
+                    if self.estado.alerta != faltando:
+                        _log.warning("%s", faltando)
+                        self.livro.anotar("lote_incompleto", arquivo_origem=str(unidade.relativo),
+                                          detalhe=faltando)
+                        self.estado.anotar(faltando[:120])
+                        self.estado.alerta = faltando
+                        self._talvez_heartbeat(forcar=True)
             if r.status == mod_entrada.ERRO and r.motivo.startswith("limite de custo"):
                 self.estado.alerta = r.motivo
                 self.estado.anotar(f"{unidade.relativo}: {r.motivo}"[:120])

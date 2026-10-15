@@ -23,6 +23,7 @@ gravado e compara com o tipo gravado — tem que dar 0 divergência.
 from __future__ import annotations
 
 import csv
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -141,6 +142,46 @@ def reconferir_tipo(leituras: dict[str, Leitura]) -> list[tuple[str, str, str]]:
         if (l.valores.get("tipo") or "") != recalculado:
             divergencias.append((chave, l.valores.get("tipo", ""), recalculado))
     return divergencias
+
+
+def regravar_tipo(raiz: Path, simular: bool = False) -> list[tuple[str, str, str]]:
+    """Recalcula o tipo de desenho e REGRAVA leituras.json (e o tipo no pacote_tainacan.json
+    vizinho). Devolve (codigo, gravado, novo) do que mudou; `simular` só lista (CAMP-051)."""
+    from . import atomico
+    mudou: list[tuple[str, str, str]] = []
+    for arquivo in sorted(raiz.rglob("leituras.json")):
+        leituras = ler_json(arquivo)
+        novos: dict[str, str] = {}
+        for l in leituras:
+            if l.modo != "prancha":
+                continue
+            novo = tipo_de_desenho(l.valores.get("titulo_prancha", ""))
+            antigo = l.valores.get("tipo") or ""
+            if antigo != novo:
+                novos[Path(l.arquivo).stem.lower()] = novo
+                mudou.append((Path(l.arquivo).stem.lower(), antigo, novo))
+                l.valores["tipo"] = novo
+        if not novos or simular:
+            continue
+        atomico.gravar_json(arquivo, [l.para_dict() for l in leituras], indent=1)
+        pacote = arquivo.parent / "pacote_tainacan.json"
+        if pacote.exists():
+            try:
+                dados = json.loads(pacote.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            alterou = False
+            for lista in ("documentos", "retirados", "itens"):
+                for d in dados.get(lista) or []:
+                    cod = str(d.get("codigo", "")).lower()
+                    if cod in novos:
+                        d["tipo"] = d["tipo_de_desenho"] = novos[cod]
+                        if isinstance(d.get("metadados"), dict):
+                            d["metadados"]["tipo"] = novos[cod]
+                        alterou = True
+            if alterou:
+                atomico.gravar_json(pacote, dados, indent=2)
+    return mudou
 
 
 def relatorio(resultados: list[ResultadoCampo]) -> str:

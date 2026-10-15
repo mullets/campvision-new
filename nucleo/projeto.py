@@ -270,7 +270,7 @@ def registrar_decisao(catalogacao: Path, codigo: str, acao: str, motivo: str, po
 def capa_sugerida(leituras: dict) -> str:
     candidatos = [c for c in sorted(leituras) if not leituras[c].duplicata_de
                   and not leituras[c].autoria_divergente]
-    for preferido in ("Perspectiva", "Fachada", "Elevação", "Implantação"):
+    for preferido in ("Perspectiva", "Elevação/Fachada", "Implantação"):
         for c in candidatos:
             if preferido in (leituras[c].valores.get("tipo") or "") and "-S01-" in c:
                 return c
@@ -304,8 +304,11 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
         l = leituras[doc]
         serie = doc.split("-")[3] if doc.count("-") >= 4 else ctx.serie
         bloqueios = []
+        ressalvas = list(l.ressalvas or [])
         if l.autoria_divergente:
-            bloqueios.append("autoria divergente")
+            # CAMP-046: não bloqueia; vai publicável com ressalva (autoria nunca é corrigida pelo consenso)
+            lido = (l.lidos_originais or l.valores).get("arquiteto", "") or "?"
+            ressalvas.append(f"autoria não confirmada: {lido}")
         if l.suspeita_grupo:
             c = l.carimbo or {}
             bloqueios.append("projeto divergente: o carimbo diz '"
@@ -360,7 +363,7 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
             "prancha_original": (origem_por_codigo.get(doc) or [{}])[0].get("nome_original", ""),
             "confianca": round(l.confianca_media, 2) if hasattr(l, "confianca_media") else None,
             "decisao": decisao, "publicavel": not bloqueios, "bloqueios": bloqueios,
-            "ressalvas": l.ressalvas,
+            "ressalvas": ressalvas,
             "versao_cv2": l.versao_cv2, "versao_prompt": l.versao_prompt, "modelo": l.modelo,
             # T1 (auditoria F026): o que o CARIMBO diz, como lido, e a leitura inteira.
             "carimbo": l.carimbo or {}, "capa": l.capa, "sem_identificacao": l.sem_identificacao,
@@ -369,16 +372,16 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
                      "anotacoes_manuscritas": l.anotacoes_manuscritas,
                      "observacoes_leitura": l.observacoes_leitura},
         }
-        # Autoria divergente, retirada por decisão, projeto divergente, sem identificação e capa
-        # NÃO vão no pacote de publicação (CV-06/25; auditoria F026 T4/T6). Uma pessoa devolve
-        # a folha de identificação duvidosa com a decisão "publicar"; autoria divergente, não.
+        # Retirada por decisão, projeto divergente, sem identificação e capa NÃO vão no pacote de
+        # publicação (CV-06/25; auditoria F026 T4/T6). Uma pessoa devolve a folha de identificação
+        # duvidosa com a decisão "publicar". Autoria divergente fica em documentos (CAMP-046).
         liberada = bool(decisao and decisao["acao"] == "publicar")
         identificacao = l.suspeita_grupo or l.sem_identificacao or bool(l.capa)
         if liberada and identificacao:
             item["bloqueios"] = bloqueios = [b for b in bloqueios if not b.startswith(
                 ("projeto divergente", "sem identificação")) and "não é prancha" not in b]
             item["publicavel"] = not bloqueios
-        if l.autoria_divergente or (identificacao and not liberada) or (decisao and decisao["acao"] == "retirar"):
+        if (identificacao and not liberada) or (decisao and decisao["acao"] == "retirar"):
             retirados.append(item)
         else:
             documentos.append(item)

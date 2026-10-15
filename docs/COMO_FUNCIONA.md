@@ -112,7 +112,7 @@ O repositório das estações Windows não está neste projeto. O que o vigia es
 - **Marca de fim:** um `manifesto.json` (qualquer conteúdo) ou um `status.json` com `status: "enviado_windows"` (ou `etapa: "enviado_windows"`: as duas chaves valem desde o contrato 2.3). Qualquer outro status conta como "sem marca".
 - **Campos lidos** do `manifesto.json`, que valem sobre o `info_projeto.json`:
   - `fundo_codigo` ou `fundo`;
-  - `serie` (só `S01`–`S07`, `S99`) ou `tipo_material`;
+  - `serie` (só `S01`–`S08`, `S99`) ou `tipo_material`;
   - `codigo` ou `projeto_codigo` (um `F0xx-P0xxx` completo vale como oficial);
   - `nome`, `titulo` ou `projeto`; `ano`; `cidade`;
   - `operador`; `operador_email` ou `email`; `estacao`; `tipo_estacao`;
@@ -172,7 +172,7 @@ Regras:
 | Sem marca | 10 min sem mudança (`entrada_quieto_minutos`) |
 
 - "Mudar" usa a data de modificação **e** a hora em que o arquivo chegou no QNAP (ctime). O Mac copia mantendo a data do scan; sem o ctime, a pasta TIFF era pega no meio da cópia (SESI Marília, 14/10).
-- Se o manifesto diz quantos arquivos são, a contagem precisa bater ("contagem X de Y").
+- Se o manifesto diz quantos arquivos são, a contagem precisa bater ("contagem X de Y"). Faltando arquivo e nada chegando há 30 min deixa de esperar em silêncio: o vigia loga WARNING, grava `lote_incompleto` no livro e manda `detalhe.alerta` no heartbeat (estado `erro`) até outro lote ficar pronto.
 - Lote vazio ("vazia") ou com arquivo sumindo durante a leitura espera a próxima rodada.
 
 ### Passo 3 — Montar o contexto (sem gastar API)
@@ -347,7 +347,7 @@ Em todos os casos, **nada é apagado da entrada**. O lote não volta sozinho enq
 
 ### 5.2 Série
 
-Séries: S01 Desenhos e pranchas · S02 Documentos textuais · S03 Fotografias · S04 Negativos · S05 Slides · S06 Materiais e especificações · S07 Publicações · S99 Não identificado.
+Séries: S01 Desenhos e pranchas · S02 Documentos textuais · S03 Fotografias · S04 Negativos · S05 Slides · S06 Materiais e especificações · S07 Publicações · S08 Redesenhos · S99 Não identificado.
 
 Quando a estação não diz a série (5.1, item 4), três etapas corrigem:
 
@@ -422,7 +422,7 @@ Em dúvida, nada muda e a foto continua para conferir. O painel usa `orientacao_
 - textual: "<Tipo documental> — <assunto>" e "(remetente, data)" nas cartas;
 - **título para publicar** (`titulo_publicacao`): tira nome do projeto e da pasta e passa texto todo em maiúsculas para frase normal.
 
-**Bloqueios** (`projeto.py`; `publicavel = sem bloqueio`):
+- (autoria divergente deixou de bloquear no contrato 2.4: vira ressalva);
 - autoria divergente;
 - projeto divergente ("o carimbo diz '…'");
 - sem identificação (pasta com várias obras);
@@ -432,7 +432,7 @@ Em dúvida, nada muda e a foto continua para conferir. O painel usa `orientacao_
 - lote de teste;
 - retirado por decisão humana.
 
-**`retirados`** (fora de `documentos` no pacote): autoria divergente (sem volta), decisão "retirar", e problemas de identificação (projeto divergente, sem identificação, capa) — estes voltam com uma decisão "publicar". Duplicata, ficha e teste ficam em `documentos` com `publicavel: false`. Ressalvas e "fora do período" nunca bloqueiam.
+**`retirados`** (fora de `documentos` no pacote): decisão "retirar", e problemas de identificação (projeto divergente, sem identificação, capa) — estes voltam com uma decisão "publicar". Duplicata, ficha e teste ficam em `documentos` com `publicavel: false`. Ressalvas e "fora do período" nunca bloqueiam.
 
 **Decisões humanas:** `vigia.py --decisao CODIGO --acao retirar|publicar|nota --motivo "…" --por NOME` grava em `catalogacao/decisoes.json` (vale a mais recente) e no livro.
 
@@ -492,7 +492,7 @@ Regras: só o visível; não nomear pessoas nem autor; não dizer onde foi tirad
 
 `derivacao.py`:
 - **Ano** só da data escrita (ano de 4 dígitos, ou `dd.mm.aa` → 19aa). O modelo não dá o ano em prancha.
-- **Tipo de desenho** pelo título, com 15 detectores nesta ordem: Implantação, Planta, Corte, Elevação, Fachada, Detalhe, Estrutura, Instalações, Mobiliário, Perspectiva, Croqui, Fotografia, Levantamento, Documento, Tabela. No máximo 3, juntos com " / ". Implantação suprime Planta.
+- **Tipo de desenho** pelo título, com 14 detectores nesta ordem: Implantação, Planta, Corte, Elevação/Fachada (tipo único, CAMP-051), Detalhe, Estrutura, Instalações, Mobiliário, Perspectiva, Croqui, Fotografia, Levantamento, Documento, Tabela. No máximo 3, juntos com " / ". Implantação suprime Planta.
 - **"É documento, não obra"**: título com documento, currículo, caderno, pasta, recorte, correspondência, memorial, contrato, ofício. Em S01 bloqueia a publicação (ficha) e impede sugestão de programa.
 - **Autoria divergente:** nomes com 4+ letras (sem títulos e palavras vazias) comparados com titular e coautores. Arquiteto vazio nunca dispara.
 - **Chaves de identidade** (fotos): uma pessoa só é nomeada quando os traços (barba, bigode, óculos) batem com **exatamente uma** chave escrita por gente no fundo. "só", "apenas" e "sem" tornam explícito o que não está. Qualquer ambiguidade = ninguém nomeado. O nome vai na frente da legenda, com ressalva.
@@ -578,11 +578,11 @@ UTF-8 com BOM, vírgula, ordenado por grupo e folha. Colunas: Código, Arquivo, 
 
 ### 7.5 Erros, relatório e aceite
 
-**`erros.json`:** categorias metadado, autoria divergente, duplicata, projeto errado, série, espelhado, orientação, arquivo corrompido; gravidade bloqueia, corrigir ou aviso.
+**`erros.json`:** categorias metadado, autoria divergente, duplicata, projeto errado, série, espelhado, orientação, arquivo corrompido; gravidade bloqueia, corrigir ou aviso. Autoria divergente é `corrigir` (contrato 2.4): a folha fica em `documentos`, publicável, com a ressalva "autoria não confirmada: <o que o carimbo diz>".
 
 **`relatorio.txt`**, sempre nas 8 partes: 1) origem × saída; 2) séries; 3) duplicatas; 4) autoria, projeto divergente, sem identificação, capas; 5) o que precisa de gente (orientação, série); 6) folhas faltantes pelo total do carimbo (ex.: "C-3/12"); 7) ressalvas; 8) retirados e não suportados. Termina com a linha de execução (versão, contrato, modelo, chamadas, tokens, custo, tempo, prompts).
 
-**`lotes/<lote>.json` → `aceite`:** `contagem_origem_igual_saida`, `sem_autoria_divergente`, `orientacao_incerta_zerada`, `serie_incerta_zerada`, `exif_conferido`, `publicavel`, `pendencias`. Quem decide a publicação é o painel.
+**`lotes/<lote>.json` → `aceite`:** `contagem_origem_igual_saida`, `folhas_autoria_nao_confirmada` (contagem, não bloqueia), `orientacao_incerta_zerada`, `serie_incerta_zerada`, `exif_conferido`, `publicavel`, `pendencias`. Quem decide a publicação é o painel.
 
 **`status.json` no "pronto":** `codigo, status, status_em, lote_atual, lotes_prontos, imagens, folhas, com_carimbo, a_revisar, erros_bloqueantes, versao_cv2`. Valores de `status`: `processando`, `aguardando` (só na pasta provisória), `pronto`, `erro`.
 
@@ -652,7 +652,7 @@ Base `painel_url`, cabeçalho `X-Camp-Token` (de `CAMP_PAINEL_TOKEN`), timeout 8
 4. Etapa pelo `status`: pronto (e campvision_concluido, sem status) → **revisão**; processando (e enviado_windows) → processando; erro → erro; desconhecido → revisão com aviso. Um aviso "processando" devolve o lote para processando, a não ser que esteja publicado ou em rascunho.
 5. **Importa as folhas** só se a etapa é revisão, existe pacote e **o lote do painel não foi aprovado**.
 6. Na importação:
-   - só aceita séries **S01 a S06** (S07 e S99 são recusadas como problema);
+   - aceita séries **S01 a S08** e S99 (S07 Publicações, S08 Redesenhos; decisão CAMP-047);
    - **não mexe** em folha já revisada por uma pessoa nem em folha no site;
    - número D usado por **outro** lote → abre a decisão "lote colide" (adicionar ao fim, ignorar ou substituir);
    - número D já usado por outra folha **do mesmo lote** (ex.: a folha mudou de série, S01 → S03) → **recusa** ("o número D… já é de …");
@@ -830,7 +830,7 @@ Todos com `~/campvision-new/.venv/bin/python vigia.py` na frente.
 |---|---|
 | `--avaliar GABARITO.csv` | relê as folhas do gabarito do painel (`arquivo_origem, campo, valor_correto`) sem gravar no acervo e mostra o placar e o custo (gasta API) |
 | `--backtest CURADO.csv [--contra PASTA]` | compara as leituras com uma planilha curada; liberado com ≥ 85% exato |
-| `--reconferir-tipo` | recalcula o tipo de desenho pelo título e lista divergências |
+| `--reconferir-tipo` | recalcula o tipo de desenho pelo título, lista divergências e REGRAVA `leituras.json` e `pacote_tainacan.json` (Elevação e Fachada viram "Elevação/Fachada"); `--simular` só lista |
 | `--backtest-programa CURADO.csv` | placar das sugestões de programa e natureza |
 
 **Só no modo antigo** (pasta vigiada, [seção 13](#13-modo-antigo-pasta-vigiada)): `--status`, `--estimativa`, `--info`, `--planilha-geral`, `--relatorio-geral`, `--marcar-fase`, `--todos`, `--refazer TEXTO`. No servidor, **`--status` não mostra o `100 - Scanners`**: use `--lotes`.
@@ -983,7 +983,7 @@ Antes do recebimento pelo `100 - Scanners`, o vigia trabalhava direto numa pasta
 
 Encontrados na auditoria de 14/10 (nenhum foi corrigido ainda, salvo indicação):
 
-1. **Painel recusa folha que mudou de série** (S01 → S03 com o mesmo D, mesmo lote). Correção no `camp-painel` (`importador_lote.py`): renomear a folha existente do mesmo lote em vez de recusar. Caso do SESI Marília (F009-P0060).
+2. **Painel aceita S01–S08 e S99** (CAMP-047, segunda leva; S08 Redesenhos depende da migração do painel).
 2. **Painel aceita só S01–S06.** Folhas S07 (Publicações) e S99 (Não identificado) não entram.
 3. **Lote do Mac com várias séries** recebe uma série só.
 4. **Operador e estação do Mac não chegam:** o vigia lê só `manifesto.json`/`info_projeto.json`; o Mac usa `info_lote` (e `estacao_tipo` em vez de `tipo_estacao`).

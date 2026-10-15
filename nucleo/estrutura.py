@@ -5,7 +5,7 @@ Segue o MODELO de pastas da CAMP:
     <Fundo>/
       01 - Projetos/
         <F002-P0002 - Nome>/
-          01 - Desenhos e pranchas … 07 - Publicações, 99 - Não identificado
+          01 - Desenhos e pranchas … 07 - Publicações, 08 - Redesenhos, 99 - Não identificado
             TIF/ JPG/ DNG/ PDF/ …   (uma subpasta por formato, mesmo código)
           README.md
       02 - Obras e documentação de obra … 09 - Publicações, 99 - Não identificado
@@ -37,6 +37,7 @@ SERIES: dict[str, str] = {
     "S05": "05 - Slides",
     "S06": "06 - Materiais e especificações",
     "S07": "07 - Publicações",
+    "S08": "08 - Redesenhos",
     "S99": "99 - Não identificado",
 }
 
@@ -79,6 +80,7 @@ PALAVRAS_SERIE: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("S05", ("slide", "diapositiv", "cromo")),
     ("S03", ("fotograf", "foto")),
     ("S06", ("materia", "especifica")),
+    ("S08", ("redesenh",)),
     ("S07", ("publica", "livro", "revista", "jornal")),
     ("S02", ("documento", "textua", "texto", "memorial", "carta")),
     ("S01", ("desenho", "prancha", "planta")),
@@ -97,7 +99,7 @@ def normalizar(texto: str) -> str:
 
 def serie_do_texto(texto: str) -> str:
     """Série pelo nome de uma pasta (`03 - Fotografias`, `Negativos`, `S01`)."""
-    achado = re.search(r"\bS(0[1-7]|99)\b", texto or "")
+    achado = re.search(r"\bS(0[1-8]|99)\b", texto or "")
     if achado:
         return f"S{achado.group(1)}"
     alvo = normalizar(texto)
