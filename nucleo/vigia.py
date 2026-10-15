@@ -640,6 +640,7 @@ class Vigia:
             reserva=pasta_estado / "registro_reserva",
         )
         self._recebedor_obj = None
+        self._subida_confirmada = False
         self._ultimo_heartbeat = -1e9
 
     # ------------------------------------------------------------ tarefas
@@ -648,6 +649,8 @@ class Vigia:
             return
         if datetime.now() < self._proxima_atualizacao:
             return
+        if self.estado.situacao not in ("vigiando", "iniciando"):
+            return  # só atualiza (e reinicia) com o vigia ocioso: nunca no meio de um lote
         self._proxima_atualizacao = datetime.now() + timedelta(
             minutes=self.config.intervalo_atualizacao_minutos
         )
@@ -660,6 +663,13 @@ class Vigia:
         if atualizou:
             self.estado.anotar(f"código atualizado ({mensagem}), reiniciando")
             atualizador.reiniciar_processo()
+
+    def _confirmar_subida(self) -> None:
+        """Depois da 1ª rodada completa: marca "subi bem" (o rollback automático para de contar)."""
+        if self._subida_confirmada or not self.repo:
+            return
+        self._subida_confirmada = True
+        atualizador.confirmar_subida(self.repo, self.pasta_estado)
 
     def _talvez_relatorio(self) -> None:
         if datetime.now() < self._proximo_relatorio:
@@ -965,6 +975,7 @@ class Vigia:
                 self.estado.anotar(diagnosticar_pasta(raiz))
             else:
                 self.uma_rodada()
+                self._confirmar_subida()
             self.livro.descarregar_reserva()
             # Fora de qualquer lote: é a hora segura de puxar código novo.
             # Sem isto, um vigia ocioso — que é o estado normal dele — nunca

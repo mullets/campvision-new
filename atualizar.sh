@@ -8,6 +8,12 @@
 #   ./atualizar.sh --sem-log  não abre o log ao vivo no fim
 #   ./atualizar.sh --auto     usado pela auto-atualização do vigia: não reinicia
 #                             o serviço (o próprio vigia se reinicia)
+#   ./atualizar.sh --boot     chamado pelo systemd (ExecStartPre) a cada subida do serviço:
+#                             se a versão nova não confirmou "subi bem" em CAMPVISION_BOOT_MAX
+#                             subidas (padrão 3), volta sozinho para a anterior
+#
+# O serviço só é reiniciado com a situação "vigiando" (ocioso). Em qualquer outra
+# (copiando, preparando, gravando metadados, processando...) a atualização espera.
 #
 # Se os testes falharem na versão nova, volta sozinho para a anterior e o
 # serviço continua rodando o código que funcionava.
@@ -29,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     --agora) MODO="agora" ;;
     --voltar) MODO="voltar" ;;
     --auto) MODO="auto" ;;
+    --boot) MODO="boot" ;;
     --sem-log) SEM_LOG=1 ;;
     --versao) ALVO="${2:-}"; shift ;;
     *) echo "Opção desconhecida: $1" >&2; exit 2 ;;
@@ -53,6 +60,27 @@ reiniciar() {
 }
 
 ATUAL="$(git rev-parse HEAD)"
+PENDENTE="$ESTADO/subida_pendente"   # novo=SHA / anterior=SHA / tentativas=N (some quando o vigia confirma)
+
+# ---------------------------------------------------------------- boot (rollback automático)
+if [[ "$MODO" == "boot" ]]; then
+  [[ -f "$PENDENTE" ]] || exit 0
+  NOVO_P="$(sed -n 's/^novo=//p' "$PENDENTE")"; ANT_P="$(sed -n 's/^anterior=//p' "$PENDENTE")"
+  TENT="$(sed -n 's/^tentativas=//p' "$PENDENTE")"; TENT="${TENT:-0}"
+  if [[ "$NOVO_P" != "$ATUAL" ]]; then rm -f "$PENDENTE"; exit 0; fi   # mudou à mão: nada a vigiar
+  MAXIMO="${CAMPVISION_BOOT_MAX:-3}"
+  if (( TENT >= MAXIMO )); then
+    echo "CAMP Vision 2: a versão ${ATUAL:0:7} subiu $TENT vez(es) sem confirmar 'subi bem' — voltando para ${ANT_P:0:7}" >&2
+    git reset -q --hard "$ANT_P" && "$REPO/.venv/bin/pip" install -q -r requirements.txt || true
+    git rev-parse HEAD > "$FIXADA"
+    rm -f "$PENDENTE"
+    echo "$(date -Is) rollback automático de ${ATUAL:0:7} para ${ANT_P:0:7} (sem 'subi bem' em $TENT subidas)" >> "$ESTADO/rollbacks.log"
+    exit 0
+  fi
+  printf 'novo=%s\nanterior=%s\ntentativas=%s\n' "$NOVO_P" "$ANT_P" "$((TENT + 1))" > "$PENDENTE"
+  exit 0
+fi
+
 echo "CAMP Vision 2 — versão atual $(versao) ($(git rev-parse --short HEAD))"
 
 # ---------------------------------------------------------------- voltar
@@ -74,13 +102,32 @@ fi
 rm -f "$FIXADA"
 
 # ---------------------------------------------------------------- esperar o lote
+# Só reinicia com o vigia "vigiando" (ocioso). Situação vazia = serviço parado ou estado velho
+# (mais de 3 min sem gravar): nada a esperar.
+situacao_do_vigia() {
+  "$PY" - "$ESTADO/estado.json" <<'PYEOF' 2>/dev/null || true
+import json, sys, time, os
+try:
+    caminho = sys.argv[1]
+    if time.time() - os.path.getmtime(caminho) > 180:
+        raise SystemExit
+    print(json.load(open(caminho)).get("situacao", ""))
+except Exception:
+    pass
+PYEOF
+}
 if [[ "$MODO" == "normal" && -f "$ESTADO/estado.json" ]]; then
   for VEZ in $(seq 1 360); do
-    SITUACAO="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("situacao",""))' "$ESTADO/estado.json" 2>/dev/null || true)"
-    [[ "$SITUACAO" != "processando" && "$SITUACAO" != "consolidando" ]] && break
-    [[ "$VEZ" == 1 ]] && info "lote em andamento — esperando terminar (use --agora para não esperar)"
+    SITUACAO="$(situacao_do_vigia)"
+    [[ -z "$SITUACAO" || "$SITUACAO" == "vigiando" ]] && break
+    [[ "$VEZ" == 1 ]] && info "vigia está '$SITUACAO' — esperando ficar 'vigiando' (use --agora para não esperar)"
     sleep 10
   done
+  SITUACAO="$(situacao_do_vigia)"
+  if [[ -n "$SITUACAO" && "$SITUACAO" != "vigiando" ]]; then
+    erro "o vigia continua '$SITUACAO' depois de 1 h — não vou reiniciar no meio de um lote (use --agora)"
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------- baixar
@@ -104,6 +151,7 @@ if [[ "$NOVO" == "$ATUAL" ]]; then
   exit 0
 fi
 echo "$ATUAL" > "$ANTERIOR"
+rm -f "$ESTADO/subiu_bem"
 if [[ -n "$ALVO" ]]; then git reset -q --hard "$NOVO"; git rev-parse HEAD > "$FIXADA"; else git merge -q --ff-only "$NOVO"; fi
 ok "código $(git rev-parse --short "$ATUAL") → $(git rev-parse --short HEAD)"
 
@@ -154,6 +202,10 @@ else
   tail -20 /tmp/campvision2-testes.log
   desfazer "testes falharam na versão nova"
 fi
+
+# A versão nova só vale depois que o vigia completar a 1ª rodada e confirmar (subiu_bem);
+# a cada subida do serviço o --boot conta, e sem confirmação ele volta para a anterior.
+printf 'novo=%s\nanterior=%s\ntentativas=0\n' "$(git rev-parse HEAD)" "$ATUAL" > "$PENDENTE"
 
 # ---------------------------------------------------------------- reiniciar
 reiniciar || desfazer "serviço não subiu na versão nova"

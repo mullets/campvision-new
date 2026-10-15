@@ -389,6 +389,98 @@ class TestInstanciaEAtomico(unittest.TestCase):
         self.assertFalse(transferir._mesmo_destino(None, self.pasta, b))
 
 
+class TestSubidaERollback(unittest.TestCase):
+    """CAMP-040: versão nova só vale depois do "subi bem"; sem ele, o boot volta para a anterior."""
+
+    def setUp(self):
+        import shutil
+        import subprocess
+        from tempfile import TemporaryDirectory
+        self.tmp = TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self.repo, self.casa = base / "repo", base / "casa"
+        self.repo.mkdir()
+        (self.casa / ".campvision2").mkdir(parents=True)
+        raiz = Path(__file__).resolve().parents[1]
+        shutil.copy2(raiz / "atualizar.sh", self.repo / "atualizar.sh")
+        self.env = {"HOME": str(self.casa), "PATH": __import__("os").environ["PATH"],
+                    "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                    "GIT_COMMITTER_EMAIL": "t@t"}
+
+        def git(*a):
+            return subprocess.run(["git", "-C", str(self.repo), *a], capture_output=True, text=True,
+                                  env=self.env, check=True).stdout.strip()
+        self.git = git
+        git("init", "-q")
+        (self.repo / "requirements.txt").write_text("", encoding="utf-8")
+        git("add", "-A"); git("commit", "-qm", "v1")
+        self.v1 = git("rev-parse", "HEAD")
+        (self.repo / "novo.txt").write_text("x", encoding="utf-8")
+        git("add", "-A"); git("commit", "-qm", "v2")
+        self.v2 = git("rev-parse", "HEAD")
+        self.estado = self.casa / ".campvision2"
+        (self.estado / "subida_pendente").write_text(
+            f"novo={self.v2}\nanterior={self.v1}\ntentativas=0\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def boot(self):
+        import subprocess
+        return subprocess.run(["bash", str(self.repo / "atualizar.sh"), "--boot"], capture_output=True,
+                              text=True, env=self.env, cwd=self.repo)
+
+    def test_sem_confirmar_volta_para_a_versao_anterior(self):
+        for esperado in ("1", "2", "3"):
+            self.assertEqual(self.boot().returncode, 0)
+            self.assertIn(f"tentativas={esperado}", (self.estado / "subida_pendente").read_text())
+            self.assertEqual(self.git("rev-parse", "HEAD"), self.v2)
+        r = self.boot()  # 4ª subida sem "subi bem"
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.v1)
+        self.assertFalse((self.estado / "subida_pendente").exists())
+        self.assertIn("rollback automático", (self.estado / "rollbacks.log").read_text())
+        self.assertEqual((self.estado / "versao_fixada").read_text().strip(), self.v1)  # auto-update pausa
+
+    def test_confirmado_nao_volta(self):
+        from nucleo import atualizador
+        self.boot()
+        self.assertTrue(atualizador.confirmar_subida(self.repo, self.estado))
+        self.assertFalse((self.estado / "subida_pendente").exists())
+        self.assertEqual((self.estado / "subiu_bem").read_text().strip(), self.v2)
+        for _ in range(5):
+            self.boot()
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.v2)
+
+    def test_build_trocado_a_mao_nao_e_vigiado(self):
+        self.git("checkout", "-q", self.v1)
+        self.boot()
+        self.assertFalse((self.estado / "subida_pendente").exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.v1)
+
+    def test_so_atualiza_com_o_vigia_vigiando(self):
+        v = vigia.Vigia(self.config_minima(), None, self.estado, repo=self.repo)
+        v.config.auto_atualizar = True
+        chamadas = []
+        with mock.patch.object(vigia.atualizador, "atualizar", side_effect=lambda r: chamadas.append(1) or (False, "")):
+            v.estado.situacao = "gravando metadados (12)"
+            v._talvez_atualizar()
+            self.assertEqual(chamadas, [])
+            v.estado.situacao = "vigiando"
+            v._talvez_atualizar()
+            self.assertEqual(chamadas, [1])
+
+    def config_minima(self):
+        from nucleo.config import Config
+        return Config(auto_atualizar=True)
+
+    def test_ci_instala_o_que_os_testes_usam(self):
+        ci = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "testes.yml").read_text()
+        for item in ("requirements.txt", "libimage-exiftool-perl", "tesseract-ocr", "tesseract-ocr-por"):
+            self.assertIn(item, ci)
+        self.assertNotIn("openpyxl", ci)
+
+
 class TestManifesto(Base):
     def lote(self, adulterar=False, contagem=None) -> Path:
         pasta = self.scan("F026 - SBU Sami Bussab", "01 - Desenhos e pranchas", "Casa Nova 1980", n=2)
