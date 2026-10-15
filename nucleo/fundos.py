@@ -155,37 +155,50 @@ def _de_json(dados) -> list[Fundo]:
     for item in dados if isinstance(dados, list) else []:
         if not isinstance(item, dict):
             continue
-        codigo = str(item.get("codigo") or item.get("fundo_codigo") or "").upper()
+        codigo = str(item.get("codigo") or item.get("codigo_fundo") or item.get("fundo_codigo") or "").upper()
         if not re.match(r"^F\d{3}$", codigo):
             continue
         if item.get("ativo") is False:
             continue
-        coautores = item.get("coautores") or item.get("autores") or []
+        autoridade = item.get("autoridade") if isinstance(item.get("autoridade"), dict) else {}
+        # C4: `coautores` (nomes) e `periodo_atuacao` no topo; `autoridade.coautores[].nome` e
+        # `autoridade.periodo{inicio,fim}` quando o painel só manda a autoridade.
+        coautores = item.get("coautores") or item.get("autores") or autoridade.get("coautores") or []
         if isinstance(coautores, str):
             coautores = [c.strip() for c in coautores.split(",") if c.strip()]
         coautores = tuple(
-            str(c.get("nome") if isinstance(c, dict) else c) for c in coautores if c
+            str(c.get("nome") if isinstance(c, dict) else c).strip() for c in coautores
+            if c and (c.get("nome") if isinstance(c, dict) else c)
         )
         fundos.append(Fundo(
             codigo,
             str(item.get("sigla") or item.get("prefixo") or ""),
             str(item.get("nome") or item.get("titulo") or codigo),
             coautores,
-            **_parametros(item),
+            **_parametros(item, autoridade),
         ))
     return fundos
 
 
-def _parametros(item: dict) -> dict:
+def _periodo(*candidatos) -> tuple[int, int] | None:
+    for periodo in candidatos:
+        if not isinstance(periodo, dict):
+            continue
+        for chave_de, chave_ate in (("de", "ate"), ("inicio", "fim")):
+            try:
+                de, ate = int(periodo.get(chave_de)), int(periodo.get(chave_ate))
+            except (TypeError, ValueError):
+                continue
+            return (min(de, ate), max(de, ate))
+    return None
+
+
+def _parametros(item: dict, autoridade: dict | None = None) -> dict:
     """periodo_atuacao / chaves_de_identidade / observacoes, no formato do procedimento."""
     saida: dict = {}
-    periodo = item.get("periodo_atuacao") or item.get("periodo")
-    if isinstance(periodo, dict):
-        try:
-            de, ate = int(periodo.get("de")), int(periodo.get("ate"))
-            saida["periodo"] = (min(de, ate), max(de, ate))
-        except (TypeError, ValueError):
-            pass
+    periodo = _periodo(item.get("periodo_atuacao"), item.get("periodo"), (autoridade or {}).get("periodo"))
+    if periodo:
+        saida["periodo"] = periodo
     chaves = []
     for c in item.get("chaves_de_identidade") or []:
         if isinstance(c, dict) and c.get("pessoa") and c.get("sinal"):

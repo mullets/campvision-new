@@ -224,5 +224,48 @@ class TestHeartbeat(Base):
         self.assertIn("Heartbeat", logs.output[0])
 
 
+# Corpo REAL de GET /api/estacoes/contexto do camp-painel (tests/teste_backend.py, F099).
+CONTEXTO_REAL = {"fundos": [
+    {"codigo_fundo": "F099", "prefixo": "TST", "nome": "Fundo Teste", "ultimo_projeto": "P0007",
+     "proximo_projeto": "P0008",
+     "autoridade": {
+         "titulares": [{"nome": "Titular Teste", "grafias": ["T. TESTE"], "inicio": 1920, "fim": 1995}],
+         "coautores": [{"nome": "Sócio Teste", "inicio": 1960, "fim": 1970}],
+         "periodo": {"inicio": 1950, "fim": 1990},
+         "autorias_de_projeto": [{"projeto": "F099-P0001", "autores": ["Fulano", "Beltrano"],
+                                  "papel_do_titular": "consultor"}]},
+     "coautores": ["Sócio Teste"], "periodo_atuacao": {"de": 1950, "ate": 1990}},
+    {"codigo_fundo": "F098", "prefixo": "SEM", "nome": "Só Autoridade", "ultimo_projeto": None,
+     "proximo_projeto": "P0001",
+     "autoridade": {"coautores": [{"nome": "Fulana"}, {"nome": ""}], "periodo": {"inicio": 1960, "fim": 1975}}},
+    {"codigo_fundo": "F097", "prefixo": "NUL", "nome": "Sem Período", "autoridade": None,
+     "coautores": [], "periodo_atuacao": {"de": None, "ate": None}},
+], "operadores": [{"id": 1, "nome": "Beatriz"}]}
+
+
+class TestAutoridadeDoPainel(unittest.TestCase):
+    def test_corpo_real_do_painel(self):
+        fundos_ = {f.codigo: f for f in fundos._de_json(CONTEXTO_REAL)}
+        self.assertEqual(set(fundos_), {"F099", "F098", "F097"})
+        f99 = fundos_["F099"]
+        self.assertEqual((f99.sigla, f99.nome, f99.coautores, f99.periodo),
+                         ("TST", "Fundo Teste", ("Sócio Teste",), (1950, 1990)))
+        self.assertTrue(f99.fora_do_periodo("1995"))
+        self.assertFalse(f99.fora_do_periodo("1960"))
+
+    def test_so_autoridade_coautores_nome_e_periodo_inicio_fim(self):
+        f98 = {f.codigo: f for f in fundos._de_json(CONTEXTO_REAL)}["F098"]
+        self.assertEqual((f98.coautores, f98.periodo), (("Fulana",), (1960, 1975)))
+
+    def test_periodo_nulo_nao_quebra(self):
+        f97 = {f.codigo: f for f in fundos._de_json(CONTEXTO_REAL)}["F097"]
+        self.assertEqual((f97.coautores, f97.periodo), ((), None))
+
+    def test_formato_antigo_continua(self):
+        [f] = fundos._de_json({"fundos": [{"codigo": "F010", "sigla": "FSJ", "nome": "X",
+                                           "coautores": "A, B", "periodo_atuacao": {"de": 1980, "ate": 1970}}]})
+        self.assertEqual((f.coautores, f.periodo), (("A", "B"), (1970, 1980)))
+
+
 if __name__ == "__main__":
     unittest.main()
