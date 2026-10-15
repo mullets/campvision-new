@@ -1,6 +1,6 @@
 {
   "versao": 2,
-  "gerado_em": "2026-10-15T06:06:48+00:00",
+  "gerado_em": "2026-10-15T06:09:18+00:00",
   "teste": false,
   "projeto_codigo": "F026-P0001",
   "projeto_nome": "CASA DA PRAIA",
@@ -122,7 +122,7 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-15-02+f796560",
+      "versao_cv2": "2026-10-15-03+eb1d740",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
@@ -239,7 +239,7 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-15-02+f796560",
+      "versao_cv2": "2026-10-15-03+eb1d740",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
@@ -356,7 +356,7 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-15-02+f796560",
+      "versao_cv2": "2026-10-15-03+eb1d740",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
@@ -473,7 +473,7 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-15-02+f796560",
+      "versao_cv2": "2026-10-15-03+eb1d740",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
       "carimbo": {
@@ -526,7 +526,7 @@
     "F026-P0001-1972-S01-D00002 é quase de F026-P0001-1972-S01-D00001 — publicar F026-P0001-1972-S01-D00001"
   ],
   "execucao": {
-    "versao_cv2": "2026-10-15-02+f796560",
+    "versao_cv2": "2026-10-15-03+eb1d740",
     "contrato": "2.3",
     "modelo": "claude-sonnet-5",
     "versao_prompt": {
@@ -538,6 +538,6 @@
     "tokens_entrada": 2000,
     "tokens_saida": 200,
     "custo_usd": 0.006,
-    "tempo_s": 0.3
+    "tempo_s": 0.4
   }
 }

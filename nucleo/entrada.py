@@ -1469,7 +1469,7 @@ class Recebedor:
             codigo = self.painel.reservar(
                 ctx.fundo.codigo, titulo, chave, ano=ctx.ano, cidade=ctx.cidade,
                 identificacao_original=(f"{ctx.p_estacao} - {ctx.projeto}" if ctx.p_estacao else ctx.projeto),
-                operador=ctx.operador, proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
+                p_estacao=ctx.p_estacao, operador=ctx.operador, proximo_p_local=f"{ctx.fundo.codigo}-P{maior + 1:04d}",
                 carimbo={"obra": g.obra, "local": g.local, "cliente": g.cliente,
                          "identificadores": sorted(g.ids), "folhas": len(g.folhas)},
                 **extra) or ""

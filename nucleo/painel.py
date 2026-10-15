@@ -23,6 +23,17 @@ from pathlib import Path
 _log = logging.getLogger("cv2.painel")
 
 
+def _numero_do_projeto(dados: dict) -> str:
+    """numero_projeto (P0001) do corpo da reserva: no topo ou dentro de `projeto`."""
+    projeto = dados.get("projeto") if isinstance(dados.get("projeto"), dict) else {}
+    for origem in (dados, projeto):
+        for chave in ("numero_projeto", "numero"):
+            valor = origem.get(chave)
+            if valor not in (None, "", 0):
+                return str(valor)
+    return ""
+
+
 class Painel:
     def __init__(self, url: str, token: str = "", pasta_estado: Path | None = None,
                  timeout: float = 8.0) -> None:
@@ -101,7 +112,19 @@ class Painel:
         codigo = dados.get("codigo") or (dados.get("projeto") or {}).get("codigo")
         if not codigo and dados.get("numero"):
             codigo = f"{fundo_codigo}-P{int(dados['numero']):04d}"
-        self.ultima_reserva["existente"] = bool(dados.get("existente"))
+        existente = bool(dados.get("existente"))
+        if existente and not _numero_do_projeto(dados):
+            # C2: o painel só reaproveita projeto por número quando o corpo traz
+            # `numero_projeto`. Sem ele a resposta é suspeita (painel antigo que
+            # casou pelo "P0001 - " da estação): segura o lote em vez de misturar.
+            mensagem = ("painel devolveu projeto existente sem numero_projeto — "
+                        "lote em espera até o painel decidir")
+            self.ultima_reserva = {"pendente": True, "existente": False, "mensagem": mensagem,
+                                   "decisao_id": dados.get("decisao_id")}
+            self.ultimo_erro = mensagem
+            _log.warning("Reserva %s ignorada: %s (codigo %s)", fundo_codigo, mensagem, codigo)
+            return None
+        self.ultima_reserva["existente"] = existente
         return str(codigo) if codigo else None
 
     def pedidos_releitura(self, estacao_id: str) -> list[dict]:

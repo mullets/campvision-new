@@ -82,12 +82,28 @@ class TestPainel(unittest.TestCase):
         self.assertIsNone(self.p.reservar("F026", "Tarumã", "a" * 32))
         self.assertTrue(self.p.ultima_reserva["pendente"])
         self.assertEqual(self.p.ultimo_erro, "Aguardando decisão no painel")
-        self.srv.resposta_reserva = (200, {"codigo": "F026-P0001", "existente": True})
+        self.srv.resposta_reserva = (200, {"codigo": "F026-P0001", "numero_projeto": "P0001", "existente": True})
         self.assertEqual(self.p.reservar("F026", "Tarumã", "a" * 32), "F026-P0001")
         self.assertTrue(self.p.ultima_reserva["existente"])
         self.srv.resposta_reserva = (200, {"codigo": "F026-P0043"})
         self.p.reservar("F026", "Outro", "b" * 32)
         self.assertFalse(self.p.ultima_reserva["existente"])
+
+    def test_reservar_manda_p_estacao(self):
+        self.p.reservar("F026", "Tarumã", "a" * 32, p_estacao="P0001", identificacao_original="P0001 - Tarumã")
+        corpo = self.srv.pedidos[-1][2]
+        self.assertEqual((corpo["p_estacao"], corpo["identificacao_original"]), ("P0001", "P0001 - Tarumã"))
+        self.p.reservar("F026", "Tarumã", "b" * 32)
+        self.assertNotIn("p_estacao", self.srv.pedidos[-1][2])
+
+    def test_existente_sem_numero_projeto_e_segurado(self):
+        # C2: o painel antigo reaproveitava o projeto só porque a estação escreveu "P0001 - ".
+        self.srv.resposta_reserva = (200, {"codigo": "F026-P0001", "existente": True})
+        with self.assertLogs("cv2.painel", level="WARNING"):
+            self.assertIsNone(self.p.reservar("F026", "Tarumã", "a" * 32, p_estacao="P0001"))
+        self.assertTrue(self.p.ultima_reserva["pendente"])
+        self.assertFalse(self.p.ultima_reserva["existente"])
+        self.assertIn("numero_projeto", self.p.ultimo_erro)
 
     def test_releitura_contrato_do_painel(self):
         self.assertTrue(self.p.releitura_iniciada(5, "campvision2"))
