@@ -394,7 +394,7 @@ def _comando_livro_legado(config: Config) -> int:
 
 
 def _comando_backtest(config: Config, curado: str | None, contra: str | None,
-                      reconferir: bool) -> int:
+                      reconferir: bool, simular: bool = False) -> int:
     from nucleo import backtest as bt
 
     raiz = Path(contra or config.raiz_final or ".")
@@ -407,11 +407,12 @@ def _comando_backtest(config: Config, curado: str | None, contra: str | None,
         if not resultados or not all(r.liberado for r in resultados):
             codigo = 1
     if reconferir:
-        divergencias = bt.reconferir_tipo(leituras)
-        print(f"\nReconferência do tipo de desenho: {len(divergencias)} divergência(s)")
+        divergencias = bt.regravar_tipo(raiz, simular=simular)
+        print(f"\nReconferência do tipo de desenho: {len(divergencias)} divergência(s)"
+              + (" (simulação: nada regravado)" if simular else " — regravadas em leituras.json/pacote"))
         for c, gravado, recalc in divergencias[:200]:
             print(f"  {c}: gravado {gravado!r} · recalculado {recalc!r}")
-        codigo = codigo or (1 if divergencias else 0)
+        codigo = codigo or (1 if divergencias and simular else 0)
     return codigo
 
 
@@ -646,7 +647,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--contra", metavar="PASTA",
                    help="Onde estão os leituras.json (padrão: acervo final)")
     p.add_argument("--reconferir-tipo", action="store_true",
-                   help="Recalcula o tipo de desenho e compara com o gravado (método §9.2)")
+                   help="Recalcula o tipo de desenho e REGRAVA o gravado (método §9.2; CAMP-051)")
+    p.add_argument("--simular", action="store_true",
+                   help="Com --reconferir-tipo: só lista o que mudaria, sem regravar")
     p.add_argument("--reclassificar", metavar="F0xx-P000x",
                    help="Troca a série (--serie) e/ou o ano (--ano) dos documentos de um projeto")
     p.add_argument("--serie", metavar="S01", help="Série nova para --reclassificar")
@@ -866,7 +869,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{n} arquivo(s) renomeado(s) em {args.reclassificar}.")
         return 0
     if args.backtest or args.reconferir_tipo:
-        return _comando_backtest(config, args.backtest, args.contra, args.reconferir_tipo)
+        return _comando_backtest(config, args.backtest, args.contra, args.reconferir_tipo,
+                                 getattr(args, "simular", False))
     if args.refazer_lote:
         return _comando_refazer_lote(config, args.refazer_lote)
 

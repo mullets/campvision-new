@@ -270,7 +270,7 @@ def registrar_decisao(catalogacao: Path, codigo: str, acao: str, motivo: str, po
 def capa_sugerida(leituras: dict) -> str:
     candidatos = [c for c in sorted(leituras) if not leituras[c].duplicata_de
                   and not leituras[c].autoria_divergente]
-    for preferido in ("Perspectiva", "Fachada", "Elevação", "Implantação"):
+    for preferido in ("Perspectiva", "Elevação/Fachada", "Implantação"):
         for c in candidatos:
             if preferido in (leituras[c].valores.get("tipo") or "") and "-S01-" in c:
                 return c

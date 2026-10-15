@@ -492,7 +492,7 @@ Regras: só o visível; não nomear pessoas nem autor; não dizer onde foi tirad
 
 `derivacao.py`:
 - **Ano** só da data escrita (ano de 4 dígitos, ou `dd.mm.aa` → 19aa). O modelo não dá o ano em prancha.
-- **Tipo de desenho** pelo título, com 15 detectores nesta ordem: Implantação, Planta, Corte, Elevação, Fachada, Detalhe, Estrutura, Instalações, Mobiliário, Perspectiva, Croqui, Fotografia, Levantamento, Documento, Tabela. No máximo 3, juntos com " / ". Implantação suprime Planta.
+- **Tipo de desenho** pelo título, com 14 detectores nesta ordem: Implantação, Planta, Corte, Elevação/Fachada (tipo único, CAMP-051), Detalhe, Estrutura, Instalações, Mobiliário, Perspectiva, Croqui, Fotografia, Levantamento, Documento, Tabela. No máximo 3, juntos com " / ". Implantação suprime Planta.
 - **"É documento, não obra"**: título com documento, currículo, caderno, pasta, recorte, correspondência, memorial, contrato, ofício. Em S01 bloqueia a publicação (ficha) e impede sugestão de programa.
 - **Autoria divergente:** nomes com 4+ letras (sem títulos e palavras vazias) comparados com titular e coautores. Arquiteto vazio nunca dispara.
 - **Chaves de identidade** (fotos): uma pessoa só é nomeada quando os traços (barba, bigode, óculos) batem com **exatamente uma** chave escrita por gente no fundo. "só", "apenas" e "sem" tornam explícito o que não está. Qualquer ambiguidade = ninguém nomeado. O nome vai na frente da legenda, com ressalva.
@@ -830,7 +830,7 @@ Todos com `~/campvision-new/.venv/bin/python vigia.py` na frente.
 |---|---|
 | `--avaliar GABARITO.csv` | relê as folhas do gabarito do painel (`arquivo_origem, campo, valor_correto`) sem gravar no acervo e mostra o placar e o custo (gasta API) |
 | `--backtest CURADO.csv [--contra PASTA]` | compara as leituras com uma planilha curada; liberado com ≥ 85% exato |
-| `--reconferir-tipo` | recalcula o tipo de desenho pelo título e lista divergências |
+| `--reconferir-tipo` | recalcula o tipo de desenho pelo título, lista divergências e REGRAVA `leituras.json` e `pacote_tainacan.json` (Elevação e Fachada viram "Elevação/Fachada"); `--simular` só lista |
 | `--backtest-programa CURADO.csv` | placar das sugestões de programa e natureza |
 
 **Só no modo antigo** (pasta vigiada, [seção 13](#13-modo-antigo-pasta-vigiada)): `--status`, `--estimativa`, `--info`, `--planilha-geral`, `--relatorio-geral`, `--marcar-fase`, `--todos`, `--refazer TEXTO`. No servidor, **`--status` não mostra o `100 - Scanners`**: use `--lotes`.

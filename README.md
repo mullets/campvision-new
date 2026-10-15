@@ -261,7 +261,7 @@ em quatro passadas — só a 2 chama o modelo:
    de aceite.
 
 Validação: `vigia.py --backtest CURADO.csv` compara com a base curada à mão
-(≥ 85% exato para liberar) e `--reconferir-tipo` recalcula o tipo gravado.
+(≥ 85% exato para liberar) e `--reconferir-tipo` recalcula e regrava o tipo gravado (`--simular` só lista).
 
 ### As fontes secundárias
 

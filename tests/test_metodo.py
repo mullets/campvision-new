@@ -18,7 +18,7 @@ class TestTipoDeDesenho(unittest.TestCase):
     CASOS = {
         "Planta de Situação": "Implantação",          # supressão
         "PLANTA DO PAVIMENTO TÉRREO E CORTE AA": "Planta / Corte",
-        "Corte AA, Elevação Norte, Detalhe 1, Fachada": "Corte / Elevação / Fachada",  # limite 3
+        "Corte AA, Elevação Norte, Detalhe 1, Fachada": "Corte / Elevação/Fachada / Detalhe",  # limite 3; Elevação e Fachada são um tipo (CAMP-051)
         "Prancha 12": "",                              # abstenção
         "Esquadrias de Ferro": "",                     # nomeia assunto, não tipo
         "Luncheonete": "",
@@ -130,8 +130,36 @@ class TestBacktest(unittest.TestCase):
             self.assertEqual(backtest.reconferir_tipo(backtest.carregar_leituras(raiz)), [])
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestElevacaoFachada(unittest.TestCase):
+    """CAMP-051: Elevação e Fachada são um tipo só; --reconferir-tipo regrava."""
+
+    def test_tipo_unico(self):
+        self.assertEqual(derivacao.tipo_de_desenho("Fachada principal"), "Elevação/Fachada")
+        self.assertEqual(derivacao.tipo_de_desenho("Elevação Norte"), "Elevação/Fachada")
+        self.assertEqual(derivacao.tipo_de_desenho("Elevação e fachada leste"), "Elevação/Fachada")
+        self.assertNotIn("Fachada", derivacao.ORDEM)
+
+    def test_reconferir_regrava(self):
+        import json
+        with TemporaryDirectory() as tmp:
+            raiz = Path(tmp)
+            cat = raiz / "p" / "catalogacao"
+            cat.mkdir(parents=True)
+            escrever_json([Leitura(arquivo="F023-P0001-1968-S01-D00001.jpg",
+                                   valores={"tipo": "Fachada", "titulo_prancha": "Fachada principal"})],
+                          cat / "leituras.json")
+            (cat / "pacote_tainacan.json").write_text(json.dumps(
+                {"documentos": [{"codigo": "F023-P0001-1968-S01-D00001", "tipo": "Fachada",
+                                 "tipo_de_desenho": "Fachada"}], "retirados": []}), encoding="utf-8")
+            sim = backtest.regravar_tipo(raiz, simular=True)
+            self.assertEqual(len(sim), 1)
+            self.assertEqual(backtest.carregar_leituras(raiz)["f023-p0001-1968-s01-d00001"].valores["tipo"], "Fachada")
+            backtest.regravar_tipo(raiz)
+            self.assertEqual(backtest.carregar_leituras(raiz)["f023-p0001-1968-s01-d00001"].valores["tipo"],
+                             "Elevação/Fachada")
+            pacote = json.loads((cat / "pacote_tainacan.json").read_text(encoding="utf-8"))
+            self.assertEqual(pacote["documentos"][0]["tipo_de_desenho"], "Elevação/Fachada")
+            self.assertEqual(backtest.reconferir_tipo(backtest.carregar_leituras(raiz)), [])
 
 
 class TestSerieS08(unittest.TestCase):
@@ -147,3 +175,8 @@ class TestSerieS08(unittest.TestCase):
         self.assertEqual(estrutura.serie_do_texto("07 - Publicações"), "S07")
         self.assertEqual(estrutura.serie_do_texto("01 - Desenhos e pranchas"), "S01")
         self.assertTrue(estrutura.CODIGO_DOCUMENTO.match("F029-P0001-1980-S08-D00001"))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
