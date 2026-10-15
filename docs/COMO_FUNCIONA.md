@@ -172,7 +172,7 @@ Regras:
 | Sem marca | 10 min sem mudança (`entrada_quieto_minutos`) |
 
 - "Mudar" usa a data de modificação **e** a hora em que o arquivo chegou no QNAP (ctime). O Mac copia mantendo a data do scan; sem o ctime, a pasta TIFF era pega no meio da cópia (SESI Marília, 14/10).
-- Se o manifesto diz quantos arquivos são, a contagem precisa bater ("contagem X de Y").
+- Se o manifesto diz quantos arquivos são, a contagem precisa bater ("contagem X de Y"). Faltando arquivo e nada chegando há 30 min deixa de esperar em silêncio: o vigia loga WARNING, grava `lote_incompleto` no livro e manda `detalhe.alerta` no heartbeat (estado `erro`) até outro lote ficar pronto.
 - Lote vazio ("vazia") ou com arquivo sumindo durante a leitura espera a próxima rodada.
 
 ### Passo 3 — Montar o contexto (sem gastar API)

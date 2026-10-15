@@ -538,6 +538,18 @@ class TestFalhasNaoApagam(Base):
         self.assertFalse(ok)
         self.assertEqual(motivo, "contagem 2 de 5")
 
+    def test_lote_incompleto_parado_gera_alerta(self):
+        self.config.espera_estabilidade_segundos = 0
+        pasta = self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
+        self._manifesto(pasta, 5)
+        unidade = entrada.descobrir(self.scanners)[0]
+        _, motivo = entrada.pronta(unidade, self.config)
+        self.assertEqual(entrada.lote_incompleto_parado(unidade, motivo), "", "recém-chegado: ainda não é alerta")
+        alerta = entrada.lote_incompleto_parado(unidade, motivo, agora=__import__("time").time() + 3 * 3600)
+        self.assertIn("incompleto", alerta)
+        self.assertIn("contagem 2 de 5", alerta)
+        self.assertEqual(entrada.lote_incompleto_parado(unidade, "arquivos ainda chegando"), "")
+
     def test_etapas_longas_aparecem_no_log(self):
         self.scan("F026", "Fotos", "Tarumã", n=2, formatos=("jpg",))
         with self.assertLogs("cv2.entrada", level="INFO") as log:

@@ -247,6 +247,27 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     return True, ""
 
 
+MINUTOS_LOTE_INCOMPLETO = 30  # CAMP-051/aviso: faltando arquivo do manifesto há mais que isto → alerta
+
+
+def lote_incompleto_parado(unidade: Unidade, motivo: str, minutos: int = MINUTOS_LOTE_INCOMPLETO,
+                           agora: float | None = None) -> str:
+    """Texto de alerta quando o lote tem MENOS arquivos que o manifesto e nada chega há `minutos`.
+
+    `pronta()` devolve "contagem N de M" e o lote espera; sem isto esperava em silêncio para sempre."""
+    if not motivo.startswith("contagem "):
+        return ""
+    try:
+        ultimo = max(max(a.stat().st_mtime, a.stat().st_ctime) for a in unidade.arquivos())
+    except (OSError, ValueError):
+        return ""
+    parado = ((agora if agora is not None else time.time()) - ultimo) / 60
+    if parado < minutos:
+        return ""
+    return (f"lote {unidade.relativo} incompleto: {motivo}; nada chega há {int(parado)} min — "
+            "conferir a cópia na estação")
+
+
 def serie_do_arquivo(arquivo: Path, unidade: Unidade, padrao: str) -> str:
     """Série pela pasta de material (`03 - Fotografias/...`) dentro do lote; senão `padrao`."""
     try:
