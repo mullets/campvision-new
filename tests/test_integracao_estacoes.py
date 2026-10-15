@@ -156,6 +156,44 @@ class TestMac(Base):
         self.assertEqual(r.lote["contexto"]["operador"], "Rafa")
 
 
+class TestLoteMistoDoMac(Base):
+    def lote(self) -> Path:
+        projeto = self.scanners / "F026 - SBU Sami Bussab" / "P0060 - Edifício Tarumã - 1972"
+        for material in ("03 - Fotografias", "04 - Negativos", "05 - Slides"):
+            self.scan(*projeto.relative_to(self.scanners).parts, material,
+                      "01 - Arquivo Arquivístico (TIFF)", n=2, formatos=("jpg",))
+        escrever(projeto, "info_lote_20261014-161453_mac.json", mac_info_lote(
+            series=["03 - Fotografias", "04 - Negativos", "05 - Slides"], quantidade_documentos=6,
+            projeto_ja_existia=True))
+        escrever(projeto, "status_mac.json", {"status": "enviado_mac", "etapa": "enviado_mac"})
+        return projeto
+
+    def test_contexto_reconhece_varias_series(self):
+        projeto = self.lote()
+        c = entrada.contexto(entrada.Unidade(projeto, projeto.relative_to(self.scanners)), tabela())
+        self.assertEqual((c.series, c.serie_deduzida), (["S03", "S04", "S05"], False))
+        self.assertEqual(c.codigo, "F026-P0060")
+
+    def test_serie_por_arquivo_e_d_continuo(self):
+        projeto = self.lote()
+        [r] = self.rodar()
+        self.assertEqual(r.status, entrada.PRONTO, r.motivo)
+        nomes = sorted(p.name for p in r.pasta_projeto.rglob("F026-P0060-*") if p.suffix == ".jpg")
+        self.assertEqual(len(nomes), 6, nomes)
+        # 2 negativos, 2 slides e 2 fotos — cada um na série da sua pasta
+        por_serie = {}
+        for nome in nomes:
+            por_serie.setdefault(nome.split("-")[3], []).append(int(nome.split("-")[4][1:6]))
+        self.assertEqual({k: len(v) for k, v in por_serie.items()}, {"S03": 2, "S04": 2, "S05": 2})
+        # D contínuo no projeto: 1..6, sem repetir entre séries
+        self.assertEqual(sorted(d for v in por_serie.values() for d in v), [1, 2, 3, 4, 5, 6])
+        for serie, pasta in (("S03", "03 - Fotografias"), ("S04", "04 - Negativos"), ("S05", "05 - Slides")):
+            achados = list((r.pasta_projeto / pasta).rglob("*.jpg"))
+            self.assertEqual(len(achados), 2, pasta)
+            self.assertTrue(all(f"-{serie}-" in a.name for a in achados))
+        self.assertFalse(projeto.exists())
+
+
 class TestManifesto(Base):
     def lote(self, adulterar=False, contagem=None) -> Path:
         pasta = self.scan("F026 - SBU Sami Bussab", "01 - Desenhos e pranchas", "Casa Nova 1980", n=2)

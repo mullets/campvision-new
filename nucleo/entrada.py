@@ -225,6 +225,20 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     return True, ""
 
 
+def serie_do_arquivo(arquivo: Path, unidade: Unidade, padrao: str) -> str:
+    """Série pela pasta de material (`03 - Fotografias/...`) dentro do lote; senão `padrao`."""
+    try:
+        partes = arquivo.relative_to(unidade.pasta).parts[:-1]
+    except ValueError:
+        return padrao
+    for parte in partes:
+        if _e_pasta_de_material(parte):
+            achada = estrutura.serie_do_texto(parte)
+            if achada:
+                return achada
+    return padrao
+
+
 def conferir_manifesto(unidade: Unidade) -> list[str]:
     """Confere o manifesto.json das estações (C1): contagem, tamanho e SHA-256.
 
@@ -293,6 +307,7 @@ class Contexto:
     lote_id: str = ""
     teste: bool = False
     serie_deduzida: bool = False
+    series: list[str] = field(default_factory=list)  # lote com mais de uma série (Mac): a de cada arquivo vem da pasta
     problemas: list[str] = field(default_factory=list)
 
     def como_dict(self) -> dict:
@@ -396,12 +411,18 @@ def contexto(unidade: Unidade, tabela: mod_fundos.Tabela, serie_padrao: str = "S
         # A estação disse a série: o Mac manda `series` no info_lote e a pasta de
         # material fica DENTRO do lote (P0060 - SESI/03 - Fotografias/...). Vale
         # ela; adivinhar pela imagem pôs 14 fotos claras em S01 (SESI, 14/10).
-        declaradas = {estrutura.serie_do_texto(str(s)) for s in (mac.get("series") or [])} - {""}
+        declaradas = {estrutura.serie_do_texto(str(s)) for s in (dados.get("series") or [])
+                      if isinstance(dados.get("series"), list)} - {""}
         if not declaradas and unidade.pasta.is_dir():
             declaradas = {estrutura.serie_do_texto(f.name) for f in unidade.pasta.iterdir()
                           if f.is_dir() and _e_pasta_de_material(f.name)} - {""}
         if len(declaradas) == 1:
-            ctx.serie = declaradas.pop()
+            ctx.serie = next(iter(declaradas))
+        elif len(declaradas) > 1:
+            # Lote misto (negativos + slides + fotos): cada arquivo leva a série da sua
+            # pasta de material (serie_do_arquivo); ctx.serie só cobre o que ficar solto.
+            ctx.series = sorted(declaradas)
+            ctx.serie = ctx.series[0]
     if not ctx.serie:
         # Sem pasta de material nem manifesto: a estação de fotografia/VueScan
         # manda foto; o resto (Contex, Universal) manda prancha. "99 - Não
@@ -1086,7 +1107,9 @@ class Recebedor:
         if precisa and livre < precisa * 1.1 + 200 * 1024 * 1024:
             return falhar(f"espaço insuficiente no destino: o lote precisa de {precisa / 2**30:.1f} GB "
                           f"e há {livre / 2**30:.1f} GB livres")
-        documentos = formatos.agrupar(suportados)
+        multiserie = len(ctx.series) > 1
+        serie_de = (lambda a: serie_do_arquivo(a, unidade, ctx.serie)) if multiserie else (lambda a: ctx.serie)  # noqa: E731
+        documentos = formatos.agrupar(suportados, grupo=serie_de if multiserie else None)
         proximo = estrutura.proximo_documento(pasta)
         arquivados: list[tuple[Path, Path, str, str]] = []  # (origem, destino, código, sha)
         vistos_sha: dict[str, str] = {}
@@ -1103,7 +1126,7 @@ class Recebedor:
                 if ja:
                     codigo_doc = Path(ja[0]["destino"]).stem
                 else:
-                    codigo_doc = estrutura.codigo_documento(codigo, ctx.ano, ctx.serie, proximo)
+                    codigo_doc = estrutura.codigo_documento(codigo, ctx.ano, serie_de(doc.versoes[0]), proximo)
                     proximo += 1
                 for versao, soma in shas.items():
                     if soma in vistos_sha and vistos_sha[soma] != codigo_doc:
@@ -1115,7 +1138,7 @@ class Recebedor:
                         if destino.exists():
                             arquivados.append((versao, destino, codigo_doc, soma))
                             continue
-                    destino = estrutura.destino_documento(pasta, ctx.serie, codigo_doc, versao.suffix)
+                    destino = estrutura.destino_documento(pasta, serie_de(versao), codigo_doc, versao.suffix)
                     destino.parent.mkdir(parents=True, exist_ok=True)
                     if destino.exists() and sha256(destino) != soma:
                         return falhar(f"{destino.name} já existe com outro conteúdo")
@@ -1663,7 +1686,8 @@ class Recebedor:
             campos.update({
                 "_credito": ctx.fundo.credito, "_codigo": codigo_doc, "_fundo": ctx.fundo.codigo,
                 "_autor": ctx.fundo.nome,
-                "_serie": ctx.serie, "_operador": ctx.operador, "_estacao": ctx.estacao,
+                "_serie": codigo_doc.split("-")[3] if codigo_doc.count("-") >= 4 else ctx.serie,
+                "_operador": ctx.operador, "_estacao": ctx.estacao,
                 "_digitalizado_em": ctx.enviado_em, "_nome_original": origem.name,
             })
             if not campos.get("Projeto"):
