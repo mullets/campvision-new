@@ -1,8 +1,8 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-**Contrato 2.2 — 13/10/2026.** Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
+**Contrato 2.3 — 15/10/2026** (integração com as estações; ver §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
 
-- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.2"`.
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.3"`.
 - Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
   - Para regenerar: `python -m tests.contrato_exemplos`.
 - Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
@@ -118,6 +118,8 @@ Valores de `status`, nesta ordem:
   "material chegando", sem apagar a revisão já feita.
 - Chaves antigas (`enviado_windows`, `campvision_concluido`, `fase`) podem
   continuar no arquivo por compatibilidade; o painel olha só `status`.
+- Na **entrada** (`100 - Scanners`) a marca de fim das estações é `status` **ou** `etapa`
+  (`enviado_windows` / `enviado_mac`); ver §18.
 
 ## 4. `catalogacao/` (CV2 escreve; painel passa a ler)
 
@@ -188,6 +190,7 @@ Heartbeat do CV2:
   "app": "CAMP Vision 2",
   "versao": "2026-10-07-01",
   "estado": "processando",
+  "detalhe": {"situacao": "copiando 31 de 48"},
   "projeto": "F002-P0002",
   "progresso": {"feitos": 31, "total": 48},
   "fila": 3,
@@ -196,7 +199,13 @@ Heartbeat do CV2:
 }
 ```
 
-`estado` ∈ `vigiando`, `processando`, `pasta indisponível`, `erro`.
+`estado` ∈ `ocioso`, `capturando`, `finalizando`, `backup`, `processando`, `erro`, `vigiando`,
+`pasta indisponível` (o vocabulário do painel, o mesmo das estações; o painel responde 400 a
+qualquer outro valor). O CV2 mapeia a situação interna: `copiando…`/`preparando…`/`gravando…`/
+`relendo`/`consolidando`/`montando…` → `processando`; `iniciando` → `vigiando`;
+`QNAP com problema` e teto de custo estourado → `erro`. O texto livre vai em `detalhe.situacao`
+(e `detalhe.alerta` quando há alerta, p. ex. `limite de custo`). Heartbeat recusado é logado
+como WARNING no CV2.
 
 ### Novo no painel
 
@@ -265,8 +274,8 @@ os coautores/sócios registrados:
              "coautores": ["Joaquim Barretto", "Francisco Segnini Jr."]}]}
 ```
 
-Sem `coautores`, o CV2 compara só com o nome do fundo. Período de atuação
-(fundos de família, F015 × F016) ainda não é usado — fica para a v3.
+Sem `coautores`, o CV2 compara só com o nome do fundo. O período de atuação
+(fundos de família, F015 × F016) é lido desde o contrato 2.3 (§18, C4).
 
 ### 9.2 Preview para o site
 
@@ -427,3 +436,49 @@ O painel grava `carimbo.obra` em `projeto_carimbo`, `carimbo.escritorio` em `esc
 **Projeto divergente (T4):** não compara mais com o título do código. Folha de outra obra que foi junto com o projeto principal (grupo pequeno sem projeto na base), folha "sem identificação" numa pasta com várias obras e capa **saem de `documentos` e vão para `retirados`**, com o bloqueio dizendo o que o carimbo diz. Uma pessoa devolve com a decisão `publicar` (`vigia.py --decisao`). Autoria divergente continua sem volta.
 
 **Corrigir o que já entrou errado:** `vigia.py --reidentificar F026` (ou `F026-P0236`) mostra o plano — grupos pelo carimbo e o código certo de cada um — sem mexer em nada. Com `--sim`, move as folhas que têm UM projeto forte na base, tira da publicação as de outra obra/sem identificação/capas, refaz os pacotes e avisa o painel; grupo que precisa de pessoa fica listado em `catalogacao/reidentificacao.json`. Só rode com `--sim` depois que o painel tiver as rotas de mesclar/mover (cartão 156).
+
+## 18. Contrato 2.3 — integração com as estações (15/10/2026)
+
+Tudo aqui é **opcional e compatível** com versões antigas dos dois lados.
+
+### 18.1 Marca de fim do lote e `manifesto.json` (C1)
+
+- **Windows** grava em `status.json`: `{"status":"enviado_windows","etapa":"enviado_windows","atualizado_em","atualizado_por"}`; **Mac** em `status_mac.json`: `{"status":"enviado_mac","etapa":"enviado_mac",…}`. O CV2 aceita `status` **ou** `etapa` (estações antigas só gravam `etapa`).
+- As estações gravam por último, de forma atômica, um `manifesto.json` na pasta do lote:
+
+```json
+{"versao": 1, "estacao_id": "contex1", "tipo_estacao": "contex", "operador": "Beatriz",
+ "fundo_codigo": "F026", "projeto_codigo": "F026-P0002", "numero_projeto": "P0002",
+ "projeto_ja_existia": false, "identificacao_original": "P0002 - Edifício Tarumã - 1972",
+ "serie": "S01", "contagens": {"arquivos": 2},
+ "arquivos": [{"caminho": "TIF/scan 001.tif", "tamanho": 20811234, "sha256": "…"}],
+ "gerado_em": "2026-10-15T11:30:00-03:00"}
+```
+
+  Lote com várias séries usa `"series": ["03 - Fotografias", "04 - Negativos"]` no lugar de `serie`. O CV2 confere `contagens.arquivos` e, quando há, `tamanho` e `sha256` de cada arquivo **antes de copiar**: divergência vira lote em **erro** (`manifesto da estação não confere`), sem copiar nem apagar nada.
+- `info_projeto.json` das estações ganha `codigo` (`F023-P0002`), `fundo_codigo`, `estacao` (= `estacao_id`), `tipo_estacao`, `enviado_em` (= `finalizado_em`), mantendo as chaves antigas. O CV2 **não** trata `numero_projeto` como nome do projeto nem `codigo_fundo` como escritório; mapeia `estacao_id`→`estacao`, `estacao_tipo`→`tipo_estacao`, `finalizado_em`→`enviado_em`; `codigo_fundo` vale como fundo explícito; `codigo` completo vale como código oficial.
+- **`info_lote_AAAAMMDD-HHMMSS_mac.json` é MARCADOR**, não arquivo do lote: não vai para o acervo, não gera "formato não suportado", é mesclado ao contexto (`operador`, `estacao`/`estacao_id`, `estacao_tipo`, `series`, `quantidade_documentos`) e removido da entrada junto com o resto.
+- **Várias séries no mesmo lote do Mac:** cada arquivo leva a série da sua pasta de material (`03 - Fotografias/…`); o D é contínuo no projeto.
+
+### 18.2 `/reservar` (C2, C7)
+
+- Corpo: `p_estacao` (opcional) = o "P0001" que a estação escreveu, **só pista**; `identificacao_original` continua indo.
+- O painel só reaproveita projeto por número quando o corpo traz `projeto_ja_existia: true` + `numero_projeto` válido do fundo. A resposta com `existente: true` traz `numero_projeto`; **sem ele o CV2 segura o lote** (trata como decisão pendente, WARNING no log).
+- **`410 {"descartado": true, "mensagem": "…"}`**: o lote foi descartado no painel. O CV2 marca o lote como `descartado` (estado local + livro `descartado`), **não apaga** a origem e **para de chamar** (o lote só volta com `--refazer-lote`).
+
+### 18.3 `/aviso` (C7)
+
+| Resposta | O CV2 faz |
+|---|---|
+| 2xx | ok |
+| 2xx com corpo `{"ok": false, "motivo": "…"}` | WARNING com o `motivo`; **não** reenfileira |
+| 4xx (exceto 408/425/429) | WARNING; recusa definitiva, **não** reenfileira |
+| 5xx, 408/425/429, sem conexão | reenfileira em `painel_pendentes.json` (gravação atômica); 5xx desiste após 20 tentativas |
+
+### 18.4 `/api/estacoes/contexto` (C4)
+
+Por fundo, além de `autoridade{}`: `coautores` (lista de nomes) e `periodo_atuacao` `{"de": ano, "ate": ano}`. O CV2 lê também `autoridade.coautores[].nome` e `autoridade.periodo{inicio,fim}`, e aceita `codigo_fundo`/`prefixo` (nomes reais do painel) além de `codigo`/`sigla`.
+
+### 18.5 Teto de custo
+
+`limite_custo_dia_usd` e `limite_custo_lote_usd` no config do CV2 (0 = sem limite). Estourou: a leitura para, o lote vira erro `limite de custo` e o heartbeat vai com `estado: "erro"` e `detalhe.alerta`.

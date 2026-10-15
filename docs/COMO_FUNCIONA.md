@@ -1,6 +1,6 @@
 # CAMP Vision 2 — como funciona, passo a passo
 
-Guia completo do caminho de um lote: da digitalização na estação até a folha aparecer no painel. Vale para a **versão 2026-10-14-05**.
+Guia completo do caminho de um lote: da digitalização na estação até a folha aparecer no painel. Vale para a **versão 2026-10-15-10** (contrato 2.3).
 
 Os detalhes técnicos de cada arquivo e de cada chamada HTTP ficam no contrato com o painel: [contrato-painel.md](contrato-painel.md). A instalação e o uso no Mac ficam no [README](../README.md).
 
@@ -63,7 +63,7 @@ Tudo acontece em `nucleo/entrada.py` (`Recebedor.processar`). A cada **30 s** o 
 O vigia percorre `100 - Scanners` até 6 níveis de profundidade. Um **lote** (chamado de "unidade" no código) é a primeira pasta que:
 
 - tem arquivo direto dentro dela; ou
-- tem um marcador (`manifesto.json`, `info_projeto.json`, `status.json`, `status_mac.json`); ou
+- tem um marcador (`manifesto.json`, `info_projeto.json`, `status.json`, `status_mac.json`, `info_lote_*_mac.json`); ou
 - só tem subpastas de formato (`TIF/`, `JPG/`, `DNG/`, `PDF/`…).
 
 Ele **pula** pastas que começam com `.` ou `_`. Para tirar um lote da fila sem apagar, renomeie a pasta com `_` na frente. O `_conferidos/` da quarentena também começa com `_`.
@@ -76,10 +76,11 @@ A ordem da fila é alfabética. O `fila N` do log é quantos lotes estão penden
 
 Um lote só é processado quando está **completo**:
 
-- **Com marca de fim** (`manifesto.json`, `status.json` com `enviado_windows` ou `status_mac.json` com `enviado_mac`): espera **45 s** sem nenhum arquivo mudar.
+- **Com marca de fim** (`manifesto.json`, ou `status.json`/`status_mac.json` com **`status` OU `etapa`** igual a `enviado_windows`/`enviado_mac`; as estações antigas só gravavam `etapa`): espera **45 s** sem nenhum arquivo mudar.
 - **Sem marca:** espera **10 min** sem mudança (`entrada_quieto_minutos`).
 - **"Mudar"** considera também a hora em que o arquivo **chegou** no QNAP (ctime), e não só a data de modificação. O Mac copia mantendo a data original do scan. Sem essa regra, o vigia pegava a pasta TIFF no meio da cópia, antes de chegarem os JSON do lote (foi o que aconteceu no SESI Marília em 14/10).
-- Se o `manifesto.json` diz quantos arquivos são, a contagem precisa bater.
+- Se o `manifesto.json` diz quantos arquivos são (`contagens.arquivos`), a contagem precisa bater. Se ele lista os arquivos com `tamanho` e `sha256`, o vigia **confere os dois antes de copiar**: arquivo faltando ou corrompido vira **erro** (`manifesto da estação não confere: …`) e nada é copiado nem apagado.
+- Os marcadores (`manifesto.json`, `info_projeto.json`, `status*.json` e `info_lote_*_mac.json`) **não são arquivos do lote**: não vão para o acervo, não geram aviso de "formato não suportado" e são removidos da entrada junto com o resto quando o lote termina.
 
 ### Passo 3 — Montar o contexto (sem gastar API)
 
@@ -88,10 +89,10 @@ Um lote só é processado quando está **completo**:
 | O quê | De onde vem, em ordem de prioridade |
 |---|---|
 | **Fundo** | Campo do manifesto/info **ou** o caminho (`F009 - EOL …`), sempre conferido na **tabela de autoridade** de fundos. Se nenhum identifica, o lote dá erro. Se os dois identificam fundos **diferentes**, é conflito e o lote para. |
-| **Série** | 1) campo `serie` do manifesto; 2) pasta de material no caminho até o lote; 3) **`series` do `info_lote` do Mac**, ou a pasta de material **dentro** do lote (`03 - Fotografias/…`); 4) se nada disso existe, a série é **deduzida** (S03 para estação de foto/VueScan, senão S01) e passa pela triagem do passo 6. |
-| **Código do projeto** | 1) código completo `F0xx-P0xxx` no manifesto ou na pasta; 2) **Mac com `projeto_ja_existia: true`**: `codigo_fundo` + `numero_projeto` (por exemplo F009-P0060), porque o Mac escolheu o projeto na lista do painel; 3) senão não há código ainda: o "P0001" que a estação escreve é **só pista** (decisão do Rafa, 09/10). O código sai da identificação pelo carimbo (passo 7). |
+| **Série** | 1) campo `serie` do manifesto; 2) pasta de material no caminho até o lote; 3) **`series` do `info_lote` do Mac**, ou a pasta de material **dentro** do lote (`03 - Fotografias/…`). Com **mais de uma** série no mesmo lote (negativos + slides + fotos), **cada arquivo leva a série da sua pasta de material** e o D continua contínuo no projeto; 4) se nada disso existe, a série é **deduzida** (`serie_padrao` do config, S01, ou S03 para estação de foto/VueScan) e passa pela triagem do passo 6. `99 - Não identificado` só aparece quando alguém decide (reclassificação, `serie` S99 do manifesto), não por falta de pasta. |
+| **Código do projeto** | 1) código completo `F0xx-P0xxx` no manifesto, no `info_projeto.json` (`codigo`) ou na pasta; 2) **Mac com `projeto_ja_existia: true`**: `codigo_fundo` + `numero_projeto` (por exemplo F009-P0060), porque o Mac escolheu o projeto na lista do painel; 3) senão não há código ainda: o "P0001" que a estação escreve é **só pista** (decisão do Rafa, 09/10). O código sai da identificação pelo carimbo (passo 7). |
 | **Nome, ano, cidade** | Manifesto/info → nome da pasta (`SBU-Taruma-1972` também). |
-| **Operador, estação** | Manifesto/info. |
+| **Operador, estação** | Manifesto/info; no Mac, o `info_lote_*_mac.json` (operador, `estacao_id`→estação, `estacao_tipo`→tipo, `series`, `quantidade_documentos`) é mesclado ao contexto. No `info_projeto.json`: `estacao_id`→`estacao`, `estacao_tipo`→`tipo_estacao`, `finalizado_em`→`enviado_em`. `numero_projeto` **não** é o nome do projeto e `codigo_fundo` **não** é o escritório (viram `p_estacao` e fundo explícito). |
 | **Teste** | `"teste": true` ou a palavra "teste" no caminho: o lote nunca vira publicável. |
 
 Sem painel configurado e sem projeto existente, o lote **espera**: o vigia nunca inventa número de projeto.
@@ -105,7 +106,7 @@ Antes de ter código, o lote vai para `<Fundo>/00 - Em identificação/F0xx-P9xx
 - **Cópia conferida:** hash SHA-256 do original, cópia para um temporário, hash da cópia; só então renomeia. Hash diferente vira erro.
 - **Arquivo que já existe** no acervo (mesmo hash, em qualquer projeto do fundo) não é copiado de novo.
 - **Espaço:** antes de começar, confere se cabe no disco.
-- **Formato não suportado** (JSON e outros): fica na entrada e entra como aviso.
+- **Formato não suportado** (formatos que não são imagem, fora os marcadores das estações): fica na entrada e entra como aviso.
 
 No log: `Lote …: copiando 7 de 38` (na primeira, na última e a cada 15 s).
 
@@ -174,6 +175,8 @@ O `exiftool` grava EXIF/XMP/IPTC completo em **todas** as versões (TIF e JPG): 
 
 No log: `gravando metadados em 38 arquivo(s)…`, `conferindo metadados…`, `Metadados gravados em 38 de 38`.
 
+**Lote cortado no meio do EXIF** (reinício, QNAP caiu): antes de gravar, o vigia marca o passo (`catalogacao/exif_pendente.json` + estado `exif`). Quando o lote volta à fila ele **retoma sem gastar API** (as leituras vêm do checkpoint) e **só regrava o que faltou**: confere o XMP de cada arquivo e regrava os que não conferem. Vale também para arquivos que "já estavam no acervo". `--diagnostico` lista os projetos com EXIF incompleto.
+
 ### Passo 11 — Catalogação e "pronto"
 
 Na pasta do projeto, `catalogacao/` recebe `leituras.json`, `catalogacao.csv`, `pacote_tainacan.json` (o que o painel importa), `erros.json`, `contatos.jpg`, `relatorio.txt`, `orientacao.txt`, `preparo.json`, `mapa_origem.json` e `lotes/<lote>.json`. O `info_projeto.json` é atualizado.
@@ -186,9 +189,9 @@ Só depois do "pronto", o original em `100 - Scanners` vai para `100 - Scanners/
 
 ### Se algo falha no meio
 
-Antes do "pronto", qualquer falha deixa o projeto em **erro** com o motivo (`catalogacao/catalogacao_ERRO.txt`, `erros.json`, log) e **nada é apagado da entrada**. O lote não volta sozinho enquanto os arquivos não mudarem; use `--refazer-lote` depois de corrigir. A exceção é o corte por parada do serviço antes da leitura, que volta sozinho.
+Antes do "pronto", qualquer falha deixa o projeto em **erro** com o motivo (`catalogacao/catalogacao_ERRO.txt`, `erros.json`, log) e **nada é apagado da entrada**. Casos que também viram erro: manifesto que não confere (SHA/contagem) e **teto de custo** estourado (`limite de custo`, ver seção 7); o painel responder **410** à reserva marca o lote como **descartado** (livro `descartado`) e o vigia para de chamar. O lote não volta sozinho enquanto os arquivos não mudarem; use `--refazer-lote` depois de corrigir. A exceção é o corte por parada do serviço antes da leitura, que volta sozinho.
 
-Toda ação, arquivo por arquivo, vai para o **livro de registro**: `ACERVOS_CAMP/_campvision/registro/AAAA-MM.jsonl` e `.csv`. Ações: recebido, copiado, conferido, renomeado, lido, exif_gravado, refeito, quarentena, apagado_original, relido, erro, decisao.
+Toda ação, arquivo por arquivo, vai para o **livro de registro**: `ACERVOS_CAMP/_campvision/registro/AAAA-MM.jsonl` e `.csv`. Ações: recebido, copiado, conferido, renomeado, lido, exif_gravado, refeito, quarentena, apagado_original, relido, erro, decisao, descartado.
 
 ---
 
@@ -241,17 +244,17 @@ Séries: S01 Desenhos e pranchas · S02 Documentos textuais · S03 Fotografias �
 
 | Chamada | Quando |
 |---|---|
-| `POST /api/estacoes/heartbeat` | a cada 60 s: estado, projeto, fila, números do dia, montagens, quarentena |
+| `POST /api/estacoes/heartbeat` | a cada 60 s: `estado` no vocabulário do painel (`ocioso, capturando, finalizando, backup, processando, erro, vigiando, pasta indisponível`), `detalhe.situacao` com o texto livre ("copiando 7 de 38"), projeto, fila, números do dia, montagens, quarentena. Falha vira WARNING no log |
 | `GET /api/estacoes/contexto?fundo=` | ao identificar: fundos, coautores e projetos do fundo |
-| `POST /api/estacoes/projetos/reservar` | projeto novo ou duvidoso (202 = decisão pendente) |
-| `POST /api/campvision/aviso` | a cada troca de `status` e no fim de `--reler` / `--avisar-painel` |
+| `POST /api/estacoes/projetos/reservar` | projeto novo ou duvidoso (202 = decisão pendente, **410 = lote descartado**). Manda `p_estacao` (o "P0001" da estação, só pista). `existente=true` sem `numero_projeto` na resposta é **segurado** |
+| `POST /api/campvision/aviso` | a cada troca de `status` e no fim de `--reler` / `--avisar-painel`. 4xx: recusa definitiva, não reenvia; 5xx/sem conexão: reenfileira (5xx com limite de 20 tentativas); 202 com `ok:false`: WARNING com o `motivo` |
 | `GET /api/estacoes/pedidos-releitura` | a cada rodada: "Ler dados agora" pedido no painel |
 
-Se o painel estiver fora, avisos e heartbeats ficam em `~/.campvision2/painel_pendentes.json` e são reenviados.
+Se o painel estiver fora, os avisos ficam em `~/.campvision2/painel_pendentes.json` (gravado de forma atômica) e são reenviados.
 
 **O que o painel faz com o aviso** (`camp-painel`, `rotas_operacao.ler_pasta_do_aviso` → `importador_lote.importar_lote`): relê a pasta e, se o lote está em revisão e não foi aprovado, importa o `pacote_tainacan.json`. O importador **não mexe** em folha já revisada por uma pessoa nem em folha no site.
 
-> **Limite atual do painel (14/10):** se uma folha muda de série depois de importada (S01 → S03 com o mesmo D), o importador recusa a nova ("o número D… já é de …-S01-…") e a folha antiga continua lá. Foi o caso do SESI Marília. A correção é no `camp-painel`: renomear a folha existente do mesmo lote em vez de recusar. Até lá, uma folha que mudou de série precisa ser acertada à mão no painel.
+> **Série que muda depois de importada** (S01 → S03 com o mesmo D, caso SESI Marília): o painel já aceita a leitura nova e renomeia a folha existente do mesmo lote que não foi ao site (camp-painel, commit f776d37).
 
 ---
 
@@ -274,7 +277,7 @@ cd ~/campvision-new && ./atualizar.sh --agora  # não espera (o lote cortado vol
 cd ~/campvision-new && ./atualizar.sh --voltar # desfaz a última atualização
 ```
 
-O script puxa o código do `main`, instala dependências, faz backup de `~/.campvision2`, **roda os testes (se falharem, volta sozinho)**, reinicia e abre o log ao vivo. **Aperte Ctrl+C para sair do log.** Comandos colados depois dele só rodam quando o log fecha. Sem isso, o próprio vigia se atualiza a cada **60 min**, sempre entre lotes. O build aparece no log: `CAMP Vision 2 build 2026-10-14-05`.
+O script puxa o código do `main`, instala dependências, faz backup de `~/.campvision2` (**sem** o arquivo `ambiente`, com permissão 600), **roda os testes (se falharem, volta sozinho)**, reinicia **só com o vigia em `vigiando`** (ocioso; em qualquer outra situação ele espera) e abre o log ao vivo. A versão nova só "vale" depois que o vigia completa a primeira rodada e grava `subiu_bem`; se subir 3 vezes sem isso, o `atualizar.sh --boot` (chamado pelo systemd antes de cada subida) **volta sozinho** para a anterior e pausa a auto-atualização (`rollbacks.log`). **Aperte Ctrl+C para sair do log.** Comandos colados depois dele só rodam quando o log fecha. Sem isso, o próprio vigia se atualiza a cada **60 min**, sempre entre lotes. O build aparece no log: `CAMP Vision 2 build 2026-10-15-10`.
 
 **Estado local (`~/.campvision2/`):**
 
@@ -288,7 +291,11 @@ O script puxa o código do `main`, instala dependências, faz backup de `~/.camp
 | `eventos.jsonl`, `relatorios/` | números do dia e relatórios |
 | `leitura/`, `leitura_bruta/` | imagens de leitura (cache) |
 | `painel_pendentes.json` | avisos que o painel ainda não recebeu |
-| `backups/` | cópias feitas pelo `atualizar.sh` |
+| `backups/` | cópias feitas pelo `atualizar.sh` (sem `ambiente`) |
+| `vigia.lock` | lock de instância: um serviço por máquina; comandos de conserto (`--reclassificar`, `--reidentificar --sim`, `--organizar-formatos`, `--consertar-acervo --sim`) **recusam** se o serviço está processando |
+| `subida_pendente`, `subiu_bem`, `rollbacks.log` | controle do rollback automático |
+
+**Teto de custo:** `limite_custo_dia_usd` e `limite_custo_lote_usd` no `config.json` (0 = sem limite). Estourou: a leitura para, o lote vira erro `limite de custo` (o checkpoint guarda o que foi lido) e o heartbeat vai com `estado: erro` e `detalhe.alerta`.
 
 **Comandos pela linha de comando que usam a API ou o painel** precisam das chaves no terminal:
 
@@ -318,7 +325,7 @@ Todos com `~/campvision-new/.venv/bin/python vigia.py` na frente.
 | `--status` | o que está pendente agora, sem processar |
 | `--monitor` | a tela do servidor, por SSH |
 | `--historico TERMO` | caminho completo de um arquivo (nome original, código, lote ou data) |
-| `--diagnostico [F0xx]` | por projeto: documentos, lidos, vazios, sem JPG, pacote; quarentena e réplica |
+| `--diagnostico [F0xx]` | por projeto: documentos, lidos, vazios, sem JPG, pacote; EXIF incompleto; quarentena e réplica |
 | `--proximo-p F0xx` | próximo número P livre no acervo |
 
 **Refazer e consertar**
@@ -350,13 +357,13 @@ Todos com `~/campvision-new/.venv/bin/python vigia.py` na frente.
 |---|---|---|
 | Log parado por minutos | cópia, preparo ou EXIF de TIFF pela rede | ver `estado.json` (seção 7); a partir da 2026-10-14-03 o log mostra "copiando/preparando N de M" |
 | `cancelado antes da leitura` | serviço parado no meio do lote | volta sozinho na próxima subida (desde 2026-10-14-01) |
-| Lote em `erro` depois de reinício ("EXIF conferido em 6 de 48") | reinício cortou o exiftool | `--refazer-lote NOME`; a leitura não é paga de novo |
+| Lote em `erro` depois de reinício ("EXIF conferido em 6 de 48") | reinício cortou o exiftool | `--refazer-lote NOME`; a leitura não é paga de novo e só o EXIF que faltou é regravado |
 | `aguardando decisão … — decisão no painel` | carimbo parecido com 2+ projetos | decidir no painel; o lote segue sozinho |
 | Fundo "não está na tabela de autoridade" | pasta sem código F000 reconhecível (ex.: "Convidado") | renomear a pasta com o código do fundo, ou `_` na frente para tirar da fila |
 | Lote de teste gastando API | pasta de teste em `100 - Scanners` | `_` no começo do nome da pasta |
 | Fotos em "Desenhos e pranchas", sem título | série deduzida errada (antes da 2026-10-14-04) | `--reclassificar F0xx-P0xxx --serie S03 --de S01` e depois `--reler … --escopo projeto` |
 | Foto com orientação incerta | modelo em dúvida (detalhe, vista aérea) | conferir à mão no painel |
-| Painel não muda depois de `--reler` | painel não importa folha que mudou de série; folha revisada é protegida | ver o limite na seção 6 |
+| Painel não muda depois de `--reler` | folha já revisada por uma pessoa ou no site é protegida | conferir no painel; a mudança de série em folha não revisada já é aceita (seção 6) |
 | `Sem chave de API` num comando | terminal sem as chaves | `set -a; . ~/.campvision2/ambiente; set +a` |
 | `--avisar-painel` diz "Painel não configurado" | `painel_url` vazio | `--painel http://192.168.15.60:8000` |
 | Comandos colados depois do `atualizar.sh` não rodam | o script termina no log ao vivo | Ctrl+C e rodar de novo, um de cada vez |
@@ -365,12 +372,12 @@ Todos com `~/campvision-new/.venv/bin/python vigia.py` na frente.
 
 ## 10. Pendências abertas
 
-1. **Painel:** importar folha que mudou de série (S01 → S03) renomeando a existente, em vez de recusar (seção 6).
-2. **Lote do Mac com várias séries** (fotos e negativos no mesmo envio): hoje o lote inteiro recebe uma série só. Cada arquivo precisa pegar a série da sua pasta.
-3. **Falha durante um reinício** que não seja "cancelado antes da leitura" (ex.: EXIF cortado) ainda fica em erro e precisa de `--refazer-lote`.
-4. **Lote que já estava no acervo** ("os N arquivo(s) já estavam no acervo") não regrava metadados. Se o EXIF tinha sido cortado antes (Itatiba F016-P0024, 14/10), precisa de conserto à parte.
-5. **Orientação de prancha sem texto** (croqui) continua só pelo OCR.
-6. **Levantamento** dos projetos de foto que entraram como S01 ou sem descrição antes da 2026-10-14-04.
+1. **Orientação de prancha sem texto** (croqui) continua só pelo OCR.
+2. **Levantamento** dos projetos de foto que entraram como S01 ou sem descrição antes da 2026-10-14-04.
+3. **Estações:** gravar `manifesto.json` e as chaves novas do `info_projeto.json` (contrato C1) e mandar `X-Camp-Token` (C5). O CV2 já aceita as duas formas, a antiga e a nova.
+4. **Servidores já instalados** precisam reinstalar o unit do systemd (`sudo ./instalar.sh`) para o rollback automático (`ExecStartPre … --boot`) valer.
+
+Resolvidas em 15/10: painel importa folha que mudou de série (f776d37); lote do Mac com várias séries (série por arquivo); EXIF cortado e "já estavam no acervo" (retomada que regrava só o que faltou).
 
 ---
 
@@ -396,4 +403,4 @@ Todos com `~/campvision-new/.venv/bin/python vigia.py` na frente.
 | quarentena e réplica | `nucleo/quarentena.py` |
 | versão | `VERSAO_BUILD` em `nucleo/config.py` (subir a cada mudança) |
 
-Testes: `python -m unittest discover -s tests -t .` (316 testes, sem rede). O `atualizar.sh` roda os mesmos testes antes de trocar a versão no servidor.
+Testes: `python -m unittest discover -s tests -t .` (361 testes, sem rede). O `atualizar.sh` roda os mesmos testes antes de trocar a versão no servidor.
