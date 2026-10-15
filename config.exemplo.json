@@ -24,6 +24,8 @@
   ],
   "escrever_por_projeto": true,
   "trabalhadores": 4,
+  "limite_custo_dia_usd": 0,
+  "limite_custo_lote_usd": 0,
   "retomar_checkpoint": true,
   "identidade_nome": "CAMP - Casa da Arquitetura Moderna Paulista",
   "identidade_site": "",

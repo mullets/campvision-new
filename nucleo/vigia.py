@@ -26,6 +26,7 @@ from pathlib import Path
 from . import atualizador, caminho as mod_caminho, eventos as mod_eventos, grupos, imagem
 from . import info_projeto as mod_info, lote, planilha
 from . import relatorio_diario
+from .atomico import gravar_json
 from .config import CONTRATO, VERSAO_BUILD, Config
 from .planilha import LIMIAR_ATENCAO
 from .visao import ClienteAPI
@@ -121,6 +122,7 @@ class EstadoVigia:
     ultima_atualizacao_codigo: str = "—"
     proximo_relatorio: str = "—"
     ultimas_linhas: list[str] = field(default_factory=list)
+    alerta: str = ""  # ex.: "limite de custo ..." — vai no heartbeat até o problema passar
 
     def anotar(self, texto: str) -> None:
         carimbo = datetime.now().strftime("%H:%M:%S")
@@ -156,7 +158,7 @@ def escrever_status(caminho: Path, status: str, extra: dict | None = None) -> No
     atual["status"] = status
     atual["campvision2_em"] = datetime.now().isoformat(timespec="seconds")
     atual.update(extra or {})
-    caminho.write_text(json.dumps(atual, indent=2, ensure_ascii=False), encoding="utf-8")
+    gravar_json(caminho, atual)
 
 
 MARCADORES_DE_PROJETO = ("status.json", "info_projeto.json")
@@ -372,8 +374,7 @@ def marcar_fase(pasta: Path, config: Config, extra: dict | None = None) -> None:
     dados["fase_em"] = datetime.now().isoformat(timespec="seconds")
     dados.update(extra or {})
     dados.setdefault("status", config.status_pronto)
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+    gravar_json(caminho, dados)
 
 
 def limpar_fase(pasta: Path) -> bool:
@@ -393,7 +394,7 @@ def limpar_fase(pasta: Path) -> bool:
         return False
     dados.pop("fase", None)
     dados.pop("fase_em", None)
-    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+    gravar_json(caminho, dados)
     return True
 
 
@@ -509,14 +510,27 @@ def processar(
                 estado.concluidos_no_projeto = p.concluidos
                 estado.total_no_projeto = p.total
 
+        limites = []
+        if config.limite_custo_lote_usd > 0:
+            limites.append(config.limite_custo_lote_usd)
+        if config.limite_custo_dia_usd > 0:
+            limites.append(config.limite_custo_dia_usd - (estado.custo_hoje if estado else 0.0))
         resultado = lote.executar(
             projeto.pasta_imagens, config, cliente,
             ao_progredir=progresso, cancelar=cancelar,
             arquivos=projeto.arquivos(config, so_estaveis=True),
             pasta_checkpoint=projeto.pasta,
+            limite_usd=min(limites) if limites else None,
         )
         t_in = resultado.progresso.tokens_entrada
         t_out = resultado.progresso.tokens_saida
+        if resultado.limite_custo:
+            evento.custo_usd = config.custo_estimado_usd(t_in, t_out)
+            evento.pranchas = len(resultado.leituras)
+            evento.falha = f"limite de custo: {resultado.limite_custo}"
+            _log.error("Projeto %s: %s", projeto.nome, evento.falha)
+            evento.duracao_segundos = int(time.monotonic() - comeco)
+            return evento
 
         if config.consolidar_por_projeto and resultado.leituras:
             if estado:
@@ -773,6 +787,12 @@ class Vigia:
                                                    assinatura=unidade.assinatura())
                 continue
             self.estado.fila = max(0, self.estado.fila - 1)
+            if r.status == mod_entrada.ERRO and r.motivo.startswith("limite de custo"):
+                self.estado.alerta = r.motivo
+                self.estado.anotar(f"{unidade.relativo}: {r.motivo}"[:120])
+                self._talvez_heartbeat(forcar=True)
+            elif r.status == mod_entrada.PRONTO:
+                self.estado.alerta = ""
             if r.status in (mod_entrada.AGUARDANDO, mod_entrada.DESCARTADO):
                 continue
             feitos += 1
@@ -887,8 +907,9 @@ class Vigia:
         enviado = self.painel.heartbeat({
             "estacao_id": self.config.estacao_id, "tipo_estacao": "campvision",
             "app": "CAMP Vision 2", "versao": VERSAO_BUILD,
-            "estado": estado_do_painel(self.estado.situacao),
-            "detalhe": {"situacao": self.estado.situacao},
+            "estado": "erro" if self.estado.alerta else estado_do_painel(self.estado.situacao),
+            "detalhe": {"situacao": self.estado.situacao,
+                        **({"alerta": self.estado.alerta} if self.estado.alerta else {})},
             "projeto": self.estado.projeto_atual,
             "progresso": {"feitos": self.estado.concluidos_no_projeto,
                           "total": self.estado.total_no_projeto},
@@ -937,6 +958,7 @@ class Vigia:
         while not self.cancelar.is_set():
             if date.today() != ultimo_dia:  # virou o dia: zera o painel
                 ultimo_dia = date.today()
+                self.estado.alerta = ""
                 self._recarregar_contadores_do_dia()
             if self.config.varre_pasta_vigiada and not raiz.is_dir():
                 self.estado.situacao = "pasta indisponível"

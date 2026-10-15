@@ -216,7 +216,9 @@ sleep 5
 systemctl is-active -q "$NOME" && ok "serviço no ar" || erro "serviço não subiu: journalctl -u $NOME -n 50"
 [[ -f "$ESTADO/estado.json" ]] && ok "vigia gravando estado" || aviso "estado.json ainda não apareceu (normal nos primeiros segundos)"
 PAINEL_IP="$(echo "$CAMP_PAINEL_URL" | sed -E 's#https?://([^:/]+).*#\1#')"
-if curl -fsS -m 5 -o /dev/null "$CAMP_PAINEL_URL/api/estacoes/contexto" -H "X-Camp-Token: $CAMP_PAINEL_TOKEN" 2>/dev/null; then
+# O token vai por stdin (-H @-): na linha de comando ele apareceria em `ps` e no histórico.
+if printf 'X-Camp-Token: %s\n' "$CAMP_PAINEL_TOKEN" \
+    | curl -fsS -m 5 -o /dev/null -H @- "$CAMP_PAINEL_URL/api/estacoes/contexto" 2>/dev/null; then
   ok "painel responde em $CAMP_PAINEL_URL"
 else
   aviso "painel não respondeu em $CAMP_PAINEL_URL (projeto novo espera o painel para ganhar número)"

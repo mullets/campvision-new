@@ -46,6 +46,7 @@ class ResultadoLote:
     leituras: list[Leitura] = field(default_factory=list)
     progresso: Progresso = field(default_factory=Progresso)
     cancelado: bool = False
+    limite_custo: str = ""  # preenchido quando a leitura parou por teto de custo (US$)
 
 
 def _carregar_checkpoint(caminho: Path) -> dict[str, Leitura]:
@@ -74,6 +75,7 @@ def executar(
     cancelar: threading.Event | None = None,
     arquivos: list[Path] | None = None,
     pasta_checkpoint: Path | None = None,
+    limite_usd: float | None = None,
 ) -> ResultadoLote:
     """Lê as imagens e devolve as leituras.
 
@@ -108,7 +110,15 @@ def executar(
     leitor = LeitorDeCarimbo(config, cliente)
     trava_arquivo = threading.Lock()
 
+    parar_por_custo = threading.Event()
+    if limite_usd is not None and limite_usd <= 0:
+        resultado.limite_custo = f"teto de custo já atingido (US$ {limite_usd:.2f} disponíveis)"
+        _log.warning("Lote não iniciado: %s", resultado.limite_custo)
+        return resultado
+
     def processar(caminho: Path) -> Leitura:
+        if parar_por_custo.is_set():
+            return Leitura(arquivo=caminho.name, erro="cancelado")
         if cancelar.is_set():
             return Leitura(arquivo=caminho.name, erro="cancelado")
         with arquivo_em_processamento(caminho.name):
@@ -138,6 +148,14 @@ def executar(
 
                 if ao_progredir:
                     ao_progredir(prog)
+
+                gasto = config.custo_estimado_usd(prog.tokens_entrada, prog.tokens_saida)
+                if limite_usd is not None and gasto > limite_usd and not parar_por_custo.is_set():
+                    parar_por_custo.set()
+                    resultado.limite_custo = f"gasto US$ {gasto:.4f} passou do teto de US$ {limite_usd:.4f}"
+                    _log.error("Limite de custo: %s — parando a leitura.", resultado.limite_custo)
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
 
                 if cancelar.is_set():
                     resultado.cancelado = True

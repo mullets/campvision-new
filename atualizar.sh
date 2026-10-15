@@ -139,8 +139,12 @@ fi
 
 # ---------------------------------------------------------------- backup e testes
 mkdir -p "$ESTADO/backups"
-tar -czf "$ESTADO/backups/estado-$(date +%Y%m%d-%H%M%S).tgz" -C "$ESTADO" \
-  --exclude=backups --exclude=leitura . 2>/dev/null || true
+chmod 700 "$ESTADO/backups"
+# Sem o arquivo `ambiente` (chaves da Anthropic/painel/GitHub: nunca vão para backup) e com 600.
+BACKUP="$ESTADO/backups/estado-$(date +%Y%m%d-%H%M%S).tgz"
+( umask 077; tar -czf "$BACKUP" -C "$ESTADO" \
+  --exclude=backups --exclude=leitura --exclude=ambiente --exclude=vigia.lock . 2>/dev/null ) || true
+[[ -f "$BACKUP" ]] && chmod 600 "$BACKUP"
 ls -1t "$ESTADO/backups"/estado-*.tgz 2>/dev/null | tail -n +11 | xargs -r rm -f
 ok "backup do config e do estado em $ESTADO/backups"
 

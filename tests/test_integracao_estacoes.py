@@ -16,7 +16,8 @@ from unittest import mock
 
 from nucleo import entrada, fundos, vigia
 from nucleo.livro import Livro
-from tests.test_entrada import Base
+from tests.test_entrada import Base, conferir_falso, exif_falso
+from tests.test_nucleo import ClienteFalso, resposta_padrao
 
 
 def windows_info(**mudar) -> dict:
@@ -280,6 +281,112 @@ class TestExifRetomavel(Base):
         [res] = self.processar(self.recebedor(), gravar, conferir)
         self.assertEqual(res.status, entrada.PRONTO, res.motivo)
         self.assertEqual(len(gravados), 2)
+
+
+class TestLimiteDeCusto(Base):
+    def lote(self, n=4):
+        return self.scan("F026 - SBU Sami Bussab", "01 - Desenhos e pranchas", "Casa Nova 1980",
+                         n=n, formatos=("jpg",))
+
+    def test_estourou_o_teto_do_lote_vira_erro_e_para_de_gastar(self):
+        origem = self.lote(n=6)
+        self.config.limite_custo_lote_usd = 0.0001  # a 1ª chamada (1000 tokens) já passa
+        r = self.recebedor()
+        with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+            [res] = [r.processar(u) for u in r.pendentes()]
+        self.assertEqual(res.status, entrada.ERRO)
+        self.assertTrue(res.motivo.startswith("limite de custo"), res.motivo)
+        self.assertLess(len(r.cliente.chamadas), 6)
+        self.assertTrue(origem.exists())  # nada apagado
+
+    def test_teto_do_dia_ja_gasto_nem_comeca(self):
+        self.lote(n=2)
+        self.config.limite_custo_dia_usd = 1.0
+        v = vigia.Vigia(self.config, ClienteFalso([resposta_padrao()]), self.estado, painel=self.painel)
+        v.estado.custo_hoje = 1.5
+        with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso), \
+                mock.patch.object(entrada.mod_fundos, "carregar", return_value=fundos.Tabela(fundos.EMBUTIDA)):
+            v.uma_rodada()
+        self.assertEqual(len(v.cliente.chamadas), 0)
+        self.assertIn("limite de custo", v.estado.alerta)
+        # o heartbeat avisa: estado erro + alerta no detalhe
+        hb = self.painel.heartbeats[-1]
+        self.assertEqual(hb["estado"], "erro")
+        self.assertIn("limite de custo", hb["detalhe"]["alerta"])
+
+    def test_sem_limite_nada_muda(self):
+        self.lote(n=2)
+        [r] = self.rodar()
+        self.assertEqual(r.status, entrada.PRONTO, r.motivo)
+
+
+class TestInstanciaEAtomico(unittest.TestCase):
+    def setUp(self):
+        from tempfile import TemporaryDirectory
+        self.tmp = TemporaryDirectory()
+        self.pasta = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_so_um_servico_por_maquina(self):
+        from nucleo import instancia
+        primeiro = instancia.travar_servico(self.pasta)
+        self.assertIsNotNone(primeiro)
+        self.assertIsNone(instancia.travar_servico(self.pasta))  # a segunda instância recusa
+        primeiro.close()
+        outra = instancia.travar_servico(self.pasta)  # solto o lock, outra pode subir
+        self.assertIsNotNone(outra)
+        outra.close()
+
+    def test_conserto_recusa_enquanto_o_servico_processa(self):
+        from nucleo import instancia
+        estado = self.pasta / "estado.json"
+        estado.write_text(json.dumps({"situacao": "copiando 3 de 9"}), encoding="utf-8")
+        trava, recusa = instancia.travar_conserto(self.pasta)
+        self.assertIsNone(trava)
+        self.assertIn("processando um lote", recusa)
+        estado.write_text(json.dumps({"situacao": "vigiando"}), encoding="utf-8")
+        trava, recusa = instancia.travar_conserto(self.pasta)
+        self.assertEqual(recusa, "")
+        self.assertIsNotNone(trava)
+        # enquanto o conserto roda, o serviço não sobe por cima
+        self.assertIsNone(instancia.travar_servico(self.pasta))
+        trava.close()
+
+    def test_conserto_com_estado_velho_nao_recusa(self):
+        import os
+        from nucleo import instancia
+        estado = self.pasta / "estado.json"
+        estado.write_text(json.dumps({"situacao": "processando"}), encoding="utf-8")
+        os.utime(estado, (0, 0))
+        trava, recusa = instancia.travar_conserto(self.pasta)
+        self.assertEqual(recusa, "")
+        trava.close()
+
+    def test_escritas_do_vigia_sao_atomicas(self):
+        status = self.pasta / "status.json"
+        status.write_text(json.dumps({"status": "enviado_windows"}), encoding="utf-8")
+        with mock.patch("os.replace", side_effect=OSError("queda")), self.assertRaises(OSError):
+            vigia.escrever_status(status, "processando")
+        self.assertEqual(json.loads(status.read_text()), {"status": "enviado_windows"})  # intacto
+        self.assertEqual(list(self.pasta.glob(".status.json*")), [])  # sem lixo
+        vigia.escrever_status(status, "processando", {"x": 1})
+        self.assertEqual(json.loads(status.read_text())["status"], "processando")
+
+    def test_transferir_so_apaga_com_hash_igual(self):
+        from nucleo import transferir
+        a, b = self.pasta / "a.bin", self.pasta / "b.bin"
+        a.write_bytes(b"x" * 100)
+        b.write_bytes(b"y" * 100)  # mesmo tamanho, outro conteúdo
+        self.assertNotEqual(transferir._sha256(a), transferir._sha256(b))
+        b.write_bytes(b"x" * 100)
+        self.assertEqual(transferir._sha256(a), transferir._sha256(b))
+        self.assertTrue(transferir._mesmo_destino({"destino": "b.bin"}, self.pasta, b))
+        self.assertFalse(transferir._mesmo_destino({"destino": "a.bin"}, self.pasta, b))
+        self.assertFalse(transferir._mesmo_destino(None, self.pasta, b))
 
 
 class TestManifesto(Base):

@@ -755,6 +755,18 @@ def main(argv: list[str] | None = None) -> int:
     registro.configurar(PASTA_ESTADO / "vigia.log")
     logging.getLogger("cv2").info("CAMP Vision 2 build %s", VERSAO_BUILD)
 
+    conserto = bool(args.reclassificar or args.organizar_formatos
+                    or (args.reidentificar and args.sim)
+                    or (args.consertar_acervo is not None and args.sim))
+    trava_conserto = None
+    if conserto:
+        from nucleo import instancia as _instancia
+
+        trava_conserto, recusa = _instancia.travar_conserto(PASTA_ESTADO)
+        if recusa:
+            print(f"Não rodei: {recusa}", file=sys.stderr)
+            return 1
+
     if args.identidade:
         return _comando_identidade(config)
     if args.refazer:
@@ -866,6 +878,14 @@ def main(argv: list[str] | None = None) -> int:
         cliente = ClienteAnthropic(config)
     except RuntimeError as erro:
         print(erro, file=sys.stderr)
+        return 1
+
+    from nucleo import instancia as _instancia
+
+    trava = _instancia.travar_servico(PASTA_ESTADO)  # segura até o processo sair
+    if trava is None:
+        print("Já há outra instância do vigia (ou um comando de conserto) rodando — "
+              f"lock em {PASTA_ESTADO / _instancia.NOME_LOCK}. Nada foi iniciado.", file=sys.stderr)
         return 1
 
     vigilante = mod_vigia.Vigia(config, cliente, PASTA_ESTADO, repo=RAIZ_REPO)

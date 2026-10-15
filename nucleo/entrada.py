@@ -37,6 +37,7 @@ from . import estrutura, formatos, fundos as mod_fundos, info_projeto as mod_inf
 from . import preparo as mod_preparo
 from . import triagem as mod_triagem
 from . import metadados as mod_metadados
+from .atomico import gravar_json as _gravar_json_atomico
 from .config import VERSAO_BUILD, Config
 from .esquema import CAMPOS
 
@@ -104,10 +105,7 @@ def sha256(caminho: Path) -> str:
 
 def gravar_json(caminho: Path, dados) -> None:
     """Temporário + rename: quem lê nunca pega o arquivo pela metade."""
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    temporario = caminho.with_name(f".{caminho.name}.tmp")
-    temporario.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporario, caminho)
+    _gravar_json_atomico(caminho, dados)
 
 
 def ler_json(caminho: Path, padrao=None):
@@ -1332,7 +1330,8 @@ class Recebedor:
         evento = mod_vigia.processar(projeto, cfg_leitura, self.cliente, estado_vigia, cancelar)
         lote["custo_usd"] = round(evento.custo_usd, 4)
         if evento.falha:
-            return falhar(f"leitura falhou: {evento.falha}")
+            return falhar(evento.falha if evento.falha.startswith("limite de custo")
+                          else f"leitura falhou: {evento.falha}")
         leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
         # A leitura de prancha viu que era FOTO (a triagem achou que era papel) e já
         # releu como foto: a série acompanha. Só quando a estação não disse a série.
