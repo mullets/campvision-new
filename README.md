@@ -4,10 +4,8 @@ Catalogação de pranchas de arquitetura a partir do carimbo, usando um modelo d
 visão. Lê o carimbo, monta a planilha, marca o que precisa de revisão humana e
 grava o crédito da CAMP dentro de cada imagem.
 
-**Uso em produção: serviço no servidor Ubuntu da CAMP** (`vigia.py`, recebe o que as
-estações largam em `100 - Scanners` e organiza o `ACERVOS_CAMP`). O aplicativo de
-janela (`app.py`) e o LaunchAgent do macOS são **legado**: continuam no repositório e
-funcionam, mas não são o caminho usado na CAMP e não recebem as novidades do servidor.
+Roda como aplicativo de janela, como comando de terminal ou como serviço que
+vigia uma pasta sozinho.
 
 > **Como funciona tudo, passo a passo → [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md)**
 >
@@ -77,8 +75,7 @@ source ~/.zshrc
 echo $ANTHROPIC_API_KEY     # tem que devolver a chave
 ```
 
-Para o modo automático na CAMP, use o servidor Ubuntu ([instalar](#servidor-da-camp-ubuntu)).
-A ressalva sobre LaunchAgent (legado) está em
+Para o modo automático, veja a ressalva sobre LaunchAgent em
 [Instalar como serviço](#instalar-como-serviço-do-macos).
 
 ### 4. Config e identidade da CAMP
@@ -120,7 +117,7 @@ Sem ele o app funciona, mas não grava metadados nas imagens.
 
 ```bash
 python -m unittest discover -s tests -t .   # 361 testes, sem rede
-python app.py                                # janela (legado)
+python app.py                                # janela
 ```
 
 Comece por uma pasta de 20 pranchas de um acervo difícil. O `relatorio.txt` diz
@@ -187,11 +184,9 @@ e `sudo reboot` — a tela tem que voltar sozinha em "vigiando".
 cd ~/campvision-new && ./atualizar.sh
 ```
 
-Espera o vigia ficar `vigiando` (ocioso), puxa o código, instala dependências novas,
-faz backup do `~/.campvision2` (sem o arquivo `ambiente`, permissão 600), roda os
-testes — **se falharem, volta sozinho** — e reinicia o serviço. Se a versão nova subir
-3 vezes sem completar a primeira rodada ("subi bem"), o systemd chama `atualizar.sh --boot`
-e ela volta sozinha para a anterior. `./atualizar.sh --voltar` desfaz a última atualização (e
+Espera o lote em andamento, puxa o código, instala dependências novas, faz
+backup do `~/.campvision2`, roda os testes — **se falharem, volta sozinho** — e
+reinicia o serviço. `./atualizar.sh --voltar` desfaz a última atualização (e
 pausa a auto-atualização até a próxima manual). A auto-atualização de hora em
 hora usa o mesmo script.
 
@@ -363,22 +358,14 @@ python cli.py /caminho/da/pasta --regravar-metadados catalogacao.csv
 
 ## Modo automático
 
-O vigia varre a pasta montada, acha projetos prontos, lê e escreve a planilha. Há dois
-caminhos, e o primeiro é o de produção:
-
-1. **Recebimento (`100 - Scanners` → `ACERVOS_CAMP`)**, o fluxo atual. A estação marca o
-   fim do lote com `status.json` (Windows) ou `status_mac.json` (Mac) cujo campo
-   **`status` OU `etapa`** vale `enviado_windows` / `enviado_mac` (as estações antigas só
-   gravam `etapa`), ou com um `manifesto.json`. O CV2 grava no projeto `status.json` com
-   `processando` → `pronto` (ou `erro`), que é o que o painel lê. Detalhes em
-   [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md) e [contrato-painel.md](docs/contrato-painel.md).
-2. **Varredura da pasta vigiada (legado)**, o "semáforo" antigo do Mac:
+O vigia varre a pasta montada, acha projetos prontos, lê, escreve a planilha e
+avança o semáforo:
 
 ```
 enviado_windows  ──vigia──▶  campvision_concluido  ──QNAP──▶  sincronizado
 ```
 
-Quem manda é o `status.json` no disco, nunca estado em memória: reiniciar a máquina
+Quem manda é o `status.json` no disco, nunca estado em memória: reiniciar o Mac
 não perde nem repete nada. O vigia **preserva os campos que as outras máquinas
 escreveram** no mesmo arquivo.
 
@@ -389,7 +376,7 @@ python vigia.py                            # painel ao vivo, até Ctrl+C
 python vigia.py --uma-vez                  # processa e sai (para cron)
 ```
 
-**Deixar rodando de vez.** É o uso normal: `python vigia.py` (no servidor, o serviço systemd; o LaunchAgent é legado)
+**Deixar rodando de vez.** É o uso normal: `python vigia.py` (ou o LaunchAgent)
 varre a cada 30 s e processa o que aparecer. Duas proteções para isso funcionar
 com o scanner despejando arquivo na pasta:
 
@@ -500,14 +487,11 @@ Os scanners largam o material em `100 - Scanners/<fundo>/<material>/<projeto>/`
 (a ordem de material e projeto tanto faz; `TIF/`, `JPG/`, `DNG/`, `PDF/` dentro são
 aceitos). Para cada pasta, o vigia:
 
-1. espera ela ficar **completa**: `manifesto.json`, ou `status.json`/`status_mac.json`
-   com `status` **ou** `etapa` = `enviado_windows`/`enviado_mac`, ou nada mudar por
-   `entrada_quieto_minutos` (10). O `info_lote_*_mac.json` do Mac é marcador (não vai
-   para o acervo); o `manifesto.json` tem a contagem e o SHA-256 conferidos;
+1. espera ela ficar **completa**: `manifesto.json` ou `status.json`
+   `enviado_windows` da estação, ou nada mudar por `entrada_quieto_minutos` (10);
 2. monta o **contexto**: fundo **pela tabela de autoridade** (código, sigla ou nome —
    nunca chuta; código e nome em conflito é erro), série pela pasta de material
-   (sem ela: `serie_padrao` do config, S01, ou S03 em estação de foto — `99 - Não
-   identificado` só por decisão humana), projeto e ano pelo nome da pasta
+   (sem ela: `99 - Não identificado`), projeto e ano pelo nome da pasta
    (`SBU-Taruma-1972` também), operador e estação pelo manifesto;
 3. acha o projeto em `ACERVOS_CAMP` ou **pede o número ao painel** (`/reservar`;
    sem painel o projeto novo espera, nunca recebe número inventado);
@@ -551,7 +535,7 @@ python vigia.py --planilha-geral
 ### Mutirão: passar uma vez em tudo
 
 Acervo com `status.json` e `info_projeto.json` de fluxos antigos não entra na
-fila normal da varredura legada, porque o status deles não é `enviado_windows`. Para passar uma vez
+fila normal, porque o status deles não é `enviado_windows`. Para passar uma vez
 no acervo inteiro e normalizar tudo:
 
 ```bash
@@ -615,7 +599,7 @@ de sincronizar, e você descobriria dias depois com os arquivos parados no Mac.
 Veja [Servidor da CAMP (Ubuntu)](#servidor-da-camp-ubuntu): `sudo ./instalar.sh`
 faz tudo. O `systemd/instalar.sh` antigo (serviço de usuário) foi substituído.
 
-### Instalar como serviço do macOS (legado)
+### Instalar como serviço do macOS
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -678,17 +662,16 @@ python vigia.py --relatorio 2026-09-03   # regera um dia específico
 
 ## GitHub e auto-atualização
 
-O remoto é `https://github.com/mullets/campvision-new` (HTTPS; o servidor usa o token
-guardado pelo `instalar.sh` em `~/.git-credentials`). **O servidor se atualiza sozinho
-do `main`, de hora em hora**: nada vai para o `main` sem os testes passando.
+O remoto já vem configurado (`git@github.com:mullets/campvision-new.git`). Crie o
+repositório **vazio** em https://github.com/new — sem README e sem .gitignore,
+senão o push conflita — e envie:
 
 ```bash
-git remote -v     # origin  https://github.com/mullets/campvision-new
-git push origin main
+git push -u origin main
 ```
 
-O `./publicar.sh` (legado) confere se há segredo versionado, roda os testes e commita
-o que estiver pendente.
+Ou `./publicar.sh mullets`, que antes de enviar confere se há segredo
+versionado, roda os testes e commita o que estiver pendente.
 
 ## Na máquina dedicada
 
@@ -700,7 +683,7 @@ Veja [Servidor da CAMP (Ubuntu)](#servidor-da-camp-ubuntu).
 
 | Comando | O que faz |
 |---|---|
-| `python app.py` | janela: escolher pasta, ler, aplicar (legado) |
+| `python app.py` | janela: escolher pasta, ler, aplicar |
 | `python cli.py PASTA` | lê uma pasta e escreve a planilha |
 | `python cli.py PASTA --aplicar catalogacao.csv [--valendo]` | Fase 2 (sem `--valendo`, só simula) |
 | `python cli.py PASTA --regravar-metadados catalogacao.csv` | regrava metadados sem reprocessar |
@@ -792,7 +775,7 @@ em `ClienteAnthropic.chamar`.
 python -m unittest discover -s tests -t .
 ```
 
-361 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
+316 testes, nenhum toca a rede: o cliente de API é falso e as pranchas são
 geradas na hora.
 
 ### Segurança do lote
