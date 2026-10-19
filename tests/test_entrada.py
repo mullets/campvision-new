@@ -153,11 +153,12 @@ class TestContexto(Base):
         c = entrada.contexto(unidade, fundos.Tabela(fundos.EMBUTIDA))
         self.assertEqual((c.fundo.codigo, c.codigo), ("F026", "F026-P0060"))
 
-    def test_mac_com_projeto_novo_continua_reservando_no_painel(self):
+    def test_mac_com_projeto_novo_tambem_usa_o_codigo_do_mac(self):
+        # O Mac reserva o P no painel no F9 (nunca calcula): projeto novo também é código oficial (P0092, 19/10).
         self.mac(ja_existia=False)
         [unidade] = entrada.descobrir(self.scanners)
         c = entrada.contexto(unidade, fundos.Tabela(fundos.EMBUTIDA))
-        self.assertEqual((c.codigo, c.p_estacao), ("", "P0060"))
+        self.assertEqual(c.codigo, "F026-P0060")
 
     def test_padrao_da_estacao_windows(self):
         c = self.ctx("F010 - Francisco Segnini Jr", "FSJ-AAbreuChacaraAnaliaFranco-1989")

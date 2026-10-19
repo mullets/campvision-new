@@ -170,8 +170,32 @@ def _e_pasta_de_material(nome: str) -> bool:
     return len(estrutura.normalizar(nome).split()) <= 3 and not re.search(r"\d{4}", nome)
 
 
+# Subpastas que a estação Mac cria DENTRO da pasta de material: "01 - Arquivo Arquivístico (TIFF)",
+# "03 - Preview (JPG)". Nunca são um lote: o lote é a pasta do projeto, duas acima.
+_SUBPASTA_MAC = re.compile(r"^\d{2} (arquivo arquivistico|preview)\b")
+
+
+def _e_subpasta_mac(nome: str) -> bool:
+    return bool(_SUBPASTA_MAC.match(estrutura.normalizar(nome) or ""))
+
+
+def _estruturado_como_mac(pasta: Path) -> bool:
+    """<projeto>/<NN - Material>/<NN - Arquivo Arquivístico (TIFF) | NN - Preview (JPG)>/"""
+    try:
+        return any(sub.is_dir() and _e_subpasta_mac(sub.name)
+                   for material in pasta.iterdir() if material.is_dir() and not material.name.startswith((".", "_"))
+                   for sub in material.iterdir())
+    except OSError:
+        return False
+
+
 def descobrir(raiz: Path, profundidade_maxima: int = 6) -> list[Unidade]:
-    """Unidade = primeira pasta que tem arquivo direto ou só pastas de formato."""
+    """Unidade = primeira pasta que tem arquivo direto ou só pastas de formato.
+
+    Subpasta do Mac ("01 - Arquivo Arquivístico (TIFF)", "03 - Preview (JPG)") sobe para a pasta do
+    projeto: enquanto o Mac copia, a pasta do projeto ainda não tem os JSON e cada subpasta virava um
+    lote — o mesmo projeto era lido (e pago) três vezes (P0092, 19/10).
+    """
     achadas: list[Unidade] = []
 
     def caminhar(pasta: Path, nivel: int) -> None:
@@ -198,7 +222,16 @@ def descobrir(raiz: Path, profundidade_maxima: int = 6) -> list[Unidade]:
 
     if raiz.is_dir():
         caminhar(raiz, 0)
-    return achadas
+    unicas: dict[str, Unidade] = {}
+    for unidade in achadas:
+        partes = unidade.relativo.parts
+        i = next((k for k, parte in enumerate(partes) if _e_subpasta_mac(parte)), None)
+        if i is not None:
+            corte = i - 1 if i >= 2 and re.match(r"^\s*\d{2}\s*[-–]", partes[i - 1]) else max(i, 1)
+            relativo = Path(*partes[:corte])
+            unidade = Unidade(raiz / relativo, relativo)
+        unicas.setdefault(unidade.chave, unidade)
+    return list(unicas.values())
 
 
 def _marca_de_fim(pasta: Path) -> bool:
@@ -223,6 +256,18 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
         try:
             if parcial.stat().st_mtime > recente:
                 return False, "cópia em andamento (.copiando recente)"
+        except OSError:
+            return False, "arquivo sumiu durante a leitura"
+    if _estruturado_como_mac(unidade.pasta):
+        # O Mac grava status_mac.json POR ÚLTIMO (F12). Sem ele, ou com arquivo mais novo que ele (outro
+        # envio para o mesmo projeto começou), o Mac ainda está copiando — mesmo que a pasta pareça parada.
+        status_mac = unidade.pasta / "status_mac.json"
+        if not status_mac.exists() or not _marca_de_fim(unidade.pasta):
+            return False, "aguardando o Mac terminar o envio (status_mac.json)"
+        try:
+            fim = status_mac.stat().st_mtime
+            if any(max(a.stat().st_mtime, a.stat().st_ctime) > fim + 2 for a in arquivos):
+                return False, "envio novo do Mac em andamento"
         except OSError:
             return False, "arquivo sumiu durante a leitura"
     marcada = (unidade.pasta / "manifesto.json").exists() or _marca_de_fim(unidade.pasta)
@@ -391,12 +436,13 @@ def dados_do_mac(mac: dict) -> dict:
 
 
 def codigo_do_mac(dados: dict) -> str:
-    """F009-P0060 quando o Mac escolheu um projeto que JÁ existe no painel.
+    """F009-P0060 do info_lote do Mac: é oficial.
 
-    O número P sozinho não é oficial (Rafa, 09/10), mas com projeto_ja_existia
-    o Mac pegou o projeto da lista do painel: o código é o do acervo.
+    O número P sozinho não é oficial (Rafa, 09/10) quando a estação o escreve à mão. O Mac nunca
+    calcula P: projeto existente vem da lista do painel e projeto novo é reservado no painel no F9
+    (sistema_mac._reservar_numero_projeto). Por isso vale com ou sem projeto_ja_existia (P0092, 19/10).
     """
-    if dados.get("projeto_ja_existia") is not True:
+    if dados.get("projeto_ja_existia") is not True and "mac" not in str(dados.get("estacao") or "").lower():
         return ""
     fundo = str(dados.get("codigo_fundo") or "").strip().upper()
     numero = str(dados.get("numero_projeto") or "").strip().upper()
@@ -1603,9 +1649,10 @@ class Recebedor:
             titulo = g.titulo if g.folhas else (ctx.projeto or pista)
             forte = casa.get("forte")
             candidatos = casa.get("candidatos") or ([forte] if forte else [])
-            # Código oficial explícito (manifesto/pasta F0xx-P0xxx): vale, a não ser que o carimbo
-            # aponte com força OUTRO projeto da base — aí pergunta.
-            if ctx.codigo and not varios:
+            # Código oficial explícito (manifesto/pasta F0xx-P0xxx, Mac): vale para todos os grupos, a não
+            # ser que o carimbo aponte com força OUTRO projeto da base — aí pergunta. Antes valia só com um
+            # grupo, e um erro de leitura ("WIZ SALES" × "LUIZ SALES") virava decisão no painel (P0092, 19/10).
+            if ctx.codigo:
                 if forte and forte["codigo"].upper() != ctx.codigo.upper():
                     candidatos = [{"codigo": ctx.codigo, "titulo": "código informado pela estação",
                                    "motivos": ["código no manifesto/pasta"]}, forte]
