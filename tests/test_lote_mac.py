@@ -45,19 +45,51 @@ class TestUmProjetoUmLote(LoteMac):
         projeto = self.projeto_mac(com_json=False)
         self.config.entrada_quieto_minutos = 0
         [u] = entrada.descobrir(self.scanners)
-        self.assertEqual(entrada.pronta(u, self.config), (False, "aguardando o Mac terminar o envio (status_mac.json)"))
+        self.assertEqual(entrada.pronta(u, self.config), (False, "aguardando a estação terminar o envio (status.json ou status_mac.json)"))
 
     def test_envio_novo_depois_do_status_mac_espera(self):
         projeto = self.projeto_mac()
         antigo = time.time() - 600
         os.utime(projeto / "status_mac.json", (antigo, antigo))   # status do envio anterior
         [u] = entrada.descobrir(self.scanners)
-        self.assertEqual(entrada.pronta(u, self.config), (False, "envio novo do Mac em andamento"))
+        self.assertEqual(entrada.pronta(u, self.config), (False, "envio novo da estação em andamento"))
 
     def test_status_mac_por_ultimo_libera(self):
         self.projeto_mac()
         [u] = entrada.descobrir(self.scanners)
         self.assertEqual(entrada.pronta(u, self.config), (True, ""))
+
+    def projeto_windows(self, status: bool = True, n: int = 2):
+        """Lote do WINDOWS com a estrutura REAL que a estação grava (a mesma do Mac): status.json por último."""
+        projeto = self.scanners / "F026 - SBU Sami Bussab" / "P0003 - Casa do Ipê - 1980"
+        partes = projeto.relative_to(self.scanners).parts
+        self.scan(*partes, "01 - Desenhos e pranchas", TIFF, n=n, formatos=("tif",))
+        self.scan(*partes, "01 - Desenhos e pranchas", JPG, n=n, formatos=("jpg",))
+        (projeto / "info_projeto.json").write_text(json.dumps({"codigo": "F026-P0003", "estacao": "contex1"}), encoding="utf-8")
+        (projeto / "manifesto.json").write_text(json.dumps({"versao": 1, "contagens": {"arquivos": 2 * n}}), encoding="utf-8")
+        if status:
+            (projeto / "status.json").write_text(json.dumps({"status": "enviado_windows", "etapa": "enviado_windows"}), encoding="utf-8")
+        return projeto
+
+    def test_lote_do_windows_com_a_estrutura_real_e_liberado_pelo_status_json(self):
+        # REGRESSÃO (19/10): a estrutura TIFF/JPG é igual à do Mac; o CV2 exigia status_mac.json e o lote do Windows ficava parado para sempre
+        self.projeto_windows()
+        [u] = entrada.descobrir(self.scanners)
+        self.assertEqual(entrada.pronta(u, self.config), (True, ""))
+
+    def test_lote_do_windows_sem_status_json_espera(self):
+        self.projeto_windows(status=False)
+        [u] = entrada.descobrir(self.scanners)
+        ok, motivo = entrada.pronta(u, self.config)
+        self.assertFalse(ok)
+        self.assertIn("aguardando a estação", motivo)
+
+    def test_envio_novo_do_windows_depois_do_status_json_espera(self):
+        projeto = self.projeto_windows()
+        antigo = time.time() - 600
+        os.utime(projeto / "status.json", (antigo, antigo))   # status do envio anterior
+        [u] = entrada.descobrir(self.scanners)
+        self.assertEqual(entrada.pronta(u, self.config), (False, "envio novo da estação em andamento"))
 
     def test_windows_nao_e_afetado(self):
         pasta = self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))

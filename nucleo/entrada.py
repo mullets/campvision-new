@@ -244,6 +244,21 @@ def _marca_de_fim(pasta: Path) -> bool:
     return False
 
 
+def _arquivo_da_marca(pasta: Path) -> Path | None:
+    """O status.json/status_mac.json com a marca de fim (C1) MAIS NOVO da pasta (ou None). Windows e Mac gravam a
+    MESMA estrutura de pastas (<série>/01 - Arquivo Arquivístico (TIFF) e 03 - Preview (JPG)); o que diz quem terminou é a marca."""
+    marcados = []
+    for nome in ("status.json", "status_mac.json"):
+        arq = pasta / nome
+        dados = ler_json(arq, {})
+        if isinstance(dados, dict) and ({str(dados.get("status", "")), str(dados.get("etapa", ""))} & MARCAS_DE_FIM):
+            try:
+                marcados.append((arq.stat().st_mtime, arq))
+            except OSError:
+                continue
+    return max(marcados)[1] if marcados else None
+
+
 def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
     """A estação terminou de mandar?"""
     arquivos = unidade.arquivos()
@@ -259,15 +274,17 @@ def pronta(unidade: Unidade, config: Config) -> tuple[bool, str]:
         except OSError:
             return False, "arquivo sumiu durante a leitura"
     if _estruturado_como_mac(unidade.pasta):
-        # O Mac grava status_mac.json POR ÚLTIMO (F12). Sem ele, ou com arquivo mais novo que ele (outro
-        # envio para o mesmo projeto começou), o Mac ainda está copiando — mesmo que a pasta pareça parada.
-        status_mac = unidade.pasta / "status_mac.json"
-        if not status_mac.exists() or not _marca_de_fim(unidade.pasta):
-            return False, "aguardando o Mac terminar o envio (status_mac.json)"
+        # A estação grava a marca de fim POR ÚLTIMO (F12). Sem ela, ou com arquivo mais novo que ela (outro
+        # envio para o mesmo projeto começou), a estação ainda está copiando — mesmo que a pasta pareça parada.
+        # A marca pode ser a do Mac (status_mac.json) OU a do Windows (status.json): as duas estações gravam a mesma estrutura
+        # de pastas, então a estrutura NÃO diz de quem é o lote (regressão de 19/10: lotes do Windows ficavam parados para sempre).
+        marca = _arquivo_da_marca(unidade.pasta)
+        if marca is None:
+            return False, "aguardando a estação terminar o envio (status.json ou status_mac.json)"
         try:
-            fim = status_mac.stat().st_mtime
+            fim = marca.stat().st_mtime
             if any(max(a.stat().st_mtime, a.stat().st_ctime) > fim + 2 for a in arquivos):
-                return False, "envio novo do Mac em andamento"
+                return False, "envio novo da estação em andamento"
         except OSError:
             return False, "arquivo sumiu durante a leitura"
     marcada = (unidade.pasta / "manifesto.json").exists() or _marca_de_fim(unidade.pasta)
