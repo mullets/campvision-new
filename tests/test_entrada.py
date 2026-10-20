@@ -485,6 +485,35 @@ class TestFalhasNaoApagam(Base):
         [r2] = self.rodar()
         self.assertEqual(r2.status, entrada.PRONTO)
 
+    def test_cancelado_no_meio_da_leitura_volta_a_fila(self):
+        # e2e 124D/152: reinício durante a LEITURA gravava "leitura falhou: cancelado antes de terminar",
+        # motivo que pendentes() não reabre: o lote ficava em erro até --refazer-lote manual.
+        import threading
+        import types
+
+        from nucleo import vigia as mod_vigia
+
+        self.scan("F026", "Fotos", "Tarumã", n=1, formatos=("jpg",))
+        r = self.recebedor()
+        parar = threading.Event()
+
+        def processar_cancelado(*a, **k):
+            parar.set()
+            return types.SimpleNamespace(falha="cancelado antes de terminar", custo_usd=0.0)
+
+        with mock.patch.object(mod_vigia, "processar", side_effect=processar_cancelado):
+            res = r.processar(r.pendentes()[0], cancelar=parar)
+        self.assertEqual(res.status, entrada.ERRO)
+        self.assertEqual(res.motivo, entrada.CANCELADO)
+        [r2] = self.rodar()
+        self.assertEqual(r2.status, entrada.PRONTO)
+
+    def test_livro_aceita_lote_incompleto(self):
+        # o vigia anota "lote_incompleto" aos 30 min; ação fora de ACOES derrubava o serviço
+        from nucleo import livro
+
+        self.assertIn("lote_incompleto", livro.ACOES)
+
     def test_copia_que_manteve_o_mtime_do_scan_ainda_esta_chegando(self):
         import os
 

@@ -872,7 +872,7 @@ class Vigia:
             self.estado.situacao = "relendo"
             self.estado.projeto_atual = codigo
             escopo = str(pedido.get("escopo") or "vazios")
-            documentos = pedido.get("documentos") or ([pedido["item_codigo"]] if pedido.get("item_codigo") else None)
+            documentos = pedido.get("documentos") or ([pedido.get("item_codigo_origem") or pedido["item_codigo"]] if pedido.get("item_codigo") else None)
             try:
                 resumo = mod_releitura.reler(
                     Path(self.config.raiz_final), self.pasta_estado, self.config, self.cliente, codigo,

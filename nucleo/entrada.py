@@ -662,7 +662,7 @@ def conferir_exif(itens: list[tuple[Path, str]]) -> set[Path]:
         return set()
     try:
         proc = subprocess.run(
-            ["exiftool", "-json", "-charset", "utf8", "-XMP-dc:Identifier", *[str(p) for p, _ in itens]],
+            ["exiftool", "-m", "-json", "-charset", "utf8", "-XMP-dc:Identifier", *[str(p) for p, _ in itens]],
             capture_output=True, text=True, timeout=600,
         )
         dados = json.loads(proc.stdout or "[]")
@@ -1478,6 +1478,8 @@ class Recebedor:
         evento = mod_vigia.processar(projeto, cfg_leitura, self.cliente, estado_vigia, cancelar)
         lote["custo_usd"] = round(evento.custo_usd, 4)
         if evento.falha:
+            if cancelar is not None and cancelar.is_set() and evento.falha.startswith("cancelado"):
+                return falhar(CANCELADO)   # reinício no meio da leitura: volta à fila (pendentes() só reabre CANCELADO)
             return falhar(evento.falha if evento.falha.startswith("limite de custo")
                           else f"leitura falhou: {evento.falha}")
         leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
@@ -1819,6 +1821,8 @@ class Recebedor:
         projeto = mod_vigia.Projeto(pasta, [cache], pasta.name, self.raiz_final)
         evento = mod_vigia.processar(projeto, cfg_leitura, self.cliente, estado_vigia, cancelar)
         if evento.falha:
+            if cancelar is not None and cancelar.is_set() and evento.falha.startswith("cancelado"):
+                return falhar(CANCELADO)
             return falhar(f"leitura falhou: {evento.falha}")
         leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(catalogacao / "leituras.json")}
         falhas = [c for c in por_codigo if c not in leituras or leituras[c].erro]

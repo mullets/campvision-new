@@ -165,13 +165,33 @@ def reler(raiz_final: Path, pasta_estado: Path, config, cliente, codigo_projeto:
         custo_parcial = config.custo_estimado_usd(t_in, t_out) if hasattr(config, "custo_estimado_usd") else 0.0
         regravados = _regravar(pasta, raiz_final, pasta_estado, destino, atuais, novas, tabela,
                                execucao_lote=_execucao(config, novas, custo_parcial, time.monotonic() - comeco))
+    recodificadas: dict[str, str] = {}
+    if regravar and novas and escopo == "projeto":
+        # Ano 0000 no código (a pasta não dizia) e a leitura achou o ano do projeto: renomeia como no fim do recebimento,
+        # para o painel recodificar as folhas (importador: mesmo D, mesmo lote) preservando o que a pessoa fez.
+        from collections import Counter
+        import re as _re
+
+        lidas = mod_planilha.ler_json(pasta / "catalogacao" / "leituras.json")
+        anos = Counter(l.ano_do_projeto for l in lidas if l.ano_do_projeto) or Counter(
+            l.valores.get("ano") for l in lidas if _re.fullmatch(r"\d{4}", l.valores.get("ano") or ""))
+        if anos:
+            valor, vezes = anos.most_common(1)[0]
+            if vezes >= 2 or len(anos) == 1:
+                trocas = {Path(l.arquivo).stem: mod_renomear.novo_codigo(Path(l.arquivo).stem, ano=valor)
+                          for l in lidas if "-0000-" in Path(l.arquivo).stem}
+                trocas = {a: b for a, b in trocas.items() if a != b}
+                if trocas:
+                    mod_renomear.renomear(pasta, raiz_final, pasta_estado, trocas, livro,
+                                          f"ano do projeto {valor} lido na releitura")
+                    recodificadas = trocas
     custo = round(config.custo_estimado_usd(t_in, t_out), 4) if hasattr(config, "custo_estimado_usd") else 0.0
     resumo = {
         "projeto_codigo": codigo, "escopo": escopo, "motivo": motivo, "pedido_por": pedido_por,
         "relido_em": _agora(), "documentos": escolhidos, "relidos": len(novas),
         "com_mudanca": sum(1 for c in comparacao.values() if c["mudou"]),
         "campos_preenchidos": sum(len(c["preencheu"]) for c in comparacao.values()),
-        "falhas": falhas, "custo_usd": custo, "regravados": regravados,
+        "falhas": falhas, "custo_usd": custo, "regravados": regravados, "recodificadas": recodificadas,
         "pasta": str(destino.relative_to(raiz_final)) if destino.is_relative_to(raiz_final) else str(destino),
     }
     (destino / "comparacao.json").write_text(
