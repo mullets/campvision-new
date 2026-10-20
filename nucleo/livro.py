@@ -23,7 +23,7 @@ PASTA = Path("_campvision") / "registro"
 
 ACOES = (
     "recebido", "copiado", "conferido", "renomeado", "lido", "exif_gravado",
-    "apagado_original", "erro", "refeito", "legado", "decisao", "relido", "quarentena", "releitura_cancelada", "descartado",
+    "apagado_original", "erro", "refeito", "legado", "decisao", "relido", "quarentena", "releitura_cancelada", "descartado", "lote_incompleto",
 )
 
 CAMPOS = (
