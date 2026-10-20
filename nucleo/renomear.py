@@ -106,7 +106,7 @@ def renomear(pasta_projeto: Path, raiz_final: Path, pasta_estado: Path,
         argfile.parent.mkdir(parents=True, exist_ok=True)
         argfile.write_text("\n".join(linhas) + "\n", encoding="utf-8")
         try:
-            subprocess.run(["exiftool", "-@", str(argfile)], capture_output=True, timeout=900)
+            subprocess.run(["exiftool", "-m", "-@", str(argfile)], capture_output=True, timeout=900)
         except (OSError, subprocess.TimeoutExpired) as erro:
             _log.warning("Identificador XMP não atualizado: %s", erro)
         finally:

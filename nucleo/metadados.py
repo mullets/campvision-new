@@ -225,7 +225,7 @@ def gravar_em_lote(
 
     try:
         proc = subprocess.run(
-            ["exiftool", "-@", str(caminho_args)],
+            ["exiftool", "-m", "-@", str(caminho_args)],   # -m: aviso [Minor] (TIF fora do padrão) não impede a gravação
             capture_output=True, text=True, timeout=TEMPO_LIMITE_LOTE,
         )
     except (OSError, subprocess.TimeoutExpired) as erro:

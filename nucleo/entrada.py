@@ -662,7 +662,7 @@ def conferir_exif(itens: list[tuple[Path, str]]) -> set[Path]:
         return set()
     try:
         proc = subprocess.run(
-            ["exiftool", "-json", "-charset", "utf8", "-XMP-dc:Identifier", *[str(p) for p, _ in itens]],
+            ["exiftool", "-m", "-json", "-charset", "utf8", "-XMP-dc:Identifier", *[str(p) for p, _ in itens]],
             capture_output=True, text=True, timeout=600,
         )
         dados = json.loads(proc.stdout or "[]")
