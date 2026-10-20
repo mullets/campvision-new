@@ -165,6 +165,34 @@ class TestPainel(unittest.TestCase):
         self.assertFalse(self.p.releitura_iniciada(5, "campvision2"))
         self.assertEqual(self.p.pedidos_releitura("campvision2"), [])  # GET devolve fundos, não pedidos
 
+    def test_releitura_de_folha_renumerada_usa_o_codigo_do_pacote(self):
+        # e2e 126D: o painel renumerou a folha (D00001 -> D00004); o acervo ainda a chama D00001.
+        import threading
+        import types
+        from unittest import mock
+
+        from nucleo import releitura
+        from nucleo.vigia import Vigia
+
+        visto = {}
+        painel = types.SimpleNamespace(
+            ligado=True, pedidos_releitura=lambda est: [{
+                "id": 9, "escopo": "folha", "projeto_codigo": "F026-P0001", "item_codigo": "F026-P0001-1972-S01-D00004",
+                "item_codigo_origem": "F026-P0001-1972-S01-D00001"}],
+            releitura_iniciada=lambda *a: True, releitura_concluida=lambda *a, **k: None, aviso=lambda *a: True)
+        eu = types.SimpleNamespace(
+            painel=painel, config=types.SimpleNamespace(raiz_final="/x", estacao_id="cv"), cancelar=threading.Event(),
+            estado=types.SimpleNamespace(), pasta_estado=Path("/y"), livro=None, cliente=None)
+
+        def reler(raiz, est, cfg, cli, codigo, escopo, documentos, *a):
+            visto["documentos"] = documentos
+            return {"relidos": 1, "falhas": [], "regravados": 1, "com_mudanca": 0, "campos_preenchidos": 0,
+                    "custo_usd": 0.0, "pasta": ""}
+
+        with mock.patch.object(releitura, "reler", side_effect=reler):
+            Vigia.atender_releituras(eu)
+        self.assertEqual(visto["documentos"], ["F026-P0001-1972-S01-D00001"])
+
     def test_aviso_perdido_e_reenviado(self):
         self.srv.aceitar_aviso = False
         self.assertFalse(self.p.aviso("F026-P0042", "x", "processando"))
