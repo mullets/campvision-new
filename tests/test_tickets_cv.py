@@ -297,6 +297,53 @@ class TestReleitura(unittest.TestCase):
             caso.tearDown()
 
 
+class TestReleituraAno(unittest.TestCase):
+    def test_releitura_que_acha_o_ano_renomeia_os_0000(self):
+        # e2e 126: a releitura atualizava valores["ano"] mas arquivos/pacote ficavam -0000-: o painel
+        # nunca recebia código novo para recodificar.
+        from unittest import mock
+
+        from nucleo import releitura, renomear
+        from nucleo.livro import Livro
+        from tests.test_entrada import Base, conferir_falso, exif_falso
+
+        class Caso(Base):
+            def runTest(self):
+                pass
+
+        caso = Caso()
+        caso.setUp()
+        try:
+            caso.scan("F026", "Clube Sirio", n=2, formatos=("jpg",))
+            r = caso.recebedor()
+            with mock.patch.object(entrada.mod_metadados, "gravar_em_lote", side_effect=exif_falso), \
+                    mock.patch.object(entrada, "conferir_exif", side_effect=conferir_falso):
+                res = r.processar(r.pendentes()[0])
+            self.assertEqual(res.status, entrada.PRONTO, res.motivo)
+            leituras = json.loads((res.pasta_projeto / "catalogacao" / "leituras.json").read_text())
+            codigos = [Path(l["arquivo"]).stem for l in leituras]
+            renomear.renomear(res.pasta_projeto, caso.acervo, caso.estado,
+                              {c: renomear.novo_codigo(c, ano="0000") for c in codigos}, Livro(caso.acervo), "teste")
+
+            class Leitor:
+                def ler(self, caminho):
+                    l = Leitura(arquivo=caminho.name)
+                    l.valores.update({"projeto": "CLUBE SÍRIO", "ano": "1976"})
+                    l.ano_do_projeto = "1976"
+                    l.carimbo_encontrado = True
+                    return l
+
+            resumo = releitura.reler(caso.acervo, caso.estado, caso.config, None, "F026-P0001", "projeto",
+                                     motivo="teste", pedido_por="Rafa", livro=Livro(caso.acervo), leitor=Leitor())
+            self.assertEqual(len(resumo["recodificadas"]), 2, resumo)
+            pasta = next(caso.acervo.rglob("F026-P0001*"))
+            nomes = [p.name for p in pasta.rglob("*") if p.is_file() and p.suffix in (".tif", ".jpg")]
+            self.assertTrue(nomes and not any("-0000-" in n for n in nomes), nomes)
+            self.assertNotIn("-0000-", (res.pasta_projeto / "catalogacao" / "pacote_tainacan.json").read_text())
+        finally:
+            caso.tearDown()
+
+
 class TestCdrSemBitmap(unittest.TestCase):
     def test_folha_branca_vira_texto(self):
         from PIL import Image
