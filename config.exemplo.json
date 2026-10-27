@@ -61,6 +61,8 @@
   "painel_token": "",
   "estacao_id": "campvision2",
   "heartbeat_segundos": 60,
+  "destinos_do_painel": true,
+  "destinos_por_rodada": 3,
   "auto_atualizar": true,
   "intervalo_atualizacao_minutos": 60,
   "hora_relatorio": "18:00",

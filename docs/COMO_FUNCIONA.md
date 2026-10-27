@@ -637,10 +637,18 @@ Base `painel_url`, cabeçalho `X-Camp-Token` (de `CAMP_PAINEL_TOKEN`), timeout 8
 | `POST /api/estacoes/heartbeat` | a cada 60 s |
 | `POST /api/campvision/aviso` | ver abaixo |
 | `GET /api/estacoes/pedidos-releitura` + `POST …/{id}/iniciado` + `POST …/{id}/concluido` | a cada rodada ([9.3](#93-pedidos-de-releitura-ler-dados-agora)) |
+| `GET /api/campvision/destinos` (+ `POST /api/campvision/reidentificar` com `lote_id`, só se o item continuar listado depois do aviso) | no fim de cada rodada, ocioso (UX-43, abaixo) |
 
 **Heartbeat:** `estacao_id, tipo_estacao, app, versao, estado` (vocabulário do painel: vigiando, processando, erro, pasta indisponível; a frase livre ("copiando 7 de 38", "gravando metadados", "relendo", "QNAP com problema") vai em `detalhe.situacao`; alerta de custo em `detalhe.alerta`), `projeto, progresso, fila, hoje` (projetos, imagens, erros, custo), `montagens` (entrada, acervo), `contrato, quarentena`. Heartbeat perdido não é guardado, mas a falha agora é logada (WARNING).
 
 **Aviso** = `{codigo, pasta, status}`. É mandado em toda gravação de `status.json` de projeto definitivo (processando, pronto, erro), no fim de cada releitura, no `--avisar-painel`, no `--consertar-acervo` e no `--reidentificar --sim`. Nunca para código provisório. Se o painel não responder, o aviso fica em `~/.campvision2/painel_pendentes.json` (só o último de cada projeto) e é reenviado depois de cada heartbeat.
+
+**Destinos do painel (UX-43).** O painel decide sozinho quando a pasta de um lote em "Verificar destino" é de outro projeto (existente ou criado por ele) e lista em `GET /api/campvision/destinos` (CONTRATO_UNICO do painel §5.2; rota só de leitura, painel antigo responde 404 e o vigia ignora em silêncio). No fim de cada rodada, só com o vigia ocioso (`vigiando`, a mesma regra do auto-update), uma pasta por vez e no máximo `destinos_por_rodada` (3), o vigia (`nucleo/destinos.py`):
+1. acha a pasta DAQUELE lote (código `de` + o mesmo nome de pasta) e roda o plano do `--reidentificar` (simulação, nada é mexido);
+2. só aplica se o plano bater: todos os grupos da pasta vão para `para`, mesmo fundo, `para` na lista de projetos do painel (`/contexto`), nada para pessoa decidir, nada saindo da publicação, nenhuma folha sem identificação ficando para trás;
+3. aplica como o `--sim` (move e renumera, cria a pasta do projeto destino se ainda não existe, refaz os pacotes, avisa o painel de cada projeto), sem chamar as rotas de admin; livro: `refeito`. Se depois do aviso o item ainda está na lista, fecha pelo lote (`/api/campvision/reidentificar`, simulado antes; o painel só aplica com `campvision.reidentificar_aplicar` = 1).
+
+Plano que não bate ou falha: não aplica; livro `erro` com o motivo; o motivo vai no `motivo` do `status.json` (só se `pronto`) da pasta com um aviso, e o item fica lembrado em `~/.campvision2/destinos_painel.json` — não é tentado de novo até o painel mudar o item (lote, de, para ou pasta). Painel/QNAP fora não conta como tentativa. Interruptor: `destinos_do_painel` (padrão ligado; quem decide é o painel, que só lista depois de "Aplicar" ou "Aplicar sozinho").
 
 ### 9.2 O que o painel faz com o aviso
 

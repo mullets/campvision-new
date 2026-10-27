@@ -173,6 +173,24 @@ class Painel:
         status, _ = self._chamar("POST", f"/api/estacoes/pedidos-releitura/{pedido_id}/concluido", corpo)
         return 200 <= status < 300
 
+    def destinos(self) -> list[dict] | None:
+        """UX-43: GET /api/campvision/destinos — pastas que o painel decidiu que são de outro projeto.
+
+        Lista (talvez vazia) quando o painel respondeu; None quando não deu para saber (painel antigo
+        sem a rota = 404, fora do ar, resposta estranha). Nunca levanta."""
+        status, dados = self._chamar("GET", "/api/campvision/destinos")
+        if status != 200 or not isinstance(dados, dict) or not isinstance(dados.get("destinos"), list):
+            return None
+        return [d for d in dados["destinos"] if isinstance(d, dict) and d.get("id") is not None]
+
+    def reidentificar_lote(self, lote_id, destino: str, simular: bool = True,
+                           motivo: str = "") -> tuple[int, dict | None]:
+        """POST /api/campvision/reidentificar (rede local/X-Camp-Token, CAMP-009) com o lote inteiro.
+        `simular` é o padrão do painel; aplicar só com `campvision.reidentificar_aplicar` = 1 lá (senão 403)."""
+        return self._chamar("POST", "/api/campvision/reidentificar", {
+            "simular": bool(simular), "motivo": motivo,
+            "movimentos": [{"lote_id": lote_id, "destino": destino}]})
+
     def mover_folhas(self, destino: str, itens: list[str], motivo: str = "") -> tuple[int, dict | None]:
         """POST /api/itens/mover (admin). Painel antigo/sem sessão: (status, corpo) para registrar; nunca levanta."""
         return self._chamar("POST", "/api/itens/mover", {"itens": itens, "destino": destino, "motivo": motivo})
