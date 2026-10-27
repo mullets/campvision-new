@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +28,22 @@ from .config import VERSAO_BUILD
 _log = logging.getLogger("cv2.metadados")
 
 TEMPO_LIMITE_LOTE = 900
+
+# UX-08: limites (em BYTES) dos campos IPTC IIM. Passar do limite faz o exiftool avisar
+# "[Minor] IPTC:By-line exceeds length limit (truncated)". O CV2 corta antes, do mesmo jeito
+# que o exiftool cortaria (o nome inteiro continua em XMP-dc:Creator e EXIF:Artist).
+LIMITES_IPTC = {"By-line": 32, "Credit": 32, "Source": 32, "City": 32, "Province-State": 32,
+                "OriginalTransmissionReference": 32, "ObjectName": 64, "Keywords": 64,
+                "CopyrightNotice": 128, "Caption-Abstract": 2000}
+
+
+def cortar_iptc(tag: str, valor: str) -> str:
+    """Corta o valor no limite do campo IPTC (em bytes UTF-8, sem partir letra acentuada)."""
+    limite = LIMITES_IPTC.get(tag.split(":", 1)[-1]) if tag.startswith("IPTC:") else None
+    dados = valor.encode("utf-8")
+    if limite is None or len(dados) <= limite:
+        return valor
+    return dados[:limite].decode("utf-8", "ignore").rstrip()
 
 
 @dataclass
@@ -122,6 +139,7 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
         argumentos.append(f"-{herdado}=")
 
     def adicionar(tag: str, valor: str) -> None:
+        valor = cortar_iptc(tag, valor) if valor else valor
         if valor:
             argumentos.append(f"-{tag}={valor}")
 
@@ -149,7 +167,7 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
 
     # --- Descrição do conteúdo ---
     adicionar("XMP-dc:Title", titulo)
-    adicionar("IPTC:ObjectName", titulo[:64])
+    adicionar("IPTC:ObjectName", titulo)
     adicionar("XMP-photoshop:Headline", projeto)
     adicionar("EXIF:ImageDescription", descricao)
     adicionar("XMP-dc:Description", descricao)
@@ -163,12 +181,12 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
     adicionar("IPTC:Province-State", uf)
     for palavra in palavras:
         argumentos.append(f"-XMP-dc:Subject+={palavra}")
-        argumentos.append(f"-IPTC:Keywords+={palavra}")
+        argumentos.append(f"-IPTC:Keywords+={cortar_iptc('IPTC:Keywords', palavra)}")
 
     # --- Identificação no acervo ---
     adicionar("XMP-dc:Identifier", extras.get("_codigo", ""))
     adicionar("XMP-photoshop:TransmissionReference", extras.get("_codigo", ""))
-    adicionar("IPTC:OriginalTransmissionReference", extras.get("_codigo", "")[:32])
+    adicionar("IPTC:OriginalTransmissionReference", extras.get("_codigo", ""))
     adicionar("XMP-xmpMM:PreservedFileName", extras.get("_nome_original", ""))
     quem = " / ".join(p for p in (extras.get("_operador", ""), extras.get("_estacao", "")) if p)
     adicionar("XMP-photoshop:CaptionWriter", quem)
@@ -197,7 +215,11 @@ def gravar_em_lote(
 ) -> tuple[int, list[str]]:
     """Grava os metadados de todos os arquivos num processo só.
 
-    Devolve (quantos_gravados, avisos).
+    Devolve (quantos_gravados, avisos). Em `avisos`: os gerais (identidade incompleta,
+    exiftool ausente/estourou o tempo), uma linha "<arquivo> Warning: <msg>" por aviso do
+    exiftool (não impede gravar), uma "<arquivo> Error: <msg>" por arquivo que ele não gravou
+    e, por último, o resumo "exiftool relatou N problema(s)" (só com erros de verdade).
+    `separar_avisos` separa os três tipos.
     """
     if not itens:
         return 0, []
@@ -224,8 +246,11 @@ def gravar_em_lote(
         caminho_args = Path(arquivo.name)
 
     try:
+        # -m: erro [Minor] (TIF fora do padrão) não impede a gravação. UX-08: tem de ir em
+        # -common_args — um -m antes do -@ só vale para o 1º bloco do -execute; do 2º arquivo
+        # em diante o [minor] voltava a ser erro, o arquivo não era gravado e o lote parava.
         proc = subprocess.run(
-            ["exiftool", "-m", "-@", str(caminho_args)],   # -m: aviso [Minor] (TIF fora do padrão) não impede a gravação
+            ["exiftool", "-@", str(caminho_args), "-common_args", "-m"],
             capture_output=True, text=True, timeout=TEMPO_LIMITE_LOTE,
         )
     except (OSError, subprocess.TimeoutExpired) as erro:
@@ -236,12 +261,64 @@ def gravar_em_lote(
 
     saida = proc.stdout + proc.stderr
     gravados = saida.count("1 image files updated")
-    falhas = saida.count("files weren't updated") + saida.count("Error")
+    linhas = _linhas_por_arquivo(saida, [c for c, _ in itens])
+    erros = [ln for ln in linhas if " Error: " in ln]
+    # UX-08: "Warning:" (inclusive [Minor]) não impede gravar: vai como aviso por arquivo, nunca como falha.
+    avisos.extend(ln for ln in linhas if " Warning: " in ln)
+    avisos.extend(erros)
+    falhas = len(erros) or saida.count("files weren't updated")
     if falhas:
-        avisos.append(f"exiftool relatou {falhas} problema(s): {saida[-300:].strip()}")
+        sem_aviso = "\n".join(ln for ln in saida.splitlines() if not ln.strip().startswith("Warning"))
+        detalhe = "; ".join(erros) if erros else sem_aviso.strip()
+        avisos.append(f"exiftool relatou {falhas} problema(s): {detalhe[-300:].strip()}")
         _log.warning(avisos[-1])
     _log.info("Metadados gravados em %d de %d arquivo(s).", gravados, len(itens))
     return gravados, avisos
+
+
+_LINHA_EXIFTOOL = re.compile(r"^(Warning|Error):\s*(.*)$")
+
+
+def _linhas_por_arquivo(saida: str, caminhos: list[Path]) -> list[str]:
+    """As mensagens do exiftool ("Warning: <msg> - <caminho>") como "<arquivo> Warning: <msg>".
+
+    É o formato que o painel já lê nos avisos [Minor] (avisos_cv). O caminho tem " - " no meio
+    ("01 - Projetos"): por isso casa pelo fim com os caminhos que foram ao exiftool."""
+    nomes = sorted(((str(c), c.name) for c in caminhos), key=lambda x: -len(x[0]))
+    out: list[str] = []
+    for linha in saida.splitlines():
+        m = _LINHA_EXIFTOOL.match(linha.strip())
+        if not m:
+            continue
+        tipo, resto = m.groups()
+        nome = ""
+        for caminho, n in nomes:
+            if resto.endswith(" - " + caminho):
+                resto, nome = resto[: -len(" - " + caminho)], n
+                break
+        if nome:
+            out.append(f"{nome} {tipo}: {resto.strip()}")
+    return out
+
+
+_AVISO_ARQUIVO = re.compile(r"^(?P<arquivo>\S+\.\w+) (?P<tipo>Warning|Error): (?P<msg>.+)$", re.S)
+
+
+def separar_avisos(avisos: list[str]) -> tuple[list[dict], dict[str, str], list[str]]:
+    """UX-08: (avisos por arquivo que NÃO impedem gravar [{arquivo, msg, linha}],
+    {arquivo: erro do exiftool}, avisos gerais na ordem). Ver gravar_em_lote."""
+    menores: list[dict] = []
+    erros: dict[str, str] = {}
+    gerais: list[str] = []
+    for a in avisos or []:
+        m = _AVISO_ARQUIVO.match(str(a))
+        if not m:
+            gerais.append(str(a))
+        elif m["tipo"] == "Warning":
+            menores.append({"arquivo": m["arquivo"], "msg": m["msg"].strip(), "linha": str(a)})
+        else:
+            erros.setdefault(m["arquivo"], m["msg"].strip())
+    return menores, erros, gerais
 
 
 def conferir(caminho: Path) -> dict[str, str]:

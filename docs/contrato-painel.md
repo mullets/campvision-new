@@ -1,8 +1,8 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-**Contrato 2.3 — 15/10/2026** (integração com as estações; ver §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
+**Contrato 2.5 — 27/10/2026** (UX-08: aviso do exiftool e arquivos sem EXIF conferido; ver §19. Integração com as estações: §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
 
-- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.4"`.
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.5"`.
 - Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
   - Para regenerar: `python -m tests.contrato_exemplos`.
 - Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
@@ -120,6 +120,8 @@ Valores de `status`, nesta ordem:
   continuar no arquivo por compatibilidade; o painel olha só `status`.
 - Na **entrada** (`100 - Scanners`) a marca de fim das estações é `status` **ou** `etapa`
   (`enviado_windows` / `enviado_mac`); ver §18.
+- Contrato 2.5 (opcional): com `status: "erro"` por "EXIF conferido em N de M", vem
+  `exif_sem_conferir: [{"arquivo", "motivo"}]` (§19). Some no status seguinte.
 
 ## 4. `catalogacao/` (CV2 escreve; painel passa a ler)
 
@@ -298,7 +300,8 @@ Publicar só itens com `publicavel: true`.
 
 `catalogacao/lotes/<lote>.json` ganha `aceite`: `contagem_origem_igual_saida`,
 `orientacao_incerta_zerada`, `exif_conferido`,
-`publicavel`, `pendencias` e `folhas_autoria_nao_confirmada` (contrato 2.4: autoria divergente deixou de bloquear; é aviso). O `status` continua `pronto` quando o trabalho do CV2
+`publicavel`, `pendencias` e `folhas_autoria_nao_confirmada` (contrato 2.4: autoria divergente deixou de bloquear; é aviso).
+Contrato 2.5 (opcional): `exif_sem_conferir` = `{"ok": false, "contagem": N, "arquivos": [{"arquivo", "motivo"}]}` quando faltou conferir EXIF (§19). O `status` continua `pronto` quando o trabalho do CV2
 acabou; o painel usa `aceite.publicavel` + `erros_bloqueantes` para liberar.
 
 ### 9.5 Erros novos em `erros.json`
@@ -482,3 +485,30 @@ Por fundo, além de `autoridade{}`: `coautores` (lista de nomes) e `periodo_atua
 ### 18.5 Teto de custo
 
 `limite_custo_dia_usd` e `limite_custo_lote_usd` no config do CV2 (0 = sem limite). Estourou: a leitura para, o lote vira erro `limite de custo` e o heartbeat vai com `estado: "erro"` e `detalhe.alerta`.
+
+## 19. Contrato 2.5 — aviso do exiftool não para o lote; quais arquivos ficaram sem EXIF (UX-08, 27/10/2026)
+
+Tudo aqui é **opcional**: painel antigo ignora, painel novo (UX-08) já lê.
+
+- **Aviso do exiftool não trava.** O CV2 grava com `-m` em **todos** os arquivos do lote
+  (`-common_args -m`; antes o `-m` só valia para o 1º arquivo do `-execute` e um erro `[minor]`
+  de TIF fora do padrão impedia gravar os outros → "EXIF conferido em N de M" → `erro`).
+  Campos IPTC são cortados pelo CV2 no limite do padrão (`IPTC:By-line` 32 bytes etc.; o nome
+  inteiro fica em `XMP-dc:Creator`/`EXIF:Artist`), então o aviso "exceeds length limit" não nasce.
+- Cada `Warning` do exiftool (inclusive `[Minor]`) vira uma linha em `erros.json` com
+  `gravidade: "aviso"`, `categoria: "metadado"`, `arquivo` = código do documento e
+  `detalhe` = `"<arquivo> Warning: [Minor] <mensagem do exiftool>"` (o formato que o painel já
+  reconhece). Não conta em `erros_bloqueantes`; o lote segue para `pronto`.
+- **Arquivos sem EXIF conferido**, cada um com o motivo, no formato que o painel lê
+  (`[{"arquivo": "<nome do arquivo>", "motivo": "<texto>"}]`, até 500):
+  - `status.json` → `exif_sem_conferir` quando o lote para em `erro` com
+    "EXIF conferido em N de M arquivo(s)…" (`entrada_exigir_exif` ligado, o padrão). A chave só
+    existe nesse erro: o próximo status (processando/pronto) a tira.
+  - `catalogacao/lotes/<lote>.json` → `exif.sem_conferir` (sempre que faltou algum).
+  - `aceite.exif_sem_conferir` = `{"ok": false, "contagem": N, "arquivos": [...]}` quando o lote
+    termina `pronto` mesmo assim (`entrada_exigir_exif` desligado). `aceite.exif_conferido`
+    continua **booleano**.
+  - `motivo`: `"o exiftool não gravou: <erro do exiftool>"`; ou o motivo geral (exiftool ausente,
+    estourou o tempo); ou, sem erro relatado, que o código lido de volta (`XMP-dc:Identifier`)
+    não confere.
+

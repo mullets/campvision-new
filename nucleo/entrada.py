@@ -675,6 +675,39 @@ def conferir_exif(itens: list[tuple[Path, str]]) -> set[Path]:
     }
 
 
+# UX-08: os arquivos que ficaram sem EXIF conferido, cada um com o motivo. Vai ao painel em
+# status.json "exif_sem_conferir" (lote em erro) e no aceite (lote pronto com exigir_exif desligado),
+# no formato que o painel lê: [{"arquivo", "motivo"}].
+MAX_SEM_CONFERIR = 500
+_AVISO_SEM_CAUSA = ("Identidade incompleta", "exiftool relatou")
+
+
+def motivos_sem_exif(faltam: list[Path], avisos: list[str]) -> list[dict]:
+    """[{arquivo, motivo}] dos arquivos que não passaram na conferência (até MAX_SEM_CONFERIR)."""
+    _menores, erros, gerais = mod_metadados.separar_avisos(avisos)
+    geral = next((g for g in reversed(gerais) if not g.startswith(_AVISO_SEM_CAUSA)), "")
+    out = []
+    for d in faltam[:MAX_SEM_CONFERIR]:
+        nome = Path(d).name
+        if nome in erros:
+            motivo = f"o exiftool não gravou: {erros[nome]}"
+        elif geral:
+            motivo = f"o exiftool não gravou: {geral}"
+        else:
+            motivo = ("o exiftool não relatou erro, mas o código lido de volta do arquivo "
+                      "(XMP-dc:Identifier) não confere")
+        out.append({"arquivo": nome, "motivo": motivo[:300]})
+    return out
+
+
+def avisos_do_exiftool(avisos: list[str]) -> list[dict]:
+    """UX-08: aviso do exiftool (ex.: [Minor] IPTC:By-line exceeds length limit) que NÃO impediu
+    gravar vira erro de gravidade "aviso" em erros.json: aparece na folha e não trava o lote."""
+    menores, _erros, _gerais = mod_metadados.separar_avisos(avisos)
+    return [{"arquivo": Path(m["arquivo"]).stem, "categoria": "metadado", "gravidade": "aviso",
+             "origem": "CAMP Vision", "detalhe": m["linha"][:500]} for m in menores]
+
+
 # ---- EXIF retomável (CAMP-010)
 
 PASSO_EXIF = "exif"  # estado local: o lote parou no meio da gravação de metadados
@@ -1076,6 +1109,11 @@ def checklist_aceite(por_codigo: dict, leituras: dict, erros: list[dict], lote: 
     }
     itens["publicavel"] = all(itens.values())
     itens["pendencias"] = [k for k, v in itens.items() if v is False]
+    # UX-08 (contrato 2.5, opcional): quais arquivos ficaram sem EXIF conferido e por quê — no formato
+    # de item que o painel já lê ({ok, contagem, <lista>}). `exif_conferido` continua booleano.
+    if exif.get("sem_conferir"):
+        itens["exif_sem_conferir"] = {"ok": False, "contagem": exif.get("total", 0) - exif.get("conferidos", 0),
+                                      "arquivos": exif["sem_conferir"]}
     # CAMP-046: autoria divergente não bloqueia; é aviso (N folhas com autoria não confirmada)
     itens["folhas_autoria_nao_confirmada"] = sum(1 for l in do_lote if l.autoria_divergente)
     return itens
@@ -1130,6 +1168,7 @@ class Recebedor:
 
     def _status(self, pasta: Path, codigo: str, situacao: str, ctx: Contexto, **extra) -> None:
         atual = ler_json(pasta / "status.json", {}) or {}
+        atual.pop("exif_sem_conferir", None)   # UX-08: a lista é só do erro em que foi mandada
         provisorio = estrutura.e_provisorio(codigo)
         atual.update({
             "codigo": codigo, "status": situacao, "status_em": _agora(),
@@ -1203,7 +1242,7 @@ class Recebedor:
         }
         self._status(pasta, codigo, PROCESSANDO, ctx)
 
-        def falhar(motivo: str) -> Resultado:
+        def falhar(motivo: str, **extra) -> Resultado:
             erros_lote.append({"arquivo": "", "categoria": "metadado", "gravidade": "bloqueia",
                                "origem": "CAMP Vision", "detalhe": motivo})
             lote["status"] = ERRO
@@ -1216,7 +1255,7 @@ class Recebedor:
             except OSError:
                 pass
             self._erros(catalogacao, erros_lote)
-            self._status(pasta, codigo, ERRO, ctx, motivo=motivo)
+            self._status(pasta, codigo, ERRO, ctx, motivo=motivo, **extra)
             self.livro.anotar("erro", lote_id=ctx.lote_id, codigo_projeto=codigo,
                               arquivo_origem=str(unidade.relativo), detalhe=motivo)
             self.estado.anotar(unidade.chave, ERRO, motivo=motivo, assinatura=assinatura,
@@ -1344,10 +1383,10 @@ class Recebedor:
         if ja_arquivados:
             # Já estavam no acervo (lote cortado antes do fim, reenvio): confere o EXIF e
             # regrava SÓ o que faltar — nunca entrega arquivo sem metadado (CAMP-010).
-            faltou = self._garantir_exif(ja_arquivados, ctx, estado_vigia)
+            faltou = self._garantir_exif(ja_arquivados, ctx, estado_vigia, erros_lote)
             if faltou:
                 return falhar(f"EXIF conferido em {faltou[0]} de {faltou[1]} arquivo(s) já no acervo"
-                              + (f": {faltou[2]}" if faltou[2] else ""))
+                              + (f": {faltou[2]}" if faltou[2] else ""), exif_sem_conferir=faltou[3])
         if not arquivados:  # tudo o que veio já estava no acervo: nada a ler nem a decidir
             from . import transferir as mod_transferir
 
@@ -1793,7 +1832,7 @@ class Recebedor:
         gravar_json(catalogacao / "lotes" / f"{ctx.lote_id}.json", lote)
         self._status(pasta, codigo, PROCESSANDO, ctx)
 
-        def falhar(motivo: str) -> Resultado:
+        def falhar(motivo: str, **extra) -> Resultado:
             erros_lote.append({"arquivo": "", "categoria": "metadado", "gravidade": "bloqueia",
                                "origem": "CAMP Vision", "detalhe": motivo})
             lote["status"] = ERRO
@@ -1805,7 +1844,7 @@ class Recebedor:
             except OSError:
                 pass
             self._erros(catalogacao, erros_lote)
-            self._status(pasta, codigo, ERRO, ctx, motivo=motivo)
+            self._status(pasta, codigo, ERRO, ctx, motivo=motivo, **extra)
             self.livro.anotar("erro", lote_id=ctx.lote_id, codigo_projeto=codigo,
                               arquivo_origem=str(unidade.relativo), detalhe=motivo)
             self.estado.anotar(unidade.chave, ERRO, motivo=motivo, assinatura=assinatura, codigo=codigo)
@@ -1907,16 +1946,19 @@ class Recebedor:
         conferidos = conferir_exif([(d, Path(d).stem) for d, _ in itens])
         if len(conferidos) >= len(itens):
             limpar_exif_pendente(catalogacao)
+        erros_lote.extend(avisos_do_exiftool(avisos))   # UX-08: aviso do exiftool não trava
+        sem_conferir = motivos_sem_exif([d for d, _ in itens if d not in conferidos], avisos)
         lote["exif"] = {"total": len(itens), "gravados": gravados, "conferidos": len(conferidos),
-                        "avisos": avisos}
+                        "avisos": avisos, "sem_conferir": sem_conferir}
         for destino, campos in itens:
             if destino in conferidos:
                 self.livro.anotar("exif_gravado", lote_id=ctx.lote_id, codigo_projeto=codigo,
                                   codigo_documento=campos["_codigo"],
                                   arquivo_destino=self._relativo(destino))
         if self.config.entrada_exigir_exif and len(conferidos) < len(itens):
+            gerais = mod_metadados.separar_avisos(avisos)[2]
             return falhar(f"EXIF conferido em {len(conferidos)} de {len(itens)} arquivo(s)"
-                          + (f": {avisos[-1]}" if avisos else ""))
+                          + (f": {gerais[-1]}" if gerais else ""), exif_sem_conferir=sem_conferir)
 
         # ---- 7. catalogacao/: contatos, erros, lote
         formatos.folha_de_contatos(
@@ -1965,11 +2007,13 @@ class Recebedor:
         resultado.status, resultado.lote = PRONTO, lote
         return resultado
 
-    def _garantir_exif(self, ja_arquivados: list, ctx: Contexto, estado_vigia=None):
+    def _garantir_exif(self, ja_arquivados: list, ctx: Contexto, estado_vigia=None, erros_lote=None):
         """Arquivos que já estavam no acervo: confere o XMP e regrava só o que faltar.
 
         Devolve None quando está tudo certo (ou o config não exige EXIF), senão
-        (conferidos, total, aviso). Não usa API: as leituras vêm do leituras.json do projeto.
+        (conferidos, total, aviso, [{arquivo, motivo}] dos que ficaram sem conferir).
+        Avisos do exiftool que não impediram gravar entram em `erros_lote` como "aviso" (UX-08).
+        Não usa API: as leituras vêm do leituras.json do projeto.
         """
         from . import planilha as mod_planilha
 
@@ -2001,13 +2045,17 @@ class Recebedor:
             itens.append((d, campos_do_exif(ctx, d.stem, leituras_por_projeto[projeto].get(d.stem),
                                             estrutura.nome_sem_codigo(projeto.name), nome_original)))
         gravados, avisos = mod_metadados.gravar_em_lote(itens, self.config.identidade())
+        if erros_lote is not None:
+            erros_lote.extend(avisos_do_exiftool(avisos))
         ok_agora = conferir_exif([(d, d.stem) for d, _ in itens])
         for d in ok_agora:
             self.livro.anotar("exif_gravado", lote_id=ctx.lote_id, codigo_documento=d.stem,
                               arquivo_destino=self._relativo(d), detalhe="regravado na retomada do lote")
         if len(ok_agora) < len(faltam):
             if self.config.entrada_exigir_exif:
-                return (len(destinos) - len(faltam) + len(ok_agora), len(destinos), avisos[-1] if avisos else "")
+                gerais = mod_metadados.separar_avisos(avisos)[2]
+                return (len(destinos) - len(faltam) + len(ok_agora), len(destinos), gerais[-1] if gerais else "",
+                        motivos_sem_exif([d for d, _ in itens if d not in ok_agora], avisos))
             return None
         for projeto in leituras_por_projeto:
             limpar_exif_pendente(projeto / "catalogacao")
