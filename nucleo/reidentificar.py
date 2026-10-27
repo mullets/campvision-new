@@ -121,8 +121,12 @@ def avisar_painel_das_mudancas(painel, chamadas: list[dict]) -> list[dict]:
     return chamadas
 
 
-def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict], livro, painel, tabela=None) -> list[str]:
-    """Move o que tem destino forte, marca o resto no preparo, refaz os pacotes. Devolve os projetos tocados."""
+def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict], livro, painel, tabela=None,
+            chamar_rotas_admin: bool = True) -> list[str]:
+    """Move o que tem destino forte, marca o resto no preparo, refaz os pacotes. Devolve os projetos tocados.
+
+    `chamar_rotas_admin=False` (UX-43, destino decidido pelo painel): não chama mesclar/mover de admin,
+    nem com CAMP_PAINEL_SESSAO — quem decidiu foi o painel, e o aviso da pasta basta para ele."""
     from .entrada import marcar_identidade
 
     pasta = Path(plano["pasta"])
@@ -170,7 +174,11 @@ def aplicar(plano: dict, raiz_final: Path, pasta_estado: Path, base: list[dict],
         if alvo is not None and painel is not None:
             painel.aviso(c, str(alvo.relative_to(raiz_final)), "pronto")
     if chamadas:
-        chamadas = avisar_painel_das_mudancas(painel, chamadas)
+        if chamar_rotas_admin:
+            chamadas = avisar_painel_das_mudancas(painel, chamadas)
+        else:
+            for c in chamadas:
+                c["resultado"] = "não chamado: destino decidido pelo painel (UX-43); o aviso da pasta basta"
         gravar_json(pasta / "catalogacao" / "reidentificacao_painel.json", chamadas, indent=1)
     salvo = {k: v for k, v in plano.items() if not k.startswith("_")}
     gravar_json(pasta / "catalogacao" / "reidentificacao.json", salvo, indent=1)

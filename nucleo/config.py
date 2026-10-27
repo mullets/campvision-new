@@ -179,6 +179,13 @@ class Config:
     painel_token: str = ""
     estacao_id: str = "campvision2"
     heartbeat_segundos: int = 60
+    # UX-43: o vigia lê GET /api/campvision/destinos (pastas que o painel decidiu que são de outro
+    # projeto) e reorganiza sozinho, uma por vez e só ocioso: PRIMEIRO o plano do --reidentificar
+    # (simulação), e só aplica se o plano bater com o destino pedido. A decisão humana/flag fica no
+    # painel (ele só lista depois de "Aplicar" ou "Aplicar sozinho"); aqui é só o interruptor.
+    destinos_do_painel: bool = True
+    # Teto de pastas reorganizadas por rodada do vigia.
+    destinos_por_rodada: int = 3
 
     # --- Auto-atualização pelo GitHub ---
     auto_atualizar: bool = True

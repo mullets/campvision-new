@@ -713,7 +713,13 @@ class Vigia:
 
     # -------------------------------------------------------------- laços
     def uma_rodada(self) -> int:
-        """Processa tudo o que está pronto agora. Devolve quantos projetos rodou."""
+        """Processa tudo o que está pronto agora. Devolve quantos projetos rodou.
+
+        No fim, já ocioso ("vigiando"), as pastas que o painel mandou para outro projeto (UX-43)."""
+        feitos = self._rodada_de_lotes()
+        return feitos + self.atender_destinos()
+
+    def _rodada_de_lotes(self) -> int:
         self._quarentena()
         recebidos = self.receber_lotes()
         recebidos += self.atender_releituras()
@@ -901,6 +907,29 @@ class Vigia:
                                                 mensagem=str(erro)[:300])
         self.estado.projeto_atual = ""
         return feitos
+
+    def atender_destinos(self) -> int:
+        """UX-43: GET /api/campvision/destinos → reorganiza a pasta (simula antes, aplica só se bater).
+
+        Mesma regra do auto-update: só com o vigia ocioso ("vigiando"), uma pasta por vez, com teto
+        por rodada. Interruptor `destinos_do_painel`; painel antigo sem a rota = nada, em silêncio."""
+        if (not self.config.destinos_do_painel or not self.painel.ligado or not self.config.raiz_final
+                or self.cancelar.is_set() or not hasattr(self.painel, "destinos")):
+            return 0
+        if self.estado.situacao not in ("vigiando", "iniciando"):
+            return 0  # ocupado (lote, releitura): fica para uma rodada ociosa
+        from . import destinos as mod_destinos
+
+        antes = self.estado.situacao
+        try:
+            return mod_destinos.atender(self.config, self.painel, self.livro, self.pasta_estado,
+                                        cancelar=self.cancelar, estado=self.estado)
+        except Exception as erro:  # noqa: BLE001 - nunca derruba o vigia
+            _log.error("Destinos do painel: %s", erro)
+            return 0
+        finally:
+            self.estado.situacao = antes
+            self.estado.projeto_atual = ""
 
     def _acertar_status_da_releitura(self, codigo: str) -> dict:
         """status.json da pasta do projeto depois da releitura (Recebedor.acertar_status). Nunca levanta."""
