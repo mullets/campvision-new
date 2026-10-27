@@ -182,7 +182,8 @@ class TestPainel(unittest.TestCase):
             releitura_iniciada=lambda *a: True, releitura_concluida=lambda *a, **k: None, aviso=lambda *a: True)
         eu = types.SimpleNamespace(
             painel=painel, config=types.SimpleNamespace(raiz_final="/x", estacao_id="cv"), cancelar=threading.Event(),
-            estado=types.SimpleNamespace(), pasta_estado=Path("/y"), livro=None, cliente=None)
+            estado=types.SimpleNamespace(), pasta_estado=Path("/y"), livro=None, cliente=None,
+            _acertar_status_da_releitura=lambda codigo: {})
 
         def reler(raiz, est, cfg, cli, codigo, escopo, documentos, *a):
             visto["documentos"] = documentos

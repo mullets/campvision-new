@@ -1188,7 +1188,135 @@ class Recebedor:
             "gerado_por": f"CAMP Vision 2 {VERSAO_BUILD}",
         })
 
-    # ------------------------------------------------------------ projeto
+    # ------------------------------------------- status.json preso (releitura)
+    def _contexto_do_lote(self, pasta: Path, codigo: str, lote_id: str) -> Contexto:
+        """O contexto do lote (operador, estação, fundo...) como ele foi gravado em catalogacao/lotes/<id>.json."""
+        guardado = (ler_json(pasta / "catalogacao" / "lotes" / f"{lote_id}.json", {}) or {}) if lote_id else {}
+        dados = guardado.get("contexto") if isinstance(guardado, dict) else None
+        nomes = {f.name for f in dataclasses.fields(Contexto)} - {"fundo", "lote_id", "problemas", "series"}
+        campos = {k: v for k, v in (dados or {}).items() if k in nomes}
+        fundo = self.tabela.get(codigo[:4]) or mod_fundos.Fundo(codigo[:4], "", codigo[:4])
+        return Contexto(fundo=fundo, lote_id=lote_id, **campos)
+
+    def _exif_do_lote(self, pasta: Path, ctx: Contexto):
+        """EXIF dos arquivos do lote (e do marcador de EXIF pela metade) na pasta final: confere e regrava só
+        o que faltar, como na retomada. Devolve None (ok) ou (conferidos, total, aviso, [{arquivo, motivo}])."""
+        cat = pasta / "catalogacao"
+        nome_original: dict[Path, str] = {}
+        for item in (ler_json(cat / "mapa_origem.json", {}) or {}).values():
+            if isinstance(item, dict) and item.get("destino"):
+                nome_original[self.raiz_final / item["destino"]] = item.get("nome_original") or ""
+        lote = (ler_json(cat / "lotes" / f"{ctx.lote_id}.json", {}) or {}) if ctx.lote_id else {}
+        relativos = [a.get("destino") for a in (lote.get("arquivos") or []) if isinstance(a, dict)]
+        marcador = ler_json(cat / EXIF_PENDENTE, None)
+        if isinstance(marcador, dict):
+            relativos += list(marcador.get("arquivos") or [])
+        alvos = []
+        for rel in relativos:
+            d = self.raiz_final / rel if rel else None
+            if d is not None and d not in alvos and d.exists() and d.suffix.lower() not in formatos.SEM_EXIF \
+                    and len(d.parents) > 2 and d.parents[2] == pasta:
+                alvos.append(d)
+        if not alvos:
+            return None
+        return self._garantir_exif([(Path(nome_original.get(d) or d.name), d, d.stem, "") for d in alvos], ctx)
+
+    def acertar_status(self, pasta: Path, ctx: Contexto | None = None, exif: bool = True) -> dict:
+        """status.json da pasta FINAL preso num estado velho (processando/erro) quando o trabalho já está feito.
+
+        Caso real (F009-P0092, F026-P0009, F016-P0024): lote cortado ou parado com erro; na releitura
+        (pedido do painel ou o mesmo lote de novo na entrada, tudo já no acervo) o CV2 não reescrevia o
+        status.json e o painel mostrava o estado velho para sempre. Aqui o status vira o que é VERDADE agora:
+        - `pronto` só com pacote coerente (todo documento da pasta no pacote_tainacan.json, do mesmo projeto;
+          se faltar, o pacote é remontado SEM API do leituras.json, quando ele cobre tudo) e EXIF conferido;
+        - senão `erro`, com o motivo de agora (o painel deixa de mostrar o motivo/estado antigo).
+        Pasta já `pronto` não é tocada. Nada é apagado do acervo; nenhum código é inventado.
+        Devolve {"status", "antes", "motivo", "mudou"}."""
+        from . import planilha as mod_planilha, releitura as mod_releitura
+
+        codigo = estrutura.codigo_da_pasta(pasta)
+        atual = ler_json(pasta / "status.json", {}) or {}
+        atual = atual if isinstance(atual, dict) else {}
+        antes = str(atual.get("status") or "")
+        sem_mudar = {"status": antes, "antes": antes, "motivo": str(atual.get("motivo") or ""), "mudou": False}
+        if not codigo or estrutura.e_provisorio(codigo) or antes == PRONTO or not pasta.is_dir():
+            return sem_mudar
+        masters = set(mod_releitura._masters(pasta))
+        if not masters:
+            return sem_mudar  # pasta sem documento: nada a afirmar
+        cat = pasta / "catalogacao"
+        # O lote que o status.json diz (o que parou); o `ctx` recebido só vale se for ele mesmo.
+        lote_status = str(atual.get("lote_atual") or "")
+        if ctx is not None and lote_status and ctx.lote_id != lote_status:
+            ctx = None
+        if ctx is None:
+            ctx = self._contexto_do_lote(pasta, codigo, lote_status)
+        motivo_antigo = str(atual.get("motivo") or "")
+
+        def gravar(situacao: str, motivo: str, **extra) -> dict:
+            self._status(pasta, codigo, situacao, ctx, motivo=motivo, **extra)
+            self.livro.anotar("refeito", lote_id=ctx.lote_id, codigo_projeto=codigo,
+                              detalhe=f"status.json da pasta: {antes or 'sem status'} -> {situacao}"
+                                      + (f" ({motivo})" if motivo else " (tudo já no acervo, pacote coerente)"))
+            _log.info("%s: status.json %s -> %s%s", codigo, antes or "sem status", situacao,
+                      f" ({motivo})" if motivo else "")
+            return {"status": situacao, "antes": antes, "motivo": motivo, "mudou": True}
+
+        if exif:
+            faltou = self._exif_do_lote(pasta, ctx)
+            if faltou:
+                return gravar(ERRO, f"EXIF conferido em {faltou[0]} de {faltou[1]} arquivo(s) já no acervo"
+                              + (f": {faltou[2]}" if faltou[2] else ""), exif_sem_conferir=faltou[3])
+
+        def fora_do_pacote() -> list[str]:
+            pacote = ler_json(cat / "pacote_tainacan.json", {}) or {}
+            if not isinstance(pacote, dict) or pacote.get("projeto_codigo") != codigo:
+                return sorted(masters)
+            docs = [d for d in (pacote.get("documentos") or pacote.get("itens") or []) + (pacote.get("retirados") or [])
+                    if isinstance(d, dict)]
+            return sorted(masters - {str(d.get("codigo") or "") for d in docs})
+
+        faltam = fora_do_pacote()
+        lidas = {Path(l.arquivo).stem for l in mod_planilha.ler_json(cat / "leituras.json")}
+        if faltam and masters <= lidas:  # o leituras.json cobre tudo: remonta o pacote sem chamar a API
+            mod_releitura.remontar_pacote(self.raiz_final, self.pasta_estado, codigo, self.tabela)
+            faltam = fora_do_pacote()
+        if faltam:
+            return gravar(ERRO, f"{len(faltam)} de {len(masters)} documento(s) da pasta sem leitura no pacote "
+                                f"(ex.: {faltam[0]}): peça \"Ler de novo esta pasta\"")
+
+        mapa = ler_json(cat / "mapa_origem.json", {}) or {}
+        leituras = mod_planilha.ler_json(cat / "leituras.json")
+        erros = ler_json(cat / "erros.json", []) or []
+        if motivo_antigo and isinstance(erros, list):  # o bloqueio do lote que parou deixou de valer
+            limpos = [e for e in erros if not (isinstance(e, dict) and e.get("gravidade") == "bloqueia"
+                                               and not e.get("arquivo") and e.get("detalhe") == motivo_antigo)]
+            if len(limpos) != len(erros):
+                self._erros(cat, limpos)
+                erros = limpos
+        (cat / "catalogacao_ERRO.txt").unlink(missing_ok=True)
+        if ctx.lote_id:
+            lote = ler_json(cat / "lotes" / f"{ctx.lote_id}.json", None)
+            if isinstance(lote, dict) and lote.get("status") != PRONTO:
+                lote.update({"status": PRONTO, "concluido_em": _agora()})
+                gravar_json(cat / "lotes" / f"{ctx.lote_id}.json", lote)
+        documentos = len({Path(v["destino"]).stem for v in mapa.values() if isinstance(v, dict) and v.get("destino")}) \
+            or len(masters)
+        if not (pasta / "info_projeto.json").exists():
+            pacote = ler_json(cat / "pacote_tainacan.json", {}) or {}
+            self._info(pasta, codigo, pacote.get("projeto_nome") or estrutura.nome_sem_codigo(pasta.name),
+                       ctx, documentos)
+        prontos = atual.get("lotes_prontos") or []
+        return gravar(
+            PRONTO, "",
+            lotes_prontos=sorted(set(prontos) | ({ctx.lote_id} if ctx.lote_id else set())),
+            imagens=len(mapa) or sum(len(v) for v in mod_releitura._masters(pasta).values()),
+            folhas=documentos,
+            com_carimbo=sum(1 for l in leituras if l.carimbo_encontrado),
+            a_revisar=sum(1 for l in leituras if mod_planilha.precisa_revisar(l)),
+            erros_bloqueantes=sum(1 for e in erros if isinstance(e, dict) and e.get("gravidade") == "bloqueia"),
+        )
+
     # ------------------------------------------------------------ principal
     def processar(self, unidade: Unidade, estado_vigia=None, cancelar=None) -> Resultado:
         comeco = time.monotonic()
@@ -1395,6 +1523,12 @@ class Recebedor:
             if self.config.apagar_original_apos_pronto and ja_arquivados:
                 resultado.apagados = self._apagar_originais(unidade, ja_arquivados, ctx, proj,
                                                             sobrou=bool(lote["nao_suportados"]))
+            # A pasta final pode ter ficado em "processando"/"erro" pelo corte anterior deste lote: o status.json
+            # dela passa a dizer a verdade de agora (antes só o estado LOCAL virava pronto e o painel ficava no velho).
+            # O EXIF do lote que o status.json diz (e o do marcador de EXIF pela metade) é conferido de novo lá.
+            for pasta_final in sorted({d.parents[2] for _o, d, _c, _s in ja_arquivados if len(d.parents) > 2}):
+                if pasta_final.parent.name == estrutura.PASTA_PROJETOS:
+                    self.acertar_status(pasta_final, ctx)
             self.estado.anotar(unidade.chave, PRONTO, assinatura=assinatura, codigo=proj, lote_id=ctx.lote_id)
             _log.info("Lote %s: os %d arquivo(s) já estavam no acervo (%s).", ctx.lote_id, len(ja_arquivados), proj)
             resultado.status, resultado.codigo, resultado.copiados = PRONTO, proj, 0
