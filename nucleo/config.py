@@ -15,9 +15,9 @@ from typing import Any
 # Suba o número a cada release. Sem isso não dá para saber qual versão está
 # rodando numa máquina — foi assim que um caminho errado sobreviveu a três
 # atualizações do código.
-VERSAO_BUILD = "2026-10-19-01"
+VERSAO_BUILD = "2026-10-27-01"
 # Versão do contrato com o painel (docs/contrato-painel.md). Mudou o formato = muda aqui.
-CONTRATO = "2.4"
+CONTRATO = "2.5"
 
 _log = logging.getLogger("cv2.config")
 
