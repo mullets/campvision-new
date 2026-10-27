@@ -883,8 +883,17 @@ class Vigia:
                             f"{resumo['campos_preenchidos']} campo(s) preenchido(s); US$ {resumo['custo_usd']:.2f}"
                             + (f"; falhas: {'; '.join(resumo['falhas'])[:200]}" if resumo["falhas"] else "")
                             if resumo["relidos"] else "nenhuma folha encontrada para o escopo pedido")
-                self.painel.releitura_concluida(pedido["id"], resumo, ok=ok, mensagem=mensagem)
-                self.painel.aviso(codigo, resumo.get("pasta", ""), "pronto")
+                # A pasta do projeto pode estar presa em "processando"/"erro" de um lote que parou: o status.json
+                # passa a dizer a verdade de agora, e o aviso vai com a pasta DO PROJETO (antes ia a subpasta
+                # catalogacao/releituras/..., que o painel ignora por não ter status.json nem pacote).
+                acerto = self._acertar_status_da_releitura(codigo)
+                if acerto.get("mudou") or (acerto.get("status") and acerto["status"] != "pronto"):
+                    mensagem += (f"; situação da pasta: {acerto['antes'] or 'sem status'} -> {acerto['status']}"
+                                 + (f" ({acerto['motivo']})" if acerto.get("motivo") else ""))
+                    self.estado.anotar(f"releitura {codigo}: pasta {acerto['status']}"[:120])
+                self.painel.releitura_concluida(pedido["id"], resumo, ok=ok, mensagem=mensagem[:500])
+                if acerto.get("pasta") and not acerto.get("mudou"):  # quem muda o status já avisou o painel
+                    self.painel.aviso(codigo, acerto["pasta"], acerto.get("status") or "pronto")
                 feitos += 1
             except Exception as erro:  # noqa: BLE001 - pedido ruim não derruba o vigia
                 _log.error("Releitura %s (pedido %s) falhou: %s", codigo, pedido.get("id"), erro)
@@ -892,6 +901,25 @@ class Vigia:
                                                 mensagem=str(erro)[:300])
         self.estado.projeto_atual = ""
         return feitos
+
+    def _acertar_status_da_releitura(self, codigo: str) -> dict:
+        """status.json da pasta do projeto depois da releitura (Recebedor.acertar_status). Nunca levanta."""
+        from . import renomear as mod_renomear
+
+        try:
+            raiz = Path(self.config.raiz_final)
+            pasta = mod_renomear.achar_projeto(raiz, codigo)
+            if pasta is None:
+                return {}
+            acerto = self._recebedor().acertar_status(pasta)
+            try:
+                acerto["pasta"] = str(pasta.relative_to(raiz))
+            except ValueError:
+                acerto["pasta"] = str(pasta)
+            return acerto
+        except Exception as erro:  # noqa: BLE001 - o pedido ainda tem de ser respondido
+            _log.error("Releitura %s: não consegui acertar o status.json da pasta: %s", codigo, erro)
+            return {}
 
     # ------------------------------------------------------------ painel/tela
     def _salvar_estado(self) -> None:
