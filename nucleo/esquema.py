@@ -173,11 +173,20 @@ class Leitura:
         """Aceita JSON antigo e novo: chave desconhecida é ignorada, faltante usa o padrão."""
         from dataclasses import fields as _campos
 
+        from .saneamento import anotar, sanear_leitura_gravada
+
         conhecidos = {f.name for f in _campos(cls)}
         limpos = {k: v for k, v in dados.items() if k in conhecidos}
         regiao = limpos.get("regiao")
         limpos["regiao"] = tuple(regiao) if regiao else None
-        return cls(**limpos)
+        # UX-37: leitura antiga gravada com resto de marcação da ferramenta ou 'null' como texto
+        # não volta para o próximo pacote (o arquivo antigo não é regravado aqui).
+        limpos, quebrados = sanear_leitura_gravada(limpos)
+        leitura = cls(**limpos)
+        if quebrados:
+            leitura.ressalvas = list(leitura.ressalvas or [])
+            anotar(leitura, quebrados, "leitura gravada")
+        return leitura
 
 
 def _campo_schema(descricao: str) -> dict[str, Any]:
