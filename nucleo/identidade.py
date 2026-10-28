@@ -81,15 +81,11 @@ def _parecidos(a: list[str], b: list[str], limiar: float) -> bool:
     return comuns(a, b) / min(len(set(a)), len(set(b))) >= limiar
 
 
-LIXO = re.compile(r"</?parameter[^>]*>|</?invoke[^>]*>|<[a-z_]+ name=\"[^\"]*\">", re.IGNORECASE)
-
-
 def limpar_valor(valor) -> str:
-    """Tira resto de marcação da ferramenta ('<parameter name="valor">null') e 'null' literal."""
-    texto = re.split(r"</parameter>|<parameter name=\"(?!valor)", str(valor or ""), maxsplit=1)[0]
-    texto = LIXO.sub(" ", texto)
-    texto = re.sub(r"\s+", " ", texto).strip(" \"'")
-    return "" if texto.lower() in ("null", "none", "nulo", "-", "?") else texto
+    """Tira resto de marcação da ferramenta ('<parameter name="valor">null') e 'null' literal (UX-37: nucleo/saneamento)."""
+    from .saneamento import sanear_valor
+
+    return sanear_valor(valor)[0]
 
 
 def lido(leitura, campo: str) -> str:

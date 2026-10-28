@@ -224,8 +224,8 @@ def _texto(valor: Any) -> str:
 
 def _lista(valor: Any) -> list[str]:
     if isinstance(valor, (list, tuple)):
-        return [str(v).strip() for v in valor if str(v).strip()]
-    return [str(valor).strip()] if _texto(valor) else []
+        return [t for t in (_texto(v) for v in valor) if t]
+    return [_texto(valor)] if _texto(valor) else []
 
 
 def _inteiro(valor: Any) -> int:
@@ -352,6 +352,21 @@ def _para_textual(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
     return leitura
 
 
+def _sanear_resposta(entrada: Any) -> tuple[dict[str, Any], dict[str, bool]]:
+    """UX-37: resto de marcação da ferramenta ou 'null' como texto não entra na leitura (nucleo/saneamento)."""
+    from .saneamento import sanear
+
+    limpo, quebrados = sanear(entrada if isinstance(entrada, dict) else {})
+    return limpo, quebrados
+
+
+def _anotado(leitura: Leitura, quebrados: dict[str, bool]) -> Leitura:
+    from .saneamento import anotar
+
+    anotar(leitura, quebrados, "resposta da leitura")
+    return leitura
+
+
 def _hash(texto: str) -> str:
     import hashlib
 
@@ -401,6 +416,7 @@ class LeitorDeCarimbo:
                               INSTRUCOES + (INSTRUCOES_ORIENTACAO if self.orienta_prancha else ""), _para_leitura))
             mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": pedido}]}]
             entrada, t_in, t_out = self.cliente.chamar(mensagens, ferramenta, instrucoes)
+            entrada, quebrados = _sanear_resposta(entrada)
             resultado.tokens_entrada, resultado.tokens_saida, resultado.passes = t_in, t_out, 1
             if modo == "prancha" and entrada.get("e_fotografia") is True and not entrada.get("tem_carimbo"):
                 # A triagem achou que era papel (foto clara, muito céu/parede), mas é
@@ -408,12 +424,13 @@ class LeitorDeCarimbo:
                 mensagens = [{"role": "user", "content": [
                     _bloco_imagem(env), {"type": "text", "text": "Descreva esta fotografia."}]}]
                 entrada, t_in2, t_out2 = self.cliente.chamar(mensagens, self.ferramenta_foto, INSTRUCOES_FOTO)
+                entrada, quebrados = _sanear_resposta(entrada)
                 resultado.tokens_entrada += t_in2
                 resultado.tokens_saida += t_out2
                 resultado.passes = 2
                 resultado.versao_prompt = f"fotografia:{VERSAO_PROMPT.get('fotografia', '')}"
-                return _para_foto(entrada, resultado)
-            return converter(entrada, resultado)
+                return _anotado(_para_foto(entrada, resultado), quebrados)
+            return _anotado(converter(entrada, resultado), quebrados)
         except Exception as erro:  # noqa: BLE001
             resultado.erro = str(erro)
             _log.error("%s: %s", caminho.name, erro)
