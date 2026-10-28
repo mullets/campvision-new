@@ -182,7 +182,7 @@ def processar(item: dict, config, painel, livro, pasta_estado: Path, tabela=None
     if not any(str(p.get("codigo") or "").upper() == para for p in base if isinstance(p, dict)):
         raise Recusa(f"o projeto {para} não está na lista de projetos do painel")
     try:
-        plano = mod_reid.planejar(pasta, base, pasta_estado)
+        plano = mod_reid.planejar(pasta, base, pasta_estado, usar_nome_da_pasta=False)
     except OSError as erro:
         raise Transitorio(f"QNAP ao ler {pasta.name}: {erro}") from erro
     except Exception as erro:  # noqa: BLE001 - plano que não sai não é aplicado
