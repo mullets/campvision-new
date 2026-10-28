@@ -195,12 +195,22 @@ def garantir_projeto(pasta_fundo: Path, codigo: str, nome: str, fundo) -> Path:
     return pasta
 
 
+# Folhas enviadas direto pelo painel (fotos pela página do projeto) usam D90001 em diante e, desde 28/10, o painel grava o arquivo na
+# pasta do projeto no QNAP. Essa faixa é do PAINEL: o CAMP Vision não numera a partir dela nem relê essas folhas.
+FAIXA_PAINEL = 90000
+
+
+def e_do_painel(codigo_documento: str) -> bool:
+    achado = CODIGO_DOCUMENTO.match(codigo_documento or "")
+    return bool(achado) and int(achado.group(5)) > FAIXA_PAINEL
+
+
 def proximo_documento(pasta_projeto: Path) -> int:
-    """Próximo D livre no projeto, olhando todos os arquivos já nomeados."""
+    """Próximo D livre no projeto, olhando todos os arquivos já nomeados (menos os da faixa do painel, D90001+)."""
     maior = 0
     for arquivo in pasta_projeto.rglob("*"):
         achado = CODIGO_DOCUMENTO.match(arquivo.stem)
-        if achado:
+        if achado and int(achado.group(5)) <= FAIXA_PAINEL:
             maior = max(maior, int(achado.group(5)))
     return maior + 1
 
