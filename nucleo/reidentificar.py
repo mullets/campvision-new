@@ -39,7 +39,9 @@ def _ler(caminho: Path, padrao):
         return padrao
 
 
-def planejar(pasta: Path, base: list[dict], pasta_estado: Path) -> dict:
+def planejar(pasta: Path, base: list[dict], pasta_estado: Path, usar_nome_da_pasta: bool = True) -> dict:
+    """usar_nome_da_pasta=False (UX-43, destino já decidido no painel): o nome da pasta não serve de pista. Desde 28/10 ele é o nome
+    digitado na estação (não o carimbo), justamente o que pode estar errado quando o painel manda a pasta para outro projeto."""
     codigo = estrutura.codigo_da_pasta(pasta)
     leituras = {Path(l.arquivo).stem: l for l in mod_planilha.ler_json(pasta / "catalogacao" / "leituras.json")}
     cache = pasta_estado / "leitura" / codigo
@@ -47,7 +49,7 @@ def planejar(pasta: Path, base: list[dict], pasta_estado: Path) -> dict:
 
     analise = mod_ident.analisar(leituras, {c: _proporcao(cache / f"{c}.jpg") for c in leituras}, base)
     varios = len(analise.grupos) > 1
-    pista = "" if varios else mod_ident.pista_da_pasta(estrutura.nome_sem_codigo(pasta.name))
+    pista = "" if varios or not usar_nome_da_pasta else mod_ident.pista_da_pasta(estrutura.nome_sem_codigo(pasta.name))
     perguntar = {analise.grupos[i].chave for juntos in analise.mesmo_endereco for i in juntos}
     perguntar |= {f["grupo"] for f in analise.fases}
     grupos = []

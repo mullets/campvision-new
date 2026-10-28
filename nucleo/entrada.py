@@ -1838,7 +1838,9 @@ class Recebedor:
         esperando: list[str] = []
         for g in grupos:
             casa = casamentos[g.chave]
-            titulo = g.titulo if g.folhas else (ctx.projeto or pista)
+            # 28/10: o nome do projeto é o que a pessoa digitou na estação; o carimbo só dá nome quando a pasta tem VÁRIAS obras
+            # (aí cada grupo precisa do seu) ou quando a estação não mandou nome.
+            titulo = (ctx.projeto if ctx.projeto and not varios else g.titulo) if g.folhas else (ctx.projeto or pista)
             forte = casa.get("forte")
             candidatos = casa.get("candidatos") or ([forte] if forte else [])
             # Código oficial explícito (manifesto/pasta F0xx-P0xxx, Mac): vale para todos os grupos, a não
@@ -1850,7 +1852,12 @@ class Recebedor:
                                    "motivos": ["código no manifesto/pasta"]}, forte]
                     forte = None
                 else:
-                    plano.append(self._destino(ctx.codigo, g, ctx, "código oficial informado pela estação"))
+                    # 28/10 (Rafael, F008-P0001 "Residência Max Define" virou a pasta "CONSTRUÇÃO DE UMA RESIDENCIA"): com o código
+                    # da estação, o nome é o do PROJETO (o título oficial do painel; sem ele, o nome digitado na estação), nunca o carimbo.
+                    oficial = next((str(p.get("projeto") or p.get("titulo") or "") for p in base
+                                    if str(p.get("codigo") or "").upper() == ctx.codigo.upper()), "")
+                    plano.append(self._destino(ctx.codigo, g, ctx, "código oficial informado pela estação",
+                                               nome=oficial or ctx.projeto))
                     continue
             if forte and g.chave not in perguntar_chaves:
                 nome = forte["titulo"]
