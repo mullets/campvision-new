@@ -79,3 +79,36 @@ class TestRelerFotoDoPainel(unittest.TestCase):
             self.assertEqual(estrutura.proximo_documento(pasta), 3)      # a foto do painel não empurra a numeração do CAMP Vision
         finally:
             b.tearDown()
+
+
+class TestPastaSoComFotosDoPainel(unittest.TestCase):
+    """28/10 (log: "Aviso de F008-P0001 aceito mas com ok:false — sem info_projeto.json nem status.json nesta pasta"): a pasta que só tem
+    fotos enviadas pelo painel não ganha status.json do CAMP Vision e a releitura não manda aviso dela ao painel."""
+
+    def test_acertar_status_ignora_e_vigia_nao_avisa(self):
+        import threading, types
+        from unittest import mock
+        from nucleo import entrada, fundos, vigia
+        from nucleo.livro import Livro
+        from tests.test_entrada import Base, PainelFalso
+        from tests.test_nucleo import ClienteFalso
+
+        class B(Base):
+            def runTest(self):
+                pass
+        b = B(); b.setUp()
+        try:
+            pj = b.acervo / "F026 - SBU Sami Bussab" / "01 - Projetos" / "F026-P0040 - Só fotos"
+            d = pj / estrutura.SERIES["S03"] / "JPG"; d.mkdir(parents=True)
+            (d / "F026-P0040-0000-S03-D90001.jpg").write_bytes(b"x")
+            painel = PainelFalso()
+            r = entrada.Recebedor(b.config, ClienteFalso([]), painel, Livro(b.acervo, b.estado / "reserva"), b.estado, fundos.Tabela(fundos.EMBUTIDA))
+            acerto = r.acertar_status(pj)
+            self.assertFalse(acerto.get("mudou"), acerto)
+            self.assertFalse((pj / "status.json").exists())
+            eu = types.SimpleNamespace(config=types.SimpleNamespace(raiz_final=str(b.acervo)), _recebedor=lambda: r)
+            res = vigia.Vigia._acertar_status_da_releitura(eu, "F026-P0040")
+            self.assertNotIn("pasta", res)                 # sem pasta no acerto = sem aviso ao painel
+            self.assertEqual(painel.avisos, [])
+        finally:
+            b.tearDown()

@@ -941,6 +941,10 @@ class Vigia:
             if pasta is None:
                 return {}
             acerto = self._recebedor().acertar_status(pasta)
+            if not (pasta / "status.json").is_file():
+                # 28/10 (log: "Aviso de F008-P0001 aceito mas com ok:false — sem info_projeto.json nem status.json nesta pasta"): pasta sem
+                # status.json (ex.: só as fotos que o painel gravou) não tem o que o painel ler: não avisa.
+                return acerto
             try:
                 acerto["pasta"] = str(pasta.relative_to(raiz))
             except ValueError:

@@ -1241,9 +1241,9 @@ class Recebedor:
         sem_mudar = {"status": antes, "antes": antes, "motivo": str(atual.get("motivo") or ""), "mudou": False}
         if not codigo or estrutura.e_provisorio(codigo) or antes == PRONTO or not pasta.is_dir():
             return sem_mudar
-        masters = set(mod_releitura._masters(pasta))
+        masters = {m for m in mod_releitura._masters(pasta) if not estrutura.e_do_painel(m)}
         if not masters:
-            return sem_mudar  # pasta sem documento: nada a afirmar
+            return sem_mudar  # pasta sem documento (ou só com fotos enviadas pelo painel, D90001+): nada a afirmar
         cat = pasta / "catalogacao"
         # O lote que o status.json diz (o que parou); o `ctx` recebido só vale se for ele mesmo.
         lote_status = str(atual.get("lote_atual") or "")
