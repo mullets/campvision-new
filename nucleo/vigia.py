@@ -694,6 +694,7 @@ class Vigia:
 
     def _contabilizar(self, evento: mod_eventos.Evento) -> None:
         mod_eventos.registrar(self.caminho_eventos, evento)
+        self._espelhado = mod_eventos.espelhar(self.caminho_eventos, self.config.raiz_final)   # contrato 2.6: o painel lê no acervo
         self.estado.projetos_hoje += 1
         self.estado.pranchas_hoje += evento.pranchas
         self.estado.erros_hoje += evento.erros
@@ -851,6 +852,8 @@ class Vigia:
         try:
             if self.config.raiz_final and Path(self.config.raiz_final).is_dir():
                 mod_q.gravar_sentinela(Path(self.config.raiz_final), VERSAO_BUILD)
+                if not getattr(self, "_espelhado", False):     # 1ª rodada (ou a cópia anterior falhou): leva o diário inteiro ao acervo
+                    self._espelhado = mod_eventos.espelhar(self.caminho_eventos, self.config.raiz_final)
             if self.config.pasta_entrada and Path(self.config.pasta_entrada).is_dir():
                 n = mod_q.limpar(Path(self.config.pasta_entrada), self.config.caminho_replica,
                                  self.config.quarentena_dias, self.livro)

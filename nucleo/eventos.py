@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
@@ -43,6 +45,35 @@ def registrar(caminho: Path, evento: Evento) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
     with _trava, caminho.open("a", encoding="utf-8") as f:
         f.write(json.dumps(asdict(evento), ensure_ascii=False) + "\n")
+
+
+# Contrato 2.6 (02/11/2026, Rafael: "esses relatórios do campvision, consigo acessar no meu painel? / seria bom saber tudo que ele fez
+# resumidamente e o valor gasto / no painel de um fundo, o quanto já gastamos com ele"): cópia do diário no acervo, que o painel lê.
+ESPELHO = Path("_campvision") / "eventos.jsonl"
+
+
+def espelhar(local: Path, raiz_final) -> bool:
+    """Copia o diário inteiro para ACERVOS_CAMP/_campvision/eventos.jsonl (troca atômica: o painel nunca lê pela metade).
+    QNAP fora ou sem escrita: False, sem erro (o diário local continua sendo a fonte; a próxima cópia leva tudo)."""
+    if not raiz_final or not local.exists():
+        return False
+    raiz = Path(raiz_final)
+    if not raiz.is_dir():
+        return False
+    destino = raiz / ESPELHO
+    tmp = destino.with_name(destino.name + ".tmp")
+    try:
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(local, tmp)
+        os.replace(tmp, destino)
+        return True
+    except OSError as erro:
+        _log.warning("Diário de eventos não copiado para o acervo: %s", erro)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
 
 
 def ler(caminho: Path, do_dia: date | None = None) -> list[Evento]:

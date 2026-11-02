@@ -61,6 +61,7 @@ def gerar(destino: Path) -> dict[str, Path]:
             shutil.copy2(cat / nome, destino / nome)
         for nome in ("status.json", "info_projeto.json"):
             shutil.copy2(proj / nome, destino / nome)
+        shutil.copy2(caso.acervo / "_campvision" / "eventos.jsonl", destino / "eventos.jsonl")   # contrato 2.6
         # Corpos HTTP de verdade, capturados no cliente do painel.
         v._talvez_heartbeat(forcar=True)
         corpos = {"heartbeat": caso.painel.heartbeats[-1]}
