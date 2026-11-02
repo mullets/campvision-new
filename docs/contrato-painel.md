@@ -512,3 +512,36 @@ Tudo aqui é **opcional**: painel antigo ignora, painel novo (UX-08) já lê.
     estourou o tempo); ou, sem erro relatado, que o código lido de volta (`XMP-dc:Identifier`)
     não confere.
 
+
+## 20. Contrato 2.6 — diário de eventos no acervo (02/11/2026)
+
+Pedido do Rafael: "esses relatórios do campvision, consigo acessar no meu painel? / seria bom saber tudo que ele fez resumidamente e o
+valor gasto / no painel de um fundo, o quanto já gastamos com ele".
+
+**Opcional:** o painel antigo ignora o arquivo.
+
+- O CV2 copia o diário de eventos (`~/.campvision2/eventos.jsonl`, de onde sai o relatório diário) para
+  **`ACERVOS_CAMP/_campvision/eventos.jsonl`**.
+  - A cópia é do arquivo inteiro, com troca atômica (`.tmp` + `rename`).
+  - Acontece a cada projeto processado e na 1ª rodada do serviço, ou na rodada seguinte se a cópia anterior falhou (QNAP fora).
+  - O diário local continua sendo a fonte.
+- Cada linha é um JSON por projeto processado (exemplo em `docs/contrato/exemplos/eventos.jsonl`):
+
+  | Campo | Conteúdo |
+  |---|---|
+  | `quando` | hora local do servidor, ISO sem fuso |
+  | `projeto` | nome da pasta do projeto, ex. `F001-P9003 - Auditório…` (o código pode ser o provisório P9xxx) |
+  | `pasta` | caminho da pasta do projeto |
+  | `pranchas` | pranchas lidas |
+  | `com_carimbo` | pranchas com carimbo |
+  | `erros` | erros |
+  | `campos_a_revisar` | campos a revisar |
+  | `custo_usd` | o gasto com o modelo de visão nessa leitura |
+  | `duracao_segundos` | quanto a leitura levou |
+  | `falha` | vazio = deu certo |
+
+- **Somas:** o custo de um dia é a soma de `custo_usd` das linhas desse dia. O de um fundo é a soma das linhas cujo `projeto` começa
+  com o código do fundo (`F001-`), o que vale mesmo para o provisório P9xxx.
+- **Duplicação:** a releitura que reaproveita a leitura salva grava `custo_usd: 0`, então nada é contado duas vezes.
+- **O painel** lê esse arquivo em segundo plano, pelo coletor do QNAP, nunca dentro de uma requisição. Uma linha é a mesma linha
+  quando tem o mesmo `quando` + `projeto` + `pasta`.
