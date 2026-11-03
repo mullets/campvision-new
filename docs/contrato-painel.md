@@ -1,8 +1,8 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-**Contrato 2.5 — 27/10/2026** (UX-08: aviso do exiftool e arquivos sem EXIF conferido; ver §19. Integração com as estações: §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
+**Contrato 2.7 — 03/11/2026** (UX-60: resposta quebrada do modelo é consertada, tentada de novo e contada; ver §21. Diário de eventos: §20. UX-08 exiftool: §19. Integração com as estações: §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
 
-- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.5"`.
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.7"`.
 - Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
   - Para regenerar: `python -m tests.contrato_exemplos`.
 - Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
@@ -545,3 +545,31 @@ valor gasto / no painel de um fundo, o quanto já gastamos com ele".
 - **Duplicação:** a releitura que reaproveita a leitura salva grava `custo_usd: 0`, então nada é contado duas vezes.
 - **O painel** lê esse arquivo em segundo plano, pelo coletor do QNAP, nunca dentro de uma requisição. Uma linha é a mesma linha
   quando tem o mesmo `quando` + `projeto` + `pasta`.
+
+
+## 21. Contrato 2.7 — resposta quebrada do modelo: conserto, nova tentativa e contagem (UX-60, 03/11/2026)
+
+Caso real: F001-P0033-1979-S01-D00001 com 15 campos "valor descartado: resposta do modelo quebrada".
+
+**Opcional:** campos novos; o painel antigo ignora.
+
+- **O que o CV2 faz antes de descartar:**
+  1. Conserta a resposta mal formada (`nucleo/reparo.py`):
+     - campo em texto com JSON dentro (cercas ```` ```json ````, texto antes/depois, vírgula sobrando, aspas tipográficas, JSON cortado no fim);
+     - a resposta inteira escondida num texto;
+     - parâmetros da ferramenta colados dentro de um valor: cada um volta para o seu campo, só se o campo veio vazio.
+  2. Se ainda sobra campo descartado, faz **uma** nova tentativa. O custo entra como o das outras chamadas (`passes` e tokens da folha, `execucao.chamadas`). Fica a resposta com menos campos perdidos.
+  3. Só então descarta.
+- **Por folha (`pacote_tainacan.json`, `documentos[]`):** `resposta_quebrada` = lista dos campos que ficaram sem leitura (`[]` = nenhum). Os nomes são os do modelo: `arquiteto`, `cidade`, `codigo_serie`…
+- **`erros.json`:** uma linha por folha com campo perdido, com o prefixo fixo para contar:
+  ```json
+  {"arquivo": "F001-P0033-1979-S01-D00001", "categoria": "metadado", "gravidade": "corrigir", "origem": "CAMP Vision",
+   "detalhe": "resposta do modelo quebrada: 15 campo(s) sem leitura mesmo depois de nova tentativa (arquiteto, cidade, …) — preencher na revisão"}
+  ```
+  - A linha de ressalva por campo ("valor descartado: resposta do modelo quebrada (campo)", `aviso`) continua.
+  - Para contar folhas, use a linha que **começa** com `resposta do modelo quebrada:`, não a ressalva.
+- **`execucao`** (no `pacote_tainacan.json` e em `lotes/<lote>.json`), inteiros:
+  - `novas_tentativas`: chamadas repetidas por resposta quebrada;
+  - `folhas_resposta_quebrada`: folhas que ficaram com campo sem leitura mesmo assim;
+  - `campos_descartados`: soma dos campos perdidos.
+  - Para "Qualidade do CAMP Vision": some por versão/lote, como `custo_usd`.

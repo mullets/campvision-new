@@ -352,18 +352,34 @@ def _para_textual(entrada: dict[str, Any], leitura: Leitura) -> Leitura:
     return leitura
 
 
-def _sanear_resposta(entrada: Any) -> tuple[dict[str, Any], dict[str, bool]]:
-    """UX-37: resto de marcação da ferramenta ou 'null' como texto não entra na leitura (nucleo/saneamento)."""
+def _sanear_resposta(entrada: Any, ferramenta: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, bool]]:
+    """UX-60: antes, conserta o que veio mal formado (nucleo/reparo); UX-37: depois, resto de
+    marcação da ferramenta ou 'null' como texto não entra na leitura (nucleo/saneamento)."""
+    from .reparo import reparar_resposta
     from .saneamento import sanear
 
+    propriedades = ((ferramenta or {}).get("input_schema") or {}).get("properties") or {}
+    objetos = tuple(n for n, p in propriedades.items() if isinstance(p, dict) and p.get("type") == "object")
+    outras = tuple(n for n in propriedades if n not in objetos)
+    entrada, reparos = reparar_resposta(entrada, objetos, outras)
+    if reparos:
+        _log.warning("Resposta do modelo mal formada, consertada: %s", "; ".join(reparos[:20]))
     limpo, quebrados = sanear(entrada if isinstance(entrada, dict) else {})
+    if not limpo:
+        quebrados = dict(quebrados, resposta=True)    # nada aproveitável: conta como quebrada
     return limpo, quebrados
+
+
+def campos_descartados(quebrados: dict[str, bool]) -> list[str]:
+    """UX-60: campos (1º nível) que ficaram VAZIOS porque a resposta veio quebrada."""
+    return sorted({c.split(".", 1)[0] or "valor" for c, vazio in quebrados.items() if vazio})
 
 
 def _anotado(leitura: Leitura, quebrados: dict[str, bool]) -> Leitura:
     from .saneamento import anotar
 
     anotar(leitura, quebrados, "resposta da leitura")
+    leitura.resposta_quebrada = campos_descartados(quebrados)
     return leitura
 
 
@@ -416,20 +432,33 @@ class LeitorDeCarimbo:
                               INSTRUCOES + (INSTRUCOES_ORIENTACAO if self.orienta_prancha else ""), _para_leitura))
             mensagens = [{"role": "user", "content": [_bloco_imagem(env), {"type": "text", "text": pedido}]}]
             entrada, t_in, t_out = self.cliente.chamar(mensagens, ferramenta, instrucoes)
-            entrada, quebrados = _sanear_resposta(entrada)
+            entrada, quebrados = _sanear_resposta(entrada, ferramenta)
             resultado.tokens_entrada, resultado.tokens_saida, resultado.passes = t_in, t_out, 1
             if modo == "prancha" and entrada.get("e_fotografia") is True and not entrada.get("tem_carimbo"):
                 # A triagem achou que era papel (foto clara, muito céu/parede), mas é
                 # foto: lê de novo com as regras de fotografia (SESI Marília, 14/10).
                 mensagens = [{"role": "user", "content": [
                     _bloco_imagem(env), {"type": "text", "text": "Descreva esta fotografia."}]}]
-                entrada, t_in2, t_out2 = self.cliente.chamar(mensagens, self.ferramenta_foto, INSTRUCOES_FOTO)
-                entrada, quebrados = _sanear_resposta(entrada)
+                ferramenta, instrucoes, converter = self.ferramenta_foto, INSTRUCOES_FOTO, _para_foto
+                entrada, t_in2, t_out2 = self.cliente.chamar(mensagens, ferramenta, instrucoes)
+                entrada, quebrados = _sanear_resposta(entrada, ferramenta)
                 resultado.tokens_entrada += t_in2
                 resultado.tokens_saida += t_out2
                 resultado.passes = 2
                 resultado.versao_prompt = f"fotografia:{VERSAO_PROMPT.get('fotografia', '')}"
-                return _anotado(_para_foto(entrada, resultado), quebrados)
+            if campos_descartados(quebrados):
+                # UX-60: o conserto não bastou. UMA nova tentativa (custo contado como as outras
+                # chamadas); fica a resposta com menos campos perdidos. Só então descarta.
+                _log.warning("%s: resposta do modelo quebrada (%s) — nova tentativa", caminho.name,
+                             ", ".join(campos_descartados(quebrados)))
+                entrada2, t_in3, t_out3 = self.cliente.chamar(mensagens, ferramenta, instrucoes)
+                entrada2, quebrados2 = _sanear_resposta(entrada2, ferramenta)
+                resultado.tokens_entrada += t_in3
+                resultado.tokens_saida += t_out3
+                resultado.passes += 1
+                resultado.novas_tentativas = 1
+                if len(campos_descartados(quebrados2)) <= len(campos_descartados(quebrados)):
+                    entrada, quebrados = entrada2, quebrados2
             return _anotado(converter(entrada, resultado), quebrados)
         except Exception as erro:  # noqa: BLE001
             resultado.erro = str(erro)

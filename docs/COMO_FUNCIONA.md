@@ -399,10 +399,17 @@ Depois: grupos com o mesmo destino são unidos; capas, folhas sem identificaçã
 
 ### 5.4 Orientação e espelho
 
-**OCR** (`preparo.py`): tesseract `por+eng`, `--psm 11`, numa versão de 1400 px em cinza, nas 4 rotações. Pontuação: +3 por palavra do vocabulário de prancha, +1 por número ou palavra plausível.
+**OCR** (`preparo.py`): tesseract `por+eng`, `--psm 11`, nas 4 rotações, rodando em paralelo.
+- Usa uma versão de **2400 px** em cinza. Era 1400 até o UX-59: o carimbo de prancha grande ficava ilegível e o lixo da rotação 180° ganhava.
+- Pontuação:
+  - palavra do vocabulário de prancha: +3; com 1 ou 2 letras, +1 (DE e DO leem igual viradas);
+  - data, escala ou fração: +2;
+  - número solto ou palavra só "plausível": +0,5 (texto de cabeça para baixo vira palavras plausíveis).
 - **Incerta** se o melhor tem menos de 12 pontos ou o segundo está a menos de 15% dele. Sem tesseract, tudo fica incerto.
 - **Espelho:** a versão espelhada é sempre testada; só é considerada espelhada com ≥ 24 pontos **e** o dobro da normal; com ≥ 12 e metade da normal, fica incerta.
-- O melhor chute é aplicado à imagem de leitura e ao preview **mesmo quando incerto**.
+- O **mais provável** é aplicado à imagem de leitura e ao preview **mesmo quando incerto**. O painel mostra o preview assim, com o aviso de incerteza.
+  - Sem indício (menos de 4 pontos) ou empatado com "como veio", fica como veio do scanner (0°).
+  - O JPG do acervo só é girado com certeza.
 
 **JPG do acervo:** só é girado/desespelhado quando a orientação está **certa** (`derivados.orientar_jpg`): sem perda com `jpegtran -perfect` quando o arquivo não tem etiqueta de orientação; senão regravado em JPEG 95, 4:4:4, com o perfil de cor e as etiquetas copiadas de volta. O master nunca é tocado. `preparo.json` marca `jpg_orientado`.
 

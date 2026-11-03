@@ -148,6 +148,10 @@ class Leitura:
     carimbo: dict[str, Any] = field(default_factory=dict)
     capa: str = ""
     sem_identificacao: bool = False
+    # UX-60: campos que ficaram sem leitura porque a resposta do modelo veio quebrada
+    # (mesmo depois do conserto e da nova tentativa) e quantas novas tentativas houve.
+    resposta_quebrada: list[str] = field(default_factory=list)
+    novas_tentativas: int = 0
 
     @property
     def confianca_media(self) -> float:

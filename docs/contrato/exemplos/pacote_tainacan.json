@@ -1,6 +1,6 @@
 {
   "versao": 2,
-  "gerado_em": "2026-11-02T01:07:54+00:00",
+  "gerado_em": "2026-11-03T20:51:21+00:00",
   "teste": false,
   "projeto_codigo": "F026-P0001",
   "projeto_nome": "Edifício Tarumã",
@@ -122,9 +122,10 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-27-02+04313b7",
+      "versao_cv2": "2026-10-27-02+15bac6d",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
+      "resposta_quebrada": [],
       "carimbo": {
         "obra": "CASA DA PRAIA",
         "local": "",
@@ -239,9 +240,10 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-27-02+04313b7",
+      "versao_cv2": "2026-10-27-02+15bac6d",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
+      "resposta_quebrada": [],
       "carimbo": {
         "obra": "CASA DA PRAIA",
         "local": "",
@@ -356,9 +358,10 @@
       "publicavel": true,
       "bloqueios": [],
       "ressalvas": [],
-      "versao_cv2": "2026-10-27-02+04313b7",
+      "versao_cv2": "2026-10-27-02+15bac6d",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
+      "resposta_quebrada": [],
       "carimbo": {
         "obra": "CASA DA PRAIA",
         "local": "",
@@ -473,9 +476,10 @@
         "duplicata de F026-P0001-1972-S01-D00001"
       ],
       "ressalvas": [],
-      "versao_cv2": "2026-10-27-02+04313b7",
+      "versao_cv2": "2026-10-27-02+15bac6d",
       "versao_prompt": "prancha:3349d9da",
       "modelo": "claude-sonnet-5",
+      "resposta_quebrada": [],
       "carimbo": {
         "obra": "CASA DA PRAIA",
         "local": "",
@@ -526,8 +530,8 @@
     "F026-P0001-1972-S01-D00002 é quase de F026-P0001-1972-S01-D00001 — publicar F026-P0001-1972-S01-D00001"
   ],
   "execucao": {
-    "versao_cv2": "2026-10-27-02+04313b7",
-    "contrato": "2.6",
+    "versao_cv2": "2026-10-27-02+15bac6d",
+    "contrato": "2.7",
     "modelo": "claude-sonnet-5",
     "versao_prompt": {
       "prancha": "3349d9da",
@@ -538,6 +542,9 @@
     "tokens_entrada": 2000,
     "tokens_saida": 200,
     "custo_usd": 0.006,
-    "tempo_s": 0.3
+    "tempo_s": 0.2,
+    "novas_tentativas": 0,
+    "folhas_resposta_quebrada": 0,
+    "campos_descartados": 0
   }
 }
