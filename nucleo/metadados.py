@@ -32,9 +32,21 @@ TEMPO_LIMITE_LOTE = 900
 # UX-08: limites (em BYTES) dos campos IPTC IIM. Passar do limite faz o exiftool avisar
 # "[Minor] IPTC:By-line exceeds length limit (truncated)". O CV2 corta antes, do mesmo jeito
 # que o exiftool cortaria (o nome inteiro continua em XMP-dc:Creator e EXIF:Artist).
-LIMITES_IPTC = {"By-line": 32, "Credit": 32, "Source": 32, "City": 32, "Province-State": 32,
-                "OriginalTransmissionReference": 32, "ObjectName": 64, "Keywords": 64,
+# UX-63: a tabela inteira dos campos de texto que o CV2 grava ou pode vir a gravar, com os
+# limites do exiftool (Image/ExifTool/IPTC.pm, "string[0,N]").
+LIMITES_IPTC = {"By-line": 32, "By-lineTitle": 32, "Credit": 32, "Source": 32, "City": 32,
+                "Sub-location": 32, "Province-State": 32, "Country-PrimaryLocationName": 64,
+                "OriginalTransmissionReference": 32, "Writer-Editor": 32, "ObjectName": 64,
+                "Keywords": 64, "Headline": 256, "SpecialInstructions": 256,
                 "CopyrightNotice": 128, "Caption-Abstract": 2000}
+_QUEBRA = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _uma_linha(valor: str) -> str:
+    """UX-63: o argfile do exiftool é UM argumento por linha. Quebra de linha num valor lido
+    (título em duas linhas) partia o argumento: o resto virava "nome de arquivo" e o exiftool
+    respondia "Error: File not found", com o campo cortado no meio."""
+    return re.sub(r" {2,}", " ", _QUEBRA.sub(" ", valor)).strip()
 
 
 def cortar_iptc(tag: str, valor: str) -> str:
@@ -139,7 +151,7 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
         argumentos.append(f"-{herdado}=")
 
     def adicionar(tag: str, valor: str) -> None:
-        valor = cortar_iptc(tag, valor) if valor else valor
+        valor = cortar_iptc(tag, _uma_linha(valor)) if valor else valor
         if valor:
             argumentos.append(f"-{tag}={valor}")
 
@@ -179,7 +191,7 @@ def montar_argumentos(caminho: Path, campos: dict[str, str], identidade: Identid
     adicionar("XMP-photoshop:State", uf)
     adicionar("IPTC:City", cidade)
     adicionar("IPTC:Province-State", uf)
-    for palavra in palavras:
+    for palavra in (_uma_linha(p) for p in palavras):
         argumentos.append(f"-XMP-dc:Subject+={palavra}")
         argumentos.append(f"-IPTC:Keywords+={cortar_iptc('IPTC:Keywords', palavra)}")
 
