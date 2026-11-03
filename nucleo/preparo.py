@@ -32,9 +32,14 @@ LADO_LEITURA = 2000
 QUALIDADE_LEITURA = 78
 LADO_PREVIEW = 3000
 QUALIDADE_PREVIEW = 85
-LADO_OCR = 1400
+# UX-59: a 1400 px o texto do carimbo de uma prancha grande (A1 a 300 dpi) fica com 5-9 px
+# e o tesseract só devolvia lixo; o lixo da folha de cabeça para baixo ganhava e o preview
+# saía girado 180°. A 2400 px (a bruta tem 3000) o carimbo volta a ser lido.
+LADO_OCR = 2400
 EMPATE = 0.15
 PISO_TEXTO = 12  # pontos mínimos para considerar que achou texto de verdade
+# Abaixo disto não há indício nenhum: a folha fica como veio do scanner (o mais provável).
+INDICIO_MINIMO = 4
 DISTANCIA_PERCEPTUAL = 6  # bits de diferença no dHash de 64 bits
 
 # Palavras frequentes em pranchas: pesam a favor de português de verdade.
@@ -63,30 +68,47 @@ def _normalizar(token: str) -> str:
     return re.sub(r"[^a-z0-9:./-]", "", sem_acento.lower())
 
 
+_PONTA = re.compile(r"^[^a-z0-9]+|[^a-z0-9]+$")
+NUMERO_FORTE = re.compile(r"^(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|1:\d{1,4}|[fF]\.?\d{1,3}|\d{1,3}/\d{1,3})$")
+
+
 def pontuar_texto(texto: str) -> float:
-    """Quanto o texto parece português/número de prancha. Lixo de OCR não pontua."""
+    """Quanto o texto parece português/número de prancha. Lixo de OCR não pontua.
+
+    UX-59: o texto de cabeça para baixo também sai do tesseract como "palavras" de
+    letras simétricas (VIVA, ONVINA, LINOWY…). Por isso só a prova forte pesa:
+    palavra do vocabulário (+3; com 1-2 letras, +1, porque DE/DO/OS leem igual
+    viradas), data/escala/fração (+2). Palavra apenas "plausível" vale 0,5 e
+    número solto 0,5."""
     pontos = 0.0
     for bruto in texto.split():
         token = _normalizar(bruto)
+        palavra = _PONTA.sub("", token)
         if len(token) < 2:
             continue
-        if token in PALAVRAS:
-            pontos += 3
-        elif NUMERO_PLAUSIVEL.match(token):
-            pontos += 1
-        elif re.fullmatch(r"[a-z]{3,}", token) and re.search(r"[aeiou]", token) \
-                and not re.search(r"[^aeiou]{4,}", token):
-            pontos += 1
+        if palavra in PALAVRAS:
+            pontos += 3 if len(palavra) > 2 else 1
+        elif NUMERO_FORTE.match(token) or NUMERO_FORTE.match(palavra):
+            pontos += 2
+        elif NUMERO_PLAUSIVEL.match(palavra):
+            pontos += 0.5
+        elif re.fullmatch(r"[a-z]{4,}", palavra) and re.search(r"[aeiou]", palavra) \
+                and not re.search(r"[^aeiou]{4,}", palavra):
+            pontos += 0.5
     return pontos
 
 
 def _ocr(img: Image.Image) -> str:
+    import os
+
     with tempfile.NamedTemporaryFile(suffix=".png") as f:
         img.save(f.name)
         try:
             proc = subprocess.run(
                 ["tesseract", f.name, "-", "-l", "por+eng", "--psm", "11"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, timeout=120,
+                # As 4 rotações rodam em paralelo (UX-59): uma linha de execução por tesseract.
+                env={**os.environ, "OMP_THREAD_LIMIT": "1"},
             )
         except (OSError, subprocess.TimeoutExpired):
             return ""
@@ -117,8 +139,13 @@ def orientar(img: Image.Image) -> Orientacao:
     base.thumbnail((LADO_OCR, LADO_OCR))
 
     def rodada(espelhada: bool) -> dict[int, float]:
+        from concurrent.futures import ThreadPoolExecutor
+
         fonte = ImageOps.mirror(base) if espelhada else base
-        return {r: pontuar_texto(_ocr(fonte.rotate(-r, expand=True))) for r in (0, 90, 180, 270)}
+        giradas = {r: fonte.rotate(-r, expand=True) for r in (0, 90, 180, 270)}
+        with ThreadPoolExecutor(max_workers=4) as grupo:
+            textos = dict(zip(giradas, grupo.map(_ocr, giradas.values())))
+        return {r: pontuar_texto(textos[r]) for r in giradas}
 
     def incerto(p: dict[int, float]) -> bool:
         o = sorted(p.values(), reverse=True)
@@ -126,7 +153,7 @@ def orientar(img: Image.Image) -> Orientacao:
 
     pontos = rodada(False)
     espelhada = False
-    melhor = max(pontos, key=pontos.get)
+    melhor = _mais_provavel(pontos)
     # Espelhar a folha é a decisão mais perigosa (preview publicado ao contrário),
     # então só acontece com prova forte: a leitura normal não acha texto nenhum
     # e a espelhada acha bastante. Na dúvida: não espelha e marca incerta.
@@ -142,6 +169,19 @@ def orientar(img: Image.Image) -> Orientacao:
         incerta = True  # espelho leu quase tanto: não decide sozinho
     return Orientacao(rotacao=melhor, espelhada=espelhada, incerta=incerta,
                       pontos={str(k): v for k, v in pontos.items()})
+
+
+def _mais_provavel(pontos: dict[int, float]) -> int:
+    """UX-59: a rotação a aplicar no preview/leitura, MESMO quando incerta (o painel mostra
+    a folha nessa posição; o aviso de incerteza continua). Sem indício (folha sem texto
+    legível) ou empatada com "como veio", fica como veio do scanner: 0. Antes valia o
+    maior número de pontos de lixo, e folha sem texto saía girada à toa."""
+    melhor = max(pontos, key=pontos.get)
+    if pontos[melhor] < INDICIO_MINIMO:
+        return 0
+    if melhor != 0 and pontos.get(0, 0.0) >= pontos[melhor] * (1 - EMPATE):
+        return 0
+    return melhor
 
 
 def md5(caminho: Path) -> str:
