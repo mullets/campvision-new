@@ -1,17 +1,17 @@
 {
   "codigo": "F026-P0001",
   "status": "pronto",
-  "status_em": "2026-11-02T01:07:54+00:00",
-  "lote_atual": "20261102-010753-F026 - SBU Sami Bussab_P0001 - Edificio Taruma 1972",
+  "status_em": "2026-11-03T20:51:21+00:00",
+  "lote_atual": "20261103-205121-F026 - SBU Sami Bussab_P0001 - Edificio Taruma 1972",
   "versao_cv2": "2026-10-27-02",
-  "campvision2_em": "2026-11-02T01:07:53",
+  "campvision2_em": "2026-11-03T20:51:21",
   "campvision2_pranchas": 2,
   "campvision2_com_carimbo": 2,
   "campvision2_a_revisar": 0,
   "fase": "organizado_v2",
-  "fase_em": "2026-11-02T01:07:53",
+  "fase_em": "2026-11-03T20:51:21",
   "lotes_prontos": [
-    "20261102-010753-F026 - SBU Sami Bussab_P0001 - Edificio Taruma 1972"
+    "20261103-205121-F026 - SBU Sami Bussab_P0001 - Edificio Taruma 1972"
   ],
   "imagens": 2,
   "folhas": 2,

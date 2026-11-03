@@ -905,6 +905,9 @@ def relatorio_identificacao(analise, plano: list[dict], pendente: str, leituras:
     return "\n".join(linhas) + "\n"
 
 
+RESPOSTA_QUEBRADA = "resposta do modelo quebrada"
+
+
 def erros_das_leituras(leituras) -> list[dict]:
     """Erros por documento no vocabulário do painel (contrato item 4)."""
     erros: list[dict] = []
@@ -942,6 +945,10 @@ def erros_das_leituras(leituras) -> list[dict]:
             add(nome, "espelhado", "aviso", "folha digitalizada pelo verso — preview já corrigido")
         if l.orientacao_incerta:
             add(nome, "orientação", "aviso", "orientação incerta — conferir na folha de contatos")
+        if l.resposta_quebrada:
+            # UX-60: contável pelo painel ("Qualidade do CAMP Vision"): prefixo fixo RESPOSTA_QUEBRADA.
+            add(nome, "metadado", "corrigir", f"{RESPOSTA_QUEBRADA}: {len(l.resposta_quebrada)} campo(s) sem leitura "
+                f"mesmo depois de nova tentativa ({', '.join(l.resposta_quebrada)}) — preencher na revisão")
         if l.modo == "prancha" and not l.carimbo_encontrado:
             add(nome, "metadado", "aviso", "carimbo não encontrado")
         for campo in l.outliers:
@@ -962,7 +969,12 @@ def execucao(config, leituras_do_lote: list, custo_usd: float, tempo_s: float) -
     return {"versao_cv2": versao_completa(), "contrato": CONTRATO, "modelo": getattr(config, "modelo", ""),
             "versao_prompt": dict(VERSAO_PROMPT), "chamadas": sum(max(1, l.passes) for l in lidas),
             "tokens_entrada": sum(l.tokens_entrada for l in lidas), "tokens_saida": sum(l.tokens_saida for l in lidas),
-            "custo_usd": round(float(custo_usd or 0.0), 4), "tempo_s": round(tempo_s, 1)}
+            "custo_usd": round(float(custo_usd or 0.0), 4), "tempo_s": round(tempo_s, 1),
+            # UX-60 (contrato 2.7, opcionais): novas tentativas por resposta quebrada e folhas que
+            # ficaram com campo sem leitura mesmo assim.
+            "novas_tentativas": sum(int(getattr(l, "novas_tentativas", 0) or 0) for l in lidas),
+            "folhas_resposta_quebrada": sum(1 for l in lidas if getattr(l, "resposta_quebrada", None)),
+            "campos_descartados": sum(len(getattr(l, "resposta_quebrada", None) or []) for l in lidas)}
 
 
 def pacote_tainacan(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: dict,

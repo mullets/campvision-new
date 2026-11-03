@@ -365,6 +365,8 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
             "decisao": decisao, "publicavel": not bloqueios, "bloqueios": bloqueios,
             "ressalvas": ressalvas,
             "versao_cv2": l.versao_cv2, "versao_prompt": l.versao_prompt, "modelo": l.modelo,
+            # UX-60 (contrato 2.7): campos sem leitura por resposta quebrada do modelo ([] = nenhum).
+            "resposta_quebrada": list(getattr(l, "resposta_quebrada", None) or []),
             # T1 (auditoria F026): o que o CARIMBO diz, como lido, e a leitura inteira.
             "carimbo": l.carimbo or {}, "capa": l.capa, "sem_identificacao": l.sem_identificacao,
             "lido": {**(l.lidos_originais or l.valores), "transcricao_integral": l.transcricao_integral,
