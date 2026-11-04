@@ -72,9 +72,14 @@ def marcadores_da(pasta: Path) -> list[Path]:
     achados = [pasta / m for m in MARCADORES if (pasta / m).exists()]
     achados += sorted(pasta.glob(_INFO_LOTE))
     return achados
+# Pastas de formato/versão: a lista fixa e, além dela, a regra por palavras de
+# formatos.e_pasta_de_versao ("JPG LIMPO", "fotos em alta", "fotos para internet",
+# "01 - TIFF", "web", "originais", "tratadas"...). Um projeto só com elas é UM lote.
 PASTAS_DE_FORMATO = {
     "tif", "tiff", "jpg", "jpeg", "dng", "pdf", "png", "raw", "preview", "previews",
     "alta", "baixa", "alta resolucao", "baixa resolucao", "matriz", "master",
+    "jpg limpo", "limpo", "fotos em alta", "fotos para internet", "internet", "web",
+    "originais", "tratadas",
 }
 
 
@@ -158,7 +163,11 @@ class Unidade:
 
 
 def _e_pasta_de_formato(nome: str) -> bool:
-    return estrutura.normalizar(nome) in PASTAS_DE_FORMATO
+    """Pasta de formato/versão da MESMA prancha (CAMP-FORMATOS). A subpasta do Mac
+    ("03 - Preview (JPG)") tem regra própria em `descobrir` e não entra aqui."""
+    if _e_subpasta_mac(nome):
+        return False
+    return estrutura.normalizar(nome) in PASTAS_DE_FORMATO or formatos.e_pasta_de_versao(nome)
 
 
 def _e_pasta_de_material(nome: str) -> bool:
@@ -1150,6 +1159,7 @@ class Recebedor:
         self.config = config
         self.cliente = cliente
         self._descartado = ""
+        self._versoes_novas: set[str] = set()   # projetos que ganharam versão nova (remonta o pacote)
         self.painel = painel
         self.livro = livro
         self.pasta_estado = pasta_estado
@@ -1442,7 +1452,9 @@ class Recebedor:
                           f"e há {livre / 2**30:.1f} GB livres")
         multiserie = len(ctx.series) > 1
         serie_de = (lambda a: serie_do_arquivo(a, unidade, ctx.serie)) if multiserie else (lambda a: ctx.serie)  # noqa: E731
-        documentos = formatos.agrupar(suportados, grupo=serie_de if multiserie else None)
+        # CAMP-FORMATOS: a mesma prancha em TIFF/DNG/JPG/"JPG LIMPO"/"fotos para internet" (nomes
+        # iguais ou não) vira UM documento com várias versões — não 2–3 folhas iguais (F001, 29/10).
+        documentos = formatos.agrupar(suportados, grupo=serie_de if multiserie else None, raiz=unidade.pasta)
         proximo = estrutura.proximo_documento(pasta)
         arquivados: list[tuple[Path, Path, str, str]] = []  # (origem, destino, código, sha)
         vistos_sha: dict[str, str] = {}
@@ -1467,8 +1479,14 @@ class Recebedor:
             for doc in documentos:
                 copia.passo(len(doc.versoes))
                 shas = {v: sha_origem(v) for v in doc.versoes}
+                papeis = doc.papeis()
                 if all(s in no_acervo for s in shas.values()):
                     ja_arquivados += [(v, no_acervo[sh], no_acervo[sh].stem, sh) for v, sh in shas.items()]
+                    continue
+                if any(s in no_acervo for s in shas.values()) and not any(s in mapa for s in shas.values()):
+                    # Versão NOVA de documento já arquivado (ex.: chegou o "JPG LIMPO" depois, --refazer-lote):
+                    # entra como versão do MESMO D, no projeto onde ele está. Nunca cria D novo.
+                    ja_arquivados += self._versao_de_arquivado(doc, shas, papeis, no_acervo, ctx, origem_rel)
                     continue
                 ja = [mapa[s] for s in shas.values() if s in mapa]
                 if ja:
@@ -1486,7 +1504,8 @@ class Recebedor:
                         if destino.exists():
                             arquivados.append((versao, destino, codigo_doc, soma))
                             continue
-                    destino = estrutura.destino_documento(pasta, serie_de(versao), codigo_doc, versao.suffix)
+                    destino = estrutura.destino_documento(pasta, serie_de(versao), codigo_doc, versao.suffix,
+                                                          papeis[versao]["subpasta"])
                     destino.parent.mkdir(parents=True, exist_ok=True)
                     if destino.exists() and sha256(destino) != soma:
                         return falhar(f"{destino.name} já existe com outro conteúdo")
@@ -1506,13 +1525,26 @@ class Recebedor:
                         resultado.copiados += 1
                     mapa[soma] = {"destino": self._relativo(destino), "origem": origem_rel(versao),
                                   "nome_original": versao.name, "lote_id": ctx.lote_id,
-                                  "origem_formato": formatos.origem_formato(versao)}
+                                  "origem_formato": formatos.origem_formato(versao),
+                                  # contrato 2.8: versão do documento (formato + papel)
+                                  "formato": papeis[versao]["formato"], "papel": papeis[versao]["papel"]}
                     arquivados.append((versao, destino, codigo_doc, soma))
                     lote["arquivos"].append({"origem": origem_rel(versao), "nome_original": versao.name,
                                              "destino": self._relativo(destino), "codigo": codigo_doc,
-                                             "tipo": versao.suffix.lower().lstrip("."), "sha256": soma})
+                                             "tipo": versao.suffix.lower().lstrip("."), "sha256": soma,
+                                             "formato": papeis[versao]["formato"],
+                                             "papel": papeis[versao]["papel"]})
             gravar_json(mapa_caminho, mapa)
             gravar_json(hashes_caminho, hashes)
+            if self._versoes_novas:
+                from . import releitura as mod_releitura
+
+                for codigo_versao in sorted(self._versoes_novas):
+                    try:
+                        mod_releitura.remontar_pacote(self.raiz_final, self.pasta_estado, codigo_versao, self.tabela)
+                    except (OSError, ValueError) as erro_pacote:
+                        _log.warning("%s: pacote não remontado com a versão nova: %s", codigo_versao, erro_pacote)
+                self._versoes_novas.clear()
         except OSError as erro:
             gravar_json(mapa_caminho, mapa)
             gravar_json(hashes_caminho, hashes)
@@ -1591,7 +1623,12 @@ class Recebedor:
                                    "gravidade": "bloqueia", "origem": "CAMP Vision",
                                    "detalhe": f"não abri {origem} para leitura{detalhe_erro}"})
                 continue
+            # Outras versões JPG do documento ("JPG LIMPO", "JPG V2"): quanto cada uma está girada em
+            # relação à LIDA, para o JPG do acervo de todas sair em pé (CAMP-FORMATOS).
+            giro_versoes = {v.parent.name: formatos.giro_relativo(v, melhor) for v in versoes
+                            if v != melhor and v.suffix.lower() in (".jpg", ".jpeg") and v.exists()}
             preparos[codigo_doc] = {
+                **({"giro_versoes": giro_versoes} if giro_versoes else {}),
                 "md5": prep.md5, "hash_perceptual": prep.hash_perceptual,
                 "rotacao": prep.orientacao.rotacao, "espelhada": prep.orientacao.espelhada,
                 "incerta": prep.orientacao.incerta, "pontos": prep.orientacao.pontos,
@@ -1614,8 +1651,9 @@ class Recebedor:
 
         for codigo_doc, versoes in por_codigo.items():
             prep = preparos.get(codigo_doc)
+            antes = dict(prep) if prep else None   # todas as versões JPG giram, não só a primeira
             for versao in versoes:
-                if versao.suffix.lower() in (".jpg", ".jpeg") and prep and mod_derivados.orientar_jpg(versao, prep):
+                if versao.suffix.lower() in (".jpg", ".jpeg") and prep and mod_derivados.orientar_versao(versao, antes):
                     prep["jpg_orientado"] = True
                     anotar_adiado("refeito", lote_id=ctx.lote_id, codigo_projeto=codigo,
                                       codigo_documento=codigo_doc, arquivo_destino=self._relativo(versao),
@@ -1794,6 +1832,86 @@ class Recebedor:
         resultado.status, resultado.lote = PRONTO, (prontos[0].lote if len(prontos) == 1 else
                                                     {**lote, "status": PRONTO, "destinos": codigos})
         return resultado
+
+    def _versao_de_arquivado(self, doc, shas: dict, papeis: dict, no_acervo: dict, ctx: Contexto,
+                             origem_rel) -> list[tuple[Path, Path, str, str]]:
+        """Versões que faltam de um documento JÁ arquivado (CAMP-FORMATOS, --refazer-lote).
+
+        Ficam no projeto e com o código do documento que já está lá (nunca D novo), na
+        pasta de versão livre ("JPG LIMPO", "JPG V2"...), registradas no mapa_origem dele.
+        Devolve as tuplas para `ja_arquivados` (EXIF conferido/gravado e original apagado
+        como os outros já arquivados)."""
+        from . import derivados as mod_derivados
+
+        existente = next(no_acervo[s] for s in shas.values() if s in no_acervo)
+        pasta_proj, codigo_doc = existente.parents[2], existente.stem
+        serie = existente.parents[1].name
+        cat = pasta_proj / "catalogacao"
+        mapa_d = ler_json(cat / "mapa_origem.json", {}) or {}
+        preparos_d = ler_json(cat / "preparo.json", {}) or {}
+        saida: list[tuple[Path, Path, str, str]] = []
+        for versao, soma in shas.items():
+            if soma in no_acervo:
+                saida.append((versao, no_acervo[soma], no_acervo[soma].stem, soma))
+                continue
+            fmt = estrutura.pasta_formato(versao.suffix)
+            etiqueta = formatos.etiqueta_do_caminho(versao, None) or doc.etiqueta_de(versao)
+            opcoes = [papeis[versao]["subpasta"], f"{fmt} {etiqueta.upper()}" if etiqueta else ""]
+            opcoes += [f"{fmt} V{n}" for n in range(2, 50)]
+            destino = None
+            for opcao in (o for o in opcoes if o):
+                alvo = pasta_proj / serie / opcao / f"{codigo_doc}{versao.suffix.lower()}"
+                if not alvo.exists() or sha256(alvo) == soma:
+                    destino = alvo
+                    break
+            if destino is None:
+                continue
+            if not destino.exists():
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                temporario = destino.with_name(f".{destino.name}.cv2tmp")
+                shutil.copy2(versao, temporario)
+                if sha256(temporario) != soma:
+                    temporario.unlink(missing_ok=True)
+                    raise OSError(f"cópia de {versao.name} não confere (hash)")
+                os.replace(temporario, destino)
+                self.livro.anotar("copiado", lote_id=ctx.lote_id, codigo_projeto=estrutura.codigo_da_pasta(pasta_proj),
+                                  codigo_documento=codigo_doc, arquivo_origem=origem_rel(versao),
+                                  arquivo_destino=self._relativo(destino), nome_original=versao.name,
+                                  tamanho=destino.stat().st_size, sha256=soma, operador=ctx.operador,
+                                  estacao=ctx.estacao, detalhe="versão nova de documento já arquivado")
+            mapa_d[soma] = {"destino": self._relativo(destino), "origem": origem_rel(versao),
+                            "nome_original": versao.name, "lote_id": ctx.lote_id,
+                            "origem_formato": formatos.origem_formato(versao),
+                            "formato": papeis[versao]["formato"],
+                            "papel": "derivado" if papeis[versao]["papel"] == "matriz" else papeis[versao]["papel"]}
+            no_acervo[soma] = destino
+            prep = preparos_d.get(codigo_doc)
+            if prep and destino.suffix.lower() in (".jpg", ".jpeg") and destino.parent.name not in (
+                    prep.get("giro_versoes") or {}):
+                lidas = [p for p in destino.parents[1].glob(f"*/{codigo_doc}.*") if p != destino
+                         and p.parent.name == estrutura.pasta_formato(p.suffix)]
+                referencia = formatos.Documento(codigo_doc, lidas).para_ler if lidas else None
+                giro = formatos.giro_relativo(destino, referencia) if referencia else None
+                ja_girada = bool(prep.get("jpg_orientado")) and referencia is not None \
+                    and referencia.suffix.lower() in (".jpg", ".jpeg")
+                if giro is not None and ja_girada:  # a de referência já está em pé: só alinha a ela
+                    giro_bruto = (giro + int(prep.get("rotacao") or 0)) % 360
+                    if giro and not prep.get("espelhada"):
+                        mod_derivados.orientar_jpg(destino, {"rotacao": giro})
+                else:
+                    giro_bruto = giro
+                    if giro is not None and prep.get("jpg_orientado"):
+                        mod_derivados.orientar_versao(destino, dict(prep, jpg_orientado=False,
+                                                                    giro_versoes={destino.parent.name: giro}))
+                prep.setdefault("giro_versoes", {})[destino.parent.name] = giro_bruto
+            self._versoes_novas.add(estrutura.codigo_da_pasta(pasta_proj))
+            saida.append((versao, destino, codigo_doc, soma))
+            _log.info("Lote %s: %s entrou como versão (%s) de %s, já arquivado.", ctx.lote_id, versao.name,
+                      papeis[versao]["formato"], codigo_doc)
+        gravar_json(cat / "mapa_origem.json", mapa_d)
+        if preparos_d:
+            gravar_json(cat / "preparo.json", preparos_d)
+        return saida
 
     def _livro_adiado(self, adiado: Path, codigo_destino: str, trocas: dict, movidos: dict) -> None:
         """Escreve no livro, com o código e o caminho FINAIS, o que foi feito na pasta provisória."""

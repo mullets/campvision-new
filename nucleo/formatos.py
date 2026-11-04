@@ -1,8 +1,9 @@
 """Formatos que chegam dos scanners: JPG, PNG, TIF, DNG e PDF.
 
-Cada DOCUMENTO pode vir em várias versões com o mesmo nome-base (TIF de alta +
-JPG de preview + DNG da câmera). O documento é lido UMA vez, a partir da
-versão mais leve, e a leitura vale para todas.
+Cada DOCUMENTO pode vir em várias versões (TIF de alta + JPG de preview + DNG da
+câmera + "JPG LIMPO" + "fotos para internet"), com o mesmo nome-base ou não
+(CAMP-FORMATOS: ver `agrupar`). O documento é lido UMA vez, a partir da versão
+mais leve legível, e a leitura vale para todas.
 
 Para ler, gera-se uma imagem de leitura (JPG reduzido) fora do acervo. O
 original nunca é aberto para escrita aqui.
@@ -40,29 +41,371 @@ def origem_formato(caminho: Path) -> str:
 LADO_LEITURA = 3000  # bruta: daqui saem a leitura (2000) e o preview (3000)
 
 
+# ------------------------------------------------------------- versões (CAMP-FORMATOS)
+# A MESMA prancha chega em várias pastas de formato/versão do projeto (F001, 29/10):
+# `TIFF/`, `DNG/`, `JPG/`, `JPG LIMPO/`, `fotos em alta/` × `fotos para internet/`,
+# muitas vezes com NOMES diferentes. Tudo isso é UM documento (um só D) com várias
+# versões; nada é descartado: cada versão vai para a pasta final e para o mapa_origem.
+#
+# Pasta de formato/versão: o nome normalizado (sem acento, minúsculas, sem o prefixo
+# numérico "01 - ") só tem palavras de formato/versão e de ligação, e ao menos uma de
+# formato/versão. Ex.: "TIFF", "02 - JPG", "JPG LIMPO", "limpo", "fotos em alta",
+# "fotos para internet", "alta resolução", "baixa", "web", "originais", "tratadas",
+# "matriz", "preview". "Fotografias", "Negativos", "Casa X" NÃO são (são material/projeto).
+PALAVRAS_FORMATO = {"tif", "tiff", "jpg", "jpeg", "dng", "pdf", "png", "raw", "nef"}
+PALAVRAS_VERSAO = {
+    "preview", "previews", "alta", "baixa", "resolucao", "res", "hd", "matriz", "master",
+    "limpo", "limpa", "limpos", "limpas", "internet", "web", "site", "original", "originais",
+    "tratada", "tratadas", "tratado", "tratados",
+}
+_LIGACAO = {"fotos", "foto", "imagens", "imagem", "arquivos", "em", "para", "de", "da", "do", "e", "versao", "versoes"}
+# Sufixo de NOME que marca versão ("prancha 01 limpo.jpg", "IMG_0001_web.jpg"): sai do radical.
+SUFIXOS_VERSAO = {"limpo", "limpa", "alta", "baixa", "internet", "web", "site", "final", "hd", "res",
+                  "tratada", "tratado", "original", "copia", "editada", "editado"}
+
+# Etiqueta canônica da versão (pela pasta): decide matriz, papel e leitura.
+_ETIQUETAS = (("limp", "limpo"), ("internet", "internet"), ("web", "internet"), ("site", "internet"),
+              ("baixa", "baixa"), ("alta", "alta"), ("hd", "alta"), ("matriz", "matriz"), ("master", "matriz"),
+              ("original", "original"), ("tratad", "tratada"), ("preview", "preview"))
+PUBLICACAO = {"internet", "baixa"}       # papel "publicacao": versão reduzida para a web
+# Matriz (a versão de arquivo do documento): TIFF > DNG > JPG LIMPO > JPG > outros; "alta" > "internet".
+_ORDEM_MATRIZ_EXT = {".tif": 0, ".tiff": 0, ".dng": 1, ".nef": 1, ".jpg": 2, ".jpeg": 2}  # o resto: 9
+_ORDEM_MATRIZ_ETIQUETA = {"matriz": 0, "limpo": 1, "": 2, "alta": 2, "original": 2, "tratada": 2,
+                          "preview": 3, "baixa": 4, "internet": 4}
+# Leitura (carimbo/prévia): a mais leve LEGÍVEL — JPG antes de TIFF (PREFERENCIA); entre
+# JPGs, o LIMPO (sem sujeira do scanner) primeiro e a reduzida "para internet" por último.
+_ORDEM_LEITURA_ETIQUETA = {"limpo": 0, "": 1, "alta": 1, "original": 1, "tratada": 1, "matriz": 1,
+                           "preview": 2, "baixa": 3, "internet": 3}
+# dHash da imagem BRUTA (antes de girar) nas 4 rotações: até 6 bits = mesma imagem.
+LIMITE_DHASH = 6
+TOLERANCIA_PROPORCAO = 0.06
+_DE_IMAGEM = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".dng", ".nef")
+
+
+def _tokens(nome: str) -> list[str]:
+    from .estrutura import normalizar
+
+    tokens = normalizar(nome).split()
+    while tokens and tokens[0].isdigit():   # "01 - JPG" -> "jpg"
+        tokens.pop(0)
+    return tokens
+
+
+def e_pasta_de_versao(nome: str) -> bool:
+    """Pasta de formato/versão da mesma prancha (ver PALAVRAS_FORMATO/PALAVRAS_VERSAO)."""
+    tokens = _tokens(nome)
+    if not tokens or not any(t in PALAVRAS_FORMATO or t in PALAVRAS_VERSAO for t in tokens):
+        return False
+    return all(t in PALAVRAS_FORMATO or t in PALAVRAS_VERSAO or t in _LIGACAO for t in tokens)
+
+
+def etiqueta(nome_pasta: str) -> str:
+    """'JPG LIMPO' -> 'limpo'; 'fotos para internet' -> 'internet'; 'TIFF'/'JPG' -> ''."""
+    for t in _tokens(nome_pasta):
+        for raiz, canonica in _ETIQUETAS:
+            if t.startswith(raiz):
+                return canonica
+    return ""
+
+
+def etiqueta_do_caminho(caminho: Path, raiz: Path | None = None) -> str:
+    """Etiqueta pelas pastas de versão do caminho (na entrada) ou pela pasta do arquivo (no acervo)."""
+    if raiz is not None:
+        try:
+            partes = caminho.parent.relative_to(raiz).parts
+        except ValueError:
+            partes = ()
+        for parte in reversed(partes):
+            if e_pasta_de_versao(parte) and etiqueta(parte):
+                return etiqueta(parte)
+        return ""
+    return etiqueta(caminho.parent.name)
+
+
+def pasta_de_versao(caminho: Path, raiz: Path) -> str:
+    """As pastas de formato/versão do caminho relativo à unidade ('' = nenhuma)."""
+    try:
+        partes = caminho.parent.relative_to(raiz).parts
+    except ValueError:
+        return ""
+    return "/".join(p for p in partes if e_pasta_de_versao(p))
+
+
+def radical(stem: str) -> str:
+    """Nome sem sufixos de versão nem zeros à esquerda: 'Prancha_01 LIMPO' -> 'prancha 1'."""
+    tokens = _tokens_nome(stem)
+    while len(tokens) > 1 and tokens[-1] in SUFIXOS_VERSAO:
+        tokens.pop()
+    return " ".join(str(int(t)) if t.isdigit() else t for t in tokens)
+
+
+def _tokens_nome(stem: str) -> list[str]:
+    from .estrutura import normalizar
+
+    return normalizar(stem).split()
+
+
+def formato_da_versao(caminho: Path, etiqueta_: str) -> str:
+    """'jpg limpo', 'jpg internet', 'tif', 'dng' (rótulo do contrato 2.8, campo `versoes[].formato`)."""
+    base = origem_formato(caminho)
+    return f"{base} {etiqueta_}".strip() if etiqueta_ and etiqueta_ != "matriz" else base
+
+
+def _rank_matriz(caminho: Path, etiqueta_: str) -> tuple:
+    ext = caminho.suffix.lower()
+    return (_ORDEM_MATRIZ_EXT.get(ext, 9),
+            _ORDEM_MATRIZ_ETIQUETA.get(etiqueta_, 2), str(caminho))
+
+
 @dataclass
 class Documento:
     """Um documento físico e todas as suas versões digitais."""
 
     base: str
     versoes: list[Path] = field(default_factory=list)
+    # Etiqueta de cada versão ("limpo", "internet", ...); sem entrada = pela pasta do arquivo.
+    etiquetas: dict = field(default_factory=dict)
+
+    def etiqueta_de(self, p: Path) -> str:
+        return self.etiquetas[p] if p in self.etiquetas else etiqueta_do_caminho(p)
 
     @property
     def para_ler(self) -> Path:
-        return sorted(self.versoes, key=lambda p: (PREFERENCIA.index(p.suffix.lower()), str(p)))[0]
+        def chave(p: Path):
+            et = self.etiqueta_de(p)
+            pasta_simples = p.parent.name.upper() == _pasta_formato(p.suffix)
+            return (PREFERENCIA.index(p.suffix.lower()), _ORDEM_LEITURA_ETIQUETA.get(et, 1),
+                    0 if pasta_simples else 1, str(p))
+        return sorted(self.versoes, key=chave)[0]
+
+    @property
+    def por_matriz(self) -> list[Path]:
+        """Versões da matriz para baixo (TIFF > DNG > JPG LIMPO > JPG > outros; alta > internet)."""
+        return sorted(self.versoes, key=lambda p: _rank_matriz(p, self.etiqueta_de(p)))
+
+    def papeis(self) -> dict:
+        """{versão: {"formato", "papel", "subpasta"}}. `subpasta` é a pasta de formato no acervo:
+        a melhor versão de cada extensão fica na pasta de sempre (TIF/, JPG/...); as outras em
+        "JPG LIMPO", "JPG INTERNET"... (ou "JPG V2" sem etiqueta), com o MESMO código."""
+        saida, usadas = {}, set()
+        for i, p in enumerate(self.por_matriz):
+            et = self.etiqueta_de(p)
+            fmt = _pasta_formato(p.suffix)
+            sub, ext = fmt, p.suffix.lower()
+            if (sub, ext) in usadas:
+                sub, n = (f"{fmt} {et.upper()}" if et else ""), 2
+                while not sub or (sub, ext) in usadas:
+                    sub, n = f"{fmt} V{n}", n + 1
+            usadas.add((sub, p.suffix.lower()))
+            papel = "matriz" if i == 0 else ("publicacao" if et in PUBLICACAO else "derivado")
+            saida[p] = {"formato": formato_da_versao(p, et), "papel": papel, "subpasta": sub}
+        return saida
 
 
-def agrupar(arquivos: list[Path], grupo=None) -> list[Documento]:
-    """Junta as versões pelo nome-base, mantendo a ordem da pasta original.
+def _pasta_formato(ext: str) -> str:
+    from .estrutura import pasta_formato
+
+    return pasta_formato(ext)
+
+
+def agrupar(arquivos: list[Path], grupo=None, raiz: Path | None = None, assinatura=None) -> list[Documento]:
+    """Junta as versões de cada documento, mantendo a ordem da pasta original.
+
+    1. mesmo nome-base (como sempre: `scan 001.tif` + `scan 001.jpg`);
+    2. com `raiz` (a unidade): entre pastas de formato/versão DIFERENTES, o mesmo radical
+       do nome ('Prancha 01.tif' + 'prancha_01_limpo.jpg'), só quando é inequívoco;
+    3. senão, a mesma IMAGEM: dHash da imagem bruta nas 4 rotações (≤ 6 bits) com
+       proporção parecida, par mútuo e inequívoco; a ordem na pasta só desempata.
+    Nunca junta dois arquivos da MESMA pasta de versão (são folhas diferentes).
 
     `grupo(arquivo)` separa universos: lote do Mac com várias séries tem `scan 001`
     em Negativos e `scan 001` em Slides — documentos diferentes, não versões.
+    `assinatura(arquivo)` -> (hashes das 4 rotações, proporção) ou None (testes trocam).
     """
     por_base: dict[str, Documento] = {}
     for arquivo in sorted(arquivos, key=lambda p: (grupo(p) if grupo else "", p.stem.lower(), str(p))):
         chave = (f"{grupo(arquivo)}|" if grupo else "") + arquivo.stem.lower()
         por_base.setdefault(chave, Documento(arquivo.stem)).versoes.append(arquivo)
-    return list(por_base.values())
+    documentos = list(por_base.values())
+    if raiz is None:
+        return documentos
+    for doc in documentos:
+        doc.etiquetas = {v: etiqueta_do_caminho(v, raiz) for v in doc.versoes}
+    universo = (lambda d: grupo(d.versoes[0])) if grupo else (lambda d: "")
+    _pastas: dict[int, frozenset] = {}
+
+    def pastas(d: Documento) -> frozenset:
+        if id(d) not in _pastas:
+            _pastas[id(d)] = frozenset(pasta_de_versao(v, raiz) for v in d.versoes)
+        return _pastas[id(d)]
+
+    if len({p for d in documentos for p in pastas(d)}) < 2:
+        return documentos   # sem pastas de versão: nada muda
+
+    def juntar(a: Documento, b: Documento) -> None:
+        a.versoes += b.versoes
+        a.etiquetas.update(b.etiquetas)
+        documentos.remove(b)
+        _pastas.pop(id(a), None)
+
+    # 2. radical do nome, entre pastas de versão diferentes
+    por_radical: dict[tuple, list[Documento]] = {}
+    for doc in documentos:
+        r = radical(doc.base)
+        if r:
+            por_radical.setdefault((universo(doc), r), []).append(doc)
+    for docs in por_radical.values():
+        if len(docs) < 2:
+            continue
+        vistas: set[str] = set()
+        disjuntas = True
+        for d in docs:
+            ps = pastas(d)
+            if ps & vistas:
+                disjuntas = False
+                break
+            vistas |= ps
+        if disjuntas:
+            for d in docs[1:]:
+                juntar(docs[0], d)
+
+    # 3. mesma imagem (dHash bruto nas 4 rotações). Para cada documento e cada OUTRA pasta de
+    # versão, o candidato mais parecido dessa pasta (único; a ordem na pasta só desempata o que a
+    # imagem já indicou). Só vale par MÚTUO, e a junção nunca põe duas folhas da mesma pasta juntas.
+    assinatura = assinatura or assinatura_da_imagem
+    todas = sorted({p for d in documentos for p in pastas(d)})
+    ordem: dict[tuple, int] = {}
+    for pasta in todas:
+        nela = sorted((d for d in documentos if pasta in pastas(d)),
+                      key=lambda d: min(str(v) for v in d.versoes if pasta_de_versao(v, raiz) == pasta))
+        for i, d in enumerate(nela):
+            ordem[(id(d), pasta)] = i
+    cache: dict[int, object] = {}
+
+    def assin(d: Documento):
+        if id(d) not in cache:
+            leve = Documento(d.base, d.versoes, d.etiquetas).para_ler
+            cache[id(d)] = assinatura(leve) if leve.suffix.lower() in _DE_IMAGEM else None
+        return cache[id(d)]
+
+    distancias: dict[tuple, int] = {}
+
+    def distancia(a: Documento, b: Documento) -> int:
+        chave = (id(a), id(b)) if id(a) < id(b) else (id(b), id(a))
+        if chave not in distancias:
+            sa, sb = assin(a), assin(b)
+            melhor = 99
+            if sa and sb:
+                (hashes_a, prop_a), (hashes_b, prop_b) = sa, sb
+                for giro, h in hashes_a.items():
+                    prop = prop_a if giro in (0, 180) else (1 / prop_a if prop_a else 0)
+                    if abs(prop - prop_b) <= TOLERANCIA_PROPORCAO * max(prop, prop_b, 1e-6):
+                        melhor = min(melhor, bin(h ^ hashes_b[0]).count("1"))
+            distancias[chave] = melhor
+        return distancias[chave]
+
+    def melhor_em(a: Documento, pasta: str) -> Documento | None:
+        pares = [(distancia(a, b), b) for b in documentos
+                 if b is not a and pasta in pastas(b) and not (pastas(a) & pastas(b))
+                 and universo(a) == universo(b)]
+        pares = [(x, b) for x, b in pares if x <= LIMITE_DHASH]
+        if not pares:
+            return None
+        minimo = min(x for x, _b in pares)
+        empatados = [b for x, b in pares if x == minimo]
+        if len(empatados) > 1:
+            meus = {ordem.get((id(a), p)) for p in pastas(a)}
+            empatados = [b for b in empatados if ordem.get((id(b), pasta)) in meus]
+        return empatados[0] if len(empatados) == 1 else None
+
+    sozinhos = [d for d in documentos if len(pastas(d)) == 1]
+    arestas = []
+    if sozinhos:   # todo documento já casado pelo nome em todas as pastas: nenhuma imagem é aberta
+        escolha = {}
+        for a in documentos:
+            for pasta in todas:
+                if pasta not in pastas(a):
+                    escolha[(id(a), pasta)] = melhor_em(a, pasta)
+        for a in documentos:
+            for pasta in todas:
+                b = escolha.get((id(a), pasta))
+                if b is not None and id(a) < id(b) and any(escolha.get((id(b), p)) is a for p in pastas(a)):
+                    arestas.append((distancia(a, b), a, b))
+    # junta (union-find) da mais parecida para a menos, sem nunca juntar duas folhas da mesma pasta
+    dono: dict[int, Documento] = {id(d): d for d in documentos}
+
+    def raiz_de(d: Documento) -> Documento:
+        while dono[id(d)] is not d:
+            d = dono[id(d)]
+        return d
+
+    for _x, a, b in sorted(arestas, key=lambda t: (t[0], str(t[1].versoes[0]), str(t[2].versoes[0]))):
+        ra, rb = raiz_de(a), raiz_de(b)
+        if ra is rb or (pastas(ra) & pastas(rb)):
+            continue
+        base, outro = (ra, rb) if _rank_matriz(ra.por_matriz[0], ra.etiqueta_de(ra.por_matriz[0])) <= \
+            _rank_matriz(rb.por_matriz[0], rb.etiqueta_de(rb.por_matriz[0])) else (rb, ra)
+        juntar(base, outro)
+        dono[id(outro)] = base
+    return documentos
+
+
+def _hashes_4(img: Image.Image) -> dict[int, int]:
+    from .preparo import dhash
+
+    base = img.convert("L")
+    return {g: int(dhash(base.rotate(-g, expand=True) if g else base), 16) for g in (0, 90, 180, 270)}
+
+
+def assinatura_da_imagem(caminho: Path):
+    """(dHash das 4 rotações da imagem BRUTA, largura/altura) — None se não abre ou não tem informação
+    (folha lisa dá dHash ~0 e casaria com tudo)."""
+    try:
+        img = _abrir_leve(caminho)
+    except (OSError, ValueError, SyntaxError):
+        return None
+    if img is None:
+        return None
+    hashes = _hashes_4(img)
+    bits = bin(hashes[0]).count("1")
+    if bits < 4 or bits > 60:
+        return None
+    return hashes, img.width / max(1, img.height)
+
+
+def _abrir_leve(caminho: Path) -> Image.Image | None:
+    if caminho.suffix.lower() in (".dng", ".nef"):
+        img = _dng(caminho)
+    else:
+        img = Image.open(caminho)
+        img.draft("RGB", (512, 512))
+        img.load()
+    if img is None:
+        return None
+    try:
+        from PIL import ImageOps
+
+        img = ImageOps.exif_transpose(img) or img
+    except (OSError, ValueError, KeyError):
+        pass
+    img = para_rgb(img) if img.mode not in ("RGB", "L") else img
+    img.thumbnail((512, 512))
+    return img
+
+
+def giro_relativo(versao: Path, referencia: Path) -> int | None:
+    """Quanto girar (graus, horário, como preparo.transformar) a `versao` para ficar como a
+    `referencia`. None = não deu para saber (a versão não é girada à toa)."""
+    a, b = assinatura_da_imagem(versao), assinatura_da_imagem(referencia)
+    if not a or not b:
+        return None
+    (ha, _pa), (hb, _pb) = a, b
+    dist = {g: bin(h ^ hb[0]).count("1") for g, h in ha.items()}
+    melhor = min(dist.values())
+    if melhor > LIMITE_DHASH:
+        return None
+    giros = [g for g, d in dist.items() if d == melhor]
+    return 0 if 0 in giros else (giros[0] if len(giros) == 1 else None)
 
 
 def suportado(caminho: Path) -> bool:

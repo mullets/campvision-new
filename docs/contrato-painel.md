@@ -1,8 +1,8 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-**Contrato 2.7 — 03/11/2026** (UX-60: resposta quebrada do modelo é consertada, tentada de novo e contada; ver §21. Diário de eventos: §20. UX-08 exiftool: §19. Integração com as estações: §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
+**Contrato 2.8 — 04/11/2026** (CAMP-FORMATOS: a mesma prancha em vários formatos/versões é UM documento, com `versoes[]`; ver §22. UX-60 resposta quebrada: §21. Diário de eventos: §20. UX-08 exiftool: §19. Integração com as estações: §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
 
-- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.7"`.
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.8"`.
 - Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
   - Para regenerar: `python -m tests.contrato_exemplos`.
 - Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
@@ -573,3 +573,55 @@ Caso real: F001-P0033-1979-S01-D00001 com 15 campos "valor descartado: resposta 
   - `folhas_resposta_quebrada`: folhas que ficaram com campo sem leitura mesmo assim;
   - `campos_descartados`: soma dos campos perdidos.
   - Para "Qualidade do CAMP Vision": some por versão/lote, como `custo_usd`.
+
+
+## 22. Contrato 2.8 — formatos e versões da mesma prancha viram um documento só (CAMP-FORMATOS, 04/11/2026)
+
+Caso real: F001 (Arnaldo Martino), 648 folhas em 29/10. A mesma prancha vinha em `TIFF/`, `DNG/`, `JPG/`,
+`JPG LIMPO/` (e fotos em `fotos em alta/` × `fotos para internet/`), muitas vezes com **nomes diferentes**.
+O CV2 fazia uma folha por arquivo: 2–3 folhas iguais por prancha.
+
+**Opcional:** campo novo; o painel antigo ignora e continua lendo `arquivos[]`.
+
+- **Um lote por projeto.** Pasta de formato/versão = nome (sem acento, minúsculas, sem o prefixo `01 - `)
+  só com palavras de formato (`tif`, `tiff`, `jpg`, `jpeg`, `dng`, `nef`, `pdf`, `png`, `raw`), de versão
+  (`limpo`, `alta`, `baixa`, `resolucao`, `internet`, `web`, `site`, `originais`, `tratadas`, `matriz`,
+  `master`, `preview`, `hd`) e de ligação (`fotos`, `em`, `para`, `de`…), com ao menos uma de formato/versão.
+  Ex.: `JPG LIMPO`, `fotos em alta`, `fotos para internet`, `alta resolução`, `02 - TIFF`. Não são:
+  `03 - Fotografias`, `Negativos`, `Casa X`, as subpastas do Mac (`03 - Preview (JPG)`, regra própria).
+- **Mesma prancha = um D.** Dentro do lote, arquivos de pastas de versão **diferentes** viram o mesmo documento por:
+  1. mesmo nome-base (como antes);
+  2. mesmo radical do nome (sem acento/caixa/zeros à esquerda e sem sufixos `limpo`, `alta`, `internet`,
+     `web`, `final`…), só se inequívoco;
+  3. senão, a mesma imagem: dHash da imagem **bruta** (antes de girar) nas 4 rotações, até 6 bits, com
+     proporção parecida, par mútuo; a ordem na pasta só desempata quando a imagem já indicou o par.
+  Dois arquivos da **mesma** pasta nunca se juntam (continuam folhas; repetição vira `duplicata_de`).
+- **Matriz:** TIFF > DNG > JPG LIMPO > JPG > outros; entre iguais, `alta` > `internet`.
+  **Leitura do carimbo e prévia:** a versão mais leve legível — JPG antes de TIFF; entre JPGs, o LIMPO
+  primeiro e o "para internet" por último (o TIFF é a matriz, não a leitura).
+- **No acervo:** todas as versões são copiadas (nada se perde), com o **mesmo código**. A melhor versão de
+  cada extensão fica na pasta de sempre (`TIF/`, `DNG/`, `JPG/` — o JPG LIMPO, se houver, fica em `JPG/`);
+  as outras ao lado: `JPG INTERNET/`, `JPG ALTA/`… ou `JPG V2/` (sem etiqueta). A versão JPG girada em
+  relação à lida é girada junto (giro relativo pelo dHash; sem certeza, fica como veio).
+- **`catalogacao/mapa_origem.json`** (por SHA-256): campos novos `formato` e `papel` (abaixo). Um
+  `--refazer-lote` (ou o mesmo lote de novo com uma versão a mais) reconhece a versão registrada e **nunca
+  cria D novo**: a versão que chegou depois entra no D que já está no acervo.
+- **`pacote_tainacan.json`, por documento:** `versoes` — matriz primeiro:
+  ```json
+  "versoes": [
+    {"arquivo": ".../01 - Desenhos e pranchas/TIF/F001-P0033-1979-S01-D00001.tif", "formato": "tif", "papel": "matriz"},
+    {"arquivo": ".../01 - Desenhos e pranchas/DNG/F001-P0033-1979-S01-D00001.dng", "formato": "dng", "papel": "derivado"},
+    {"arquivo": ".../01 - Desenhos e pranchas/JPG/F001-P0033-1979-S01-D00001.jpg", "formato": "jpg limpo", "papel": "derivado"},
+    {"arquivo": ".../01 - Desenhos e pranchas/JPG INTERNET/F001-P0033-1979-S01-D00001.jpg", "formato": "jpg internet", "papel": "publicacao"}
+  ]
+  ```
+  - `formato`: extensão (`tif`, `dng`, `jpg`, `pdf`…) + etiqueta da pasta de versão (`limpo`, `alta`,
+    `internet`, `baixa`, `original`, `tratada`, `preview`) quando houver.
+  - `papel`: `matriz` (uma por documento) | `derivado` | `publicacao` (versão reduzida "para internet"/"baixa").
+  - Os mesmos caminhos continuam em `arquivos[]`.
+- **Ordem de deploy:** o CV2 2.8 pode subir antes do painel. Painel antigo: ignora `versoes`, lê `arquivos[]`
+  e mostra **uma** folha por prancha (com vários arquivos) — antes eram várias folhas. Painel novo: usa a
+  `matriz` para o Tainacan/arquivo e a `publicacao` (ou o JPG) para o site; mostra as versões na folha.
+- **Projetos já recebidos** (F001-P0001, P0007, P0008, P0010, P0012–P0015, P0024, P0026–P0033) continuam
+  com as folhas repetidas: juntar o que já está no acervo é operação à parte (mesclar no painel, em modo
+  simular), não é feita por esta versão.

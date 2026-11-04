@@ -104,7 +104,8 @@ def transferir(raiz_final: Path, pasta_estado: Path, origem: Path, destino: Path
         novo = trocas.get(arquivo.stem)
         if not novo:
             continue
-        alvo = estrutura.destino_documento(destino, novo.split("-")[3], novo, arquivo.suffix)
+        alvo = estrutura.destino_documento(destino, novo.split("-")[3], novo, arquivo.suffix,
+                                           estrutura.subpasta_de_versao(arquivo))
         if alvo.exists():
             # Só apaga a cópia provisória se o SHA-256 PROVA que o destino tem os mesmos bytes
             # (ou o mapa do destino registra este mesmo conteúdo ali): tamanho igual não basta.
