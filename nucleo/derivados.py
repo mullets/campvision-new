@@ -87,6 +87,29 @@ def orientar_jpg(jpg: Path, prep: dict) -> bool:
     return True
 
 
+def giro_da_versao(prep: dict, jpg: Path) -> int | None:
+    """Giro da versão `jpg` em relação à versão LIDA do documento (CAMP-FORMATOS).
+
+    `prep["giro_versoes"]` = {subpasta: graus | None}, só para as OUTRAS versões JPG
+    ("JPG LIMPO", "JPG V2"...): o JPG girado 90° em relação ao lido gira 90° a mais.
+    None = não deu para saber: essa versão não é girada (melhor que girar errado)."""
+    giros = (prep or {}).get("giro_versoes") or {}
+    return giros.get(jpg.parent.name) if jpg.parent.name in giros else 0
+
+
+def orientar_versao(jpg: Path, prep: dict) -> bool:
+    """`orientar_jpg` para qualquer versão JPG do documento (a lida ou outra)."""
+    giro = giro_da_versao(prep, jpg)
+    if giro is None or not prep:
+        return False
+    if giro:
+        if prep.get("incerta") or prep.get("espelhada"):
+            return False   # sem certeza (ou com espelho) não compõe giros: fica como veio
+        efetivo = dict(prep, rotacao=(int(prep.get("rotacao") or 0) + giro) % 360)
+        return orientar_jpg(jpg, efetivo)
+    return orientar_jpg(jpg, prep)
+
+
 def _sem_tag_de_orientacao(jpg: Path) -> bool:
     from PIL import Image
 
@@ -105,12 +128,17 @@ def orientar_jpgs_do_projeto(pasta: Path, raiz_final: Path, livro=None) -> list[
     except (OSError, ValueError):
         return []
     girados = []
+    # Todas as versões JPG do documento (JPG/, JPG LIMPO/...) giram com o preparo de ANTES:
+    # marcar "jpg_orientado" na primeira não pode deixar as outras como vieram.
+    antes = {c: dict(p) for c, p in preparos.items() if isinstance(p, dict)}
     for jpg in sorted(pasta.rglob("*.jp*g")):
         if "catalogacao" in jpg.relative_to(pasta).parts:
             continue
         prep = preparos.get(jpg.stem)
-        if prep and orientar_jpg(jpg, prep):
+        if prep and orientar_versao(jpg, antes.get(jpg.stem, prep)):
             prep["jpg_orientado"] = True
+            if jpg.stem in girados:
+                continue
             girados.append(jpg.stem)
             if livro is not None:
                 rel = str(jpg.relative_to(raiz_final)) if jpg.is_relative_to(raiz_final) else str(jpg)
@@ -224,7 +252,7 @@ def orientar_pela_foto(prep: dict, foto: dict | None, jpgs: list[Path], imagens_
     girou = False
     for jpg in jpgs:
         if jpg.suffix.lower() in (".jpg", ".jpeg") and jpg.exists():
-            girou = orientar_jpg(jpg, dict(prep, jpg_orientado=False)) or girou
+            girou = orientar_versao(jpg, dict(prep, jpg_orientado=False)) or girou
     if girou:
         prep["jpg_orientado"] = True
     return True

@@ -54,10 +54,20 @@ def pasta_formato(extensao: str) -> str:
     return FORMATOS_PASTA.get(ext, ext.lstrip(".").upper() or "OUTROS")
 
 
-def destino_documento(pasta_projeto: Path, serie: str, codigo: str, extensao: str) -> Path:
-    """<projeto>/<série>/<FORMATO>/<código><ext>."""
+def destino_documento(pasta_projeto: Path, serie: str, codigo: str, extensao: str,
+                      subpasta: str | None = None) -> Path:
+    """<projeto>/<série>/<FORMATO>/<código><ext>.
+
+    `subpasta`: outra versão do MESMO documento com a mesma extensão (CAMP-FORMATOS):
+    "JPG LIMPO", "JPG INTERNET", "JPG V2" — mesmo código, pasta ao lado de JPG/."""
     ext = extensao.lower()
-    return pasta_projeto / SERIES.get(serie, SERIES["S99"]) / pasta_formato(ext) / f"{codigo}{ext}"
+    return pasta_projeto / SERIES.get(serie, SERIES["S99"]) / (subpasta or pasta_formato(ext)) / f"{codigo}{ext}"
+
+
+def subpasta_de_versao(arquivo: Path) -> str | None:
+    """"JPG LIMPO" se o arquivo está numa pasta de versão do acervo; None na pasta de sempre (JPG/)."""
+    nome, fmt = arquivo.parent.name, pasta_formato(arquivo.suffix)
+    return nome if nome.upper().startswith(fmt + " ") else None
 
 
 PASTAS_DO_FUNDO = (

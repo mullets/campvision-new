@@ -66,7 +66,8 @@ def renomear(pasta_projeto: Path, raiz_final: Path, pasta_estado: Path,
         if not novo:
             continue
         serie = novo.split("-")[3]
-        destino = estrutura.destino_documento(pasta_projeto, serie, novo, arquivo.suffix)
+        destino = estrutura.destino_documento(pasta_projeto, serie, novo, arquivo.suffix,
+                                              estrutura.subpasta_de_versao(arquivo))
         if destino.exists():
             raise FileExistsError(f"{destino.name} já existe — renomeação abortada")
         destino.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +141,8 @@ def organizar_formatos(raiz_final: Path, pasta_estado: Path, livro=None) -> int:
                 achado = estrutura.CODIGO_DOCUMENTO.match(arquivo.stem)
                 if not achado:
                     continue
-                destino = estrutura.destino_documento(pasta, achado.group(4).upper(), arquivo.stem, arquivo.suffix)
+                destino = estrutura.destino_documento(pasta, achado.group(4).upper(), arquivo.stem, arquivo.suffix,
+                                                      estrutura.subpasta_de_versao(arquivo))
                 if destino == arquivo or destino.exists():
                     continue
                 destino.parent.mkdir(parents=True, exist_ok=True)

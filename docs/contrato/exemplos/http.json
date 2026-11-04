@@ -24,7 +24,7 @@
    "entrada": true,
    "acervo": true
   },
-  "contrato": "2.7",
+  "contrato": "2.8",
   "quarentena": {
    "arquivos": 2,
    "gb": 0.0,
@@ -79,7 +79,7 @@
    "codigo": "F026-P0001",
    "pasta": "F026 - SBU Sami Bussab/01 - Projetos/F026-P0001 - Edifício Tarumã",
    "status": "pronto",
-   "em": "2026-11-03T20:51:21"
+   "em": "2026-11-04T15:14:22"
   }
  },
  "iniciado": {

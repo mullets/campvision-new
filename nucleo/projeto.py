@@ -281,6 +281,35 @@ def capa_sugerida(leituras: dict) -> str:
     return candidatos[0] if candidatos else ""
 
 
+def versoes_do_mapa(mapa: dict) -> dict[str, list[dict]]:
+    """{código: [{arquivo, formato, papel}]} — matriz primeiro (contrato 2.8).
+
+    `formato`/`papel` vêm do mapa_origem (gravados na cópia desde o 2.8); mapa antigo sem eles:
+    calculados pela mesma regra (formatos.Documento.papeis: TIFF > DNG > JPG LIMPO > JPG;
+    "para internet" = publicacao). JPG gerado pelo CV2 (`gerado_de`) é sempre derivado."""
+    from . import formatos
+
+    por_codigo: dict[str, dict[Path, dict]] = {}
+    for item in mapa.values():
+        if isinstance(item, dict) and item.get("destino"):
+            destino = Path(item["destino"])
+            por_codigo.setdefault(destino.stem, {})[destino] = item
+    saida: dict[str, list[dict]] = {}
+    for codigo, itens in por_codigo.items():
+        doc = formatos.Documento(codigo, list(itens))
+        calculado = doc.papeis()
+        lista = []
+        for destino in doc.por_matriz:
+            item = itens[destino]
+            papel = item.get("papel") or ("derivado" if item.get("gerado_de") else calculado[destino]["papel"])
+            lista.append({"arquivo": str(destino), "formato": item.get("formato") or calculado[destino]["formato"],
+                          "papel": papel})
+        if lista and not any(v["papel"] == "matriz" for v in lista):
+            lista[0]["papel"] = "matriz"
+        saida[codigo] = sorted(lista, key=lambda v: v["papel"] != "matriz")
+    return saida
+
+
 def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: dict,
            catalogacao: Path, info: dict | None = None, nome_pasta: str = "",
            execucao: dict | None = None) -> dict:
@@ -297,6 +326,7 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
         origem_por_codigo.setdefault(stem, []).append(
             {"arquivo_origem": item.get("origem", ""), "nome_original": item.get("nome_original", ""),
              "origem_formato": item.get("origem_formato", "")})
+    versoes_por_codigo = versoes_do_mapa(mapa)
     fotografo = str((info or {}).get("fotografo") or (info or {}).get("credito_fotografia") or "")
 
     documentos, retirados, avisos = [], [], []
@@ -349,6 +379,9 @@ def pacote(codigo: str, nome: str, ctx, leituras: dict, preparos: dict, mapa: di
             "credito": ctx.fundo.credito,
             "preview": preparos.get(doc, {}).get("preview", ""),
             "arquivos": sorted(arquivos_por_codigo.get(doc, [])),
+            # contrato 2.8 (CAMP-FORMATOS): as versões do MESMO documento (TIFF, DNG, JPG, JPG LIMPO,
+            # "para internet"), matriz primeiro. Opcional: painel antigo ignora e segue em `arquivos`.
+            "versoes": versoes_por_codigo.get(doc, []),
             "arquivo": (preparos.get(doc, {}).get("preview", "") or ""),
             "arquivo_origem": origem_por_codigo.get(doc, []),
             "origem_formato": l.origem_formato,
