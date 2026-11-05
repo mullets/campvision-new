@@ -1168,15 +1168,50 @@ class Recebedor:
         self.raiz_final = Path(config.raiz_final)
         self.tabela = mod_fundos.com_parametros(
             tabela or mod_fundos.carregar(pasta_estado, painel if painel.ligado else None), self.raiz_final)
+        self._tabela_em = time.monotonic()
+
+    # ------------------------------------------------------------ tabela de fundos
+    # 05/11 (F033 Renato Viégas): a tabela só era lida quando o serviço subia; fundo cadastrado depois no painel dava
+    # "fundo 'F033' não está na tabela de autoridade" até alguém reiniciar o CV2. Agora relê do painel de tempos em tempos.
+    MINUTOS_TABELA = 10
+
+    def atualizar_tabela(self, forcar: bool = False) -> bool:
+        """Relê a tabela do painel (no máximo a cada MINUTOS_TABELA, ou já, com forcar). Só troca se o PAINEL respondeu:
+        cache/embutida nunca substituem a tabela que está em uso. Devolve True se trocou."""
+        if not getattr(self.painel, "ligado", False):
+            return False
+        if time.monotonic() - self._tabela_em < (60 if forcar else self.MINUTOS_TABELA * 60):
+            return False                             # mesmo "já" pergunta no máximo uma vez por minuto
+        self._tabela_em = time.monotonic()
+        nova = mod_fundos.carregar(self.pasta_estado, self.painel)
+        if nova.origem != "painel":
+            return False
+        antes = set(self.tabela.por_codigo)
+        self.tabela = mod_fundos.com_parametros(nova, self.raiz_final)
+        novos = sorted(set(self.tabela.por_codigo) - antes)
+        if novos:
+            _log.info("Tabela de fundos relida do painel: novos %s", ", ".join(novos))
+        return True
+
+    def _fundo_agora_conhecido(self, ultimo: dict) -> bool:
+        """Lote que parou SÓ porque o fundo não estava na tabela, e agora está: tenta de novo (a pasta não mudou)."""
+        if ultimo.get("status") != ERRO:
+            return False
+        m = re.fullmatch(r"fundo '([^']+)' não está na tabela de autoridade e a pasta não traz código F000", str(ultimo.get("motivo") or ""))
+        return bool(m and self.tabela.identificar(m.group(1)))
 
     # ------------------------------------------------------------ fila
     def pendentes(self) -> list[Unidade]:
         feitos = self.estado.ultimos()
+        if any(u.get("status") == ERRO and "tabela de autoridade" in str(u.get("motivo") or "") for u in feitos.values()):
+            self.atualizar_tabela(forcar=True)       # há lote parado por fundo desconhecido: pergunta ao painel já
+        else:
+            self.atualizar_tabela()
         fila = []
         for unidade in descobrir(self.raiz_entrada):
             ultimo = feitos.get(unidade.chave, {})
             if (ultimo.get("status") in (PRONTO, ERRO, DESCARTADO) and ultimo.get("motivo") != CANCELADO
-                    and ultimo.get("assinatura") == unidade.assinatura()):
+                    and ultimo.get("assinatura") == unidade.assinatura() and not self._fundo_agora_conhecido(ultimo)):
                 continue  # nada mudou desde a última vez
             fila.append(unidade)
         return fila
