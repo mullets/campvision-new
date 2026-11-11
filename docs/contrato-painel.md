@@ -1,8 +1,8 @@
 # Contrato CAMP Vision 2 ↔ Painel de administração
 
-**Contrato 2.8 — 04/11/2026** (CAMP-FORMATOS: a mesma prancha em vários formatos/versões é UM documento, com `versoes[]`; ver §22. UX-60 resposta quebrada: §21. Diário de eventos: §20. UX-08 exiftool: §19. Integração com as estações: §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
+**Contrato 2.9 — 11/11/2026** (destino do painel: o CV2 diz que NÃO moveu e aceita a escolha de uma pessoa; ver §23. CAMP-FORMATOS: a mesma prancha em vários formatos/versões é UM documento, com `versoes[]`; ver §22. UX-60 resposta quebrada: §21. Diário de eventos: §20. UX-08 exiftool: §19. Integração com as estações: §18). Este arquivo é a **fonte única** do contrato. O painel só lê este arquivo e não edita o repositório do CV2; o `docs/campvision.md` do camp-painel aponta para cá.
 
-- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.8"`.
+- Versão do contrato no código: `CONTRATO` em `nucleo/config.py`. O heartbeat leva `"contrato": "2.9"`.
 - Exemplos **reais**, gerados pelo CV2, ficam em `docs/contrato/exemplos/`: `pacote_tainacan.json`, `erros.json`, `propostas.json`, `decisoes.json`, `relatorio.txt`, `orientacao.txt`, `status.json`, `info_projeto.json`, e `http.json` com os corpos de heartbeat, reservar, aviso, iniciado e concluido.
   - Para regenerar: `python -m tests.contrato_exemplos`.
 - Regra: o teste `TestContrato` compara chaves e tipos do que o CV2 grava hoje com esses exemplos. **Mudou um campo, sobe `CONTRATO` e regenera os exemplos no mesmo commit.**
@@ -625,3 +625,22 @@ O CV2 fazia uma folha por arquivo: 2–3 folhas iguais por prancha.
 - **Projetos já recebidos** (F001-P0001, P0007, P0008, P0010, P0012–P0015, P0024, P0026–P0033) continuam
   com as folhas repetidas: juntar o que já está no acervo é operação à parte (mesclar no painel, em modo
   simular), não é feita por esta versão.
+
+## 23. Contrato 2.9 — destino do painel: recusa explicada e escolha da pessoa (11/11/2026)
+
+Caso real: F010-P0174 "Concurso Público/Votorantim". O painel mandou a pasta para F010-P0731 (projeto que ele criou, UX-43);
+o carimbo "PAÇO MUNICIPAL / CENTRO CÍVICO - VOTORANTIM" combina com F010-P0201 e F010-P0731, e o CV2, com razão, não moveu.
+O painel não sabia da recusa e o lote ficou "movendo" para sempre. Campos novos, todos **opcionais**:
+
+- **`status.json` (`pronto`) da pasta — `destino_painel`** (CV2 escreve quando NÃO move a pasta de um item de
+  `GET /api/campvision/destinos`): `{"id": 3, "para": "F010-P0731", "resultado": "nao_aplicado", "motivo": "5 folha(s) “…”: precisam de uma
+  pessoa (F010-P0201 × F010-P0731)", "candidatos": ["F010-P0201", "F010-P0731"], "em": "2026-11-11T15:30:00"}`. `candidatos` = os projetos
+  que o carimbo das folhas cita (sem o próprio projeto da pasta). O `motivo` "UX-43: o CAMP Vision não reorganizou para …" continua igual
+  (painel antigo). Quando o CV2 aplica, o campo sai junto com o motivo.
+- **Item de `/api/campvision/destinos` com `"pessoa": true, "escolhido_em": "…"`** (painel; contrato único 1.10): uma pessoa escolheu
+  o destino. O CV2 manda para `para` os grupos que ficariam "para uma pessoa decidir" quando `para` está entre os candidatos deles; o que o
+  carimbo manda com certeza para OUTRO código continua barrando (a pessoa não passa por cima do carimbo). `escolhido_em` entra na assinatura
+  do item: escolha nova = tenta de novo, mesmo depois de uma recusa.
+- **Ordem de deploy:** qualquer uma. Painel antigo ignora `destino_painel`; CV2 antigo ignora `pessoa`/`escolhido_em` (só não tenta de novo
+  um item que já recusou; a pessoa usa o `comando` como antes).
+
