@@ -17,7 +17,7 @@ from typing import Any
 # atualizações do código.
 VERSAO_BUILD = "2026-10-27-02"
 # Versão do contrato com o painel (docs/contrato-painel.md). Mudou o formato = muda aqui.
-CONTRATO = "2.8"
+CONTRATO = "2.9"
 
 _log = logging.getLogger("cv2.config")
 

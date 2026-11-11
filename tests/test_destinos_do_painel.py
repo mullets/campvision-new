@@ -157,6 +157,42 @@ class TestDestinosDoPainel(Base):
         self.assertEqual(self.vigia(painel).uma_rodada(), 1)
         self.assertEqual(len(self.folhas("F026-P0092")), 3)
 
+    # ------------------------------------------------------------ 11/11: a pessoa escolhe (F010-P0174 Votorantim)
+    def test_carimbo_em_duvida_recusa_e_diz_ao_painel_os_projetos_possiveis(self):
+        # o carimbo "Clube Sírio" combina com F026-P0003 e F026-P0004: o CAMP Vision não escolhe sozinho
+        self.carimbos(*[{"projeto": "Clube Sírio"}] * 3)
+        painel = PainelDestinos(BASE, [self.item(para="F026-P0004")])
+        with mock.patch("nucleo.reidentificar.aplicar") as apl:
+            self.assertEqual(self.vigia(painel).uma_rodada(), 0)
+            apl.assert_not_called()
+        status = json.loads((self.pasta / "status.json").read_text())
+        dp = status.get("destino_painel") or {}
+        self.assertEqual((dp.get("id"), dp.get("para"), dp.get("resultado")), (3, "F026-P0004", "nao_aplicado"))
+        self.assertEqual(sorted(dp.get("candidatos") or []), ["F026-P0003", "F026-P0004"])     # o painel mostra os dois para a pessoa
+        self.assertIn("precisam de uma pessoa", dp.get("motivo", ""))
+        self.assertIn("não reorganizou para F026-P0004", status["motivo"])                     # o campo antigo continua (painel antigo)
+
+    def test_pessoa_escolheu_um_dos_candidatos_aplica(self):
+        self.carimbos(*[{"projeto": "Clube Sírio"}] * 3)
+        painel = PainelDestinos(BASE, [self.item(para="F026-P0004")])
+        self.assertEqual(self.vigia(painel).uma_rodada(), 0)                                     # sem a pessoa: recusa
+        # a pessoa escolhe F026-P0004 no painel: o mesmo item volta com pessoa=true e escolhido_em → tenta de novo e aplica
+        painel.lista = [self.item(para="F026-P0004", pessoa=True, escolhido_em="2026-11-11 15:20:00")]
+        self.assertEqual(self.vigia(painel).uma_rodada(), 1)
+        self.assertEqual(self.folhas(self.de), [])
+        self.assertEqual(len(self.folhas("F026-P0004")), 3)
+        self.assertEqual(self.folhas("F026-P0003"), [])
+
+    def test_pessoa_nao_passa_por_cima_de_carimbo_que_aponta_outro_projeto(self):
+        # o carimbo diz Jockey Club (F026-P0092) com certeza: a escolha da pessoa por Marambaia não basta
+        self.carimbos(*[{"projeto": "Jockey Club de São Paulo"}] * 3)
+        painel = PainelDestinos(BASE, [self.item(pessoa=True, escolhido_em="2026-11-11 15:20:00")])
+        with mock.patch("nucleo.reidentificar.aplicar") as apl:
+            self.assertEqual(self.vigia(painel).uma_rodada(), 0)
+            apl.assert_not_called()
+        self.assertEqual(len(self.folhas(self.de)), 3)
+        self.assertEqual((json.loads((self.pasta / "status.json").read_text()).get("destino_painel") or {}).get("candidatos"), ["F026-P0092"])
+
     def test_plano_parcial_nao_aplica(self):
         # duas folhas do Marambaia e uma do Jockey: levar só parte da pasta não é o que o painel pediu
         self.carimbos(MARAMBAIA, MARAMBAIA, {"projeto": "Jockey Club de São Paulo"})

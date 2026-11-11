@@ -42,7 +42,11 @@ _CODIGO = re.compile(r"^F\d{3}-P\d{4}$")
 
 
 class Recusa(Exception):
-    """O plano não bate / o pedido não serve: não aplica e lembra o item."""
+    """O plano não bate / o pedido não serve: não aplica e lembra o item. `candidatos`: os projetos que o carimbo cita (para o painel)."""
+
+    def __init__(self, msg: str, candidatos: list[str] | None = None):
+        super().__init__(msg)
+        self.candidatos = candidatos or []
 
 
 class Transitorio(Exception):
@@ -50,7 +54,32 @@ class Transitorio(Exception):
 
 
 def assinatura(item: dict) -> str:
-    return "|".join(str(item.get(k) or "") for k in ("lote_id", "de", "para", "pasta"))
+    """Muda quando o painel muda o pedido. 11/11: `escolhido_em` (uma pessoa escolheu de novo) também faz tentar outra vez."""
+    base = "|".join(str(item.get(k) or "") for k in ("lote_id", "de", "para", "pasta"))
+    return base + (f"|pessoa:{item['escolhido_em']}" if item.get("escolhido_em") else "")
+
+
+def candidatos_do_plano(plano: dict, de: str) -> list[str]:
+    """Os projetos que o carimbo das folhas cita (destino de quem move, candidatos de quem pergunta), sem o próprio `de`."""
+    out: list[str] = []
+    for g in plano.get("grupos") or []:
+        for c in ([g.get("destino")] if g.get("acao") == "mover" else []) + list(g.get("candidatos") or []):
+            c = str(c or "").upper()
+            if _CODIGO.match(c) and c != de and c not in out:
+                out.append(c)
+    return out
+
+
+def aceitar_escolha_da_pessoa(plano: dict, para: str) -> int:
+    """11/11 (contrato único 1.10): uma PESSOA escolheu `para` no painel. As folhas que o carimbo deixaria "para uma pessoa decidir"
+    entre projetos que incluem `para` vão para `para`. Nada além disso muda (o que o carimbo manda para outro código continua barrando).
+    Devolve quantos grupos mudaram."""
+    n = 0
+    for g in plano.get("grupos") or []:
+        if g.get("acao") == "perguntar" and para in [str(c).upper() for c in g.get("candidatos") or []]:
+            g["acao"], g["destino"] = "mover", para
+            n += 1
+    return n
 
 
 def _ler_memoria(pasta_estado: Path) -> dict:
@@ -111,9 +140,11 @@ def conferir_plano(plano: dict, item: dict) -> list[str]:
     return erros
 
 
-def _status_motivo(painel, raiz: Path, pasta: Path | None, motivo: str) -> None:
+def _status_motivo(painel, raiz: Path, pasta: Path | None, motivo: str, destino: dict | None = None) -> None:
     """Põe (ou tira, com motivo vazio) o motivo no status.json `pronto` da pasta e avisa o painel.
-    Só mexe em status `pronto` e só apaga motivo que este módulo escreveu. Nunca levanta."""
+    Só mexe em status `pronto` e só apaga motivo que este módulo escreveu. Nunca levanta.
+    11/11 (contrato 2.9, campo opcional): `destino_painel` {id, para, resultado, motivo, candidatos, em} diz ao painel que o CAMP Vision
+    NÃO moveu a pasta e quais projetos o carimbo cita; o painel mostra e a pessoa escolhe. Sai junto com o motivo."""
     if pasta is None:
         return
     try:
@@ -122,11 +153,17 @@ def _status_motivo(painel, raiz: Path, pasta: Path | None, motivo: str) -> None:
         if not isinstance(atual, dict) or atual.get("status") != "pronto":
             return
         antigo = str(atual.get("motivo") or "")
-        if not motivo and not antigo.startswith(PREFIXO):
+        tinha = "destino_painel" in atual
+        if not motivo and not antigo.startswith(PREFIXO) and not tinha:
             return
-        if antigo == motivo:
+        if antigo == motivo and (atual.get("destino_painel") == destino if motivo else not tinha):
             return
-        atual["motivo"] = motivo
+        if motivo or antigo.startswith(PREFIXO):
+            atual["motivo"] = motivo
+        if motivo and destino:
+            atual["destino_painel"] = destino
+        else:
+            atual.pop("destino_painel", None)
         gravar_json(caminho, atual)
         codigo = estrutura.codigo_da_pasta(pasta)
         try:
@@ -187,10 +224,13 @@ def processar(item: dict, config, painel, livro, pasta_estado: Path, tabela=None
         raise Transitorio(f"QNAP ao ler {pasta.name}: {erro}") from erro
     except Exception as erro:  # noqa: BLE001 - plano que não sai não é aplicado
         raise Recusa(f"a simulação falhou: {erro}") from erro
+    candidatos = candidatos_do_plano(plano, de)
+    if item.get("pessoa") and aceitar_escolha_da_pessoa(plano, para):
+        _log.info("Destino do painel %s: escolhido por uma pessoa (%s): as folhas em dúvida vão para %s", item.get("id"), item.get("escolhido_em"), para)
     _log.info("Destino do painel %s: simulação\n%s", item.get("id"), mod_reid.texto(plano))
     erros = conferir_plano(plano, item)
     if erros:
-        raise Recusa("a simulação não bate com o destino pedido: " + "; ".join(erros))
+        raise Recusa("a simulação não bate com o destino pedido: " + "; ".join(erros), candidatos)
     try:
         tocados = mod_reid.aplicar(plano, raiz, pasta_estado, base, livro, painel, tabela, chamar_rotas_admin=False)
     except Exception as erro:  # noqa: BLE001
@@ -240,7 +280,9 @@ def atender(config, painel, livro, pasta_estado: Path, cancelar=None, estado=Non
                          arquivo_origem=Path(str(item.get("pasta") or "")).name,
                          detalhe=f"{PREFIXO}: não reorganizado para {item.get('para')} (destino {chave} do painel): {motivo}")
             _status_motivo(painel, Path(config.raiz_final), pasta,
-                           f"{PREFIXO}: o CAMP Vision não reorganizou para {item.get('para')}: {motivo}"[:500])
+                           f"{PREFIXO}: o CAMP Vision não reorganizou para {item.get('para')}: {motivo}"[:500],
+                           {"id": item.get("id"), "para": str(item.get("para") or "").upper(), "resultado": "nao_aplicado", "motivo": motivo,
+                            "candidatos": getattr(erro, "candidatos", []), "em": datetime.now().isoformat(timespec="seconds")})
             memoria[chave] = {"assinatura": assinatura(item), "resultado": "nao_aplicado", "motivo": motivo,
                               "em": datetime.now().isoformat(timespec="seconds")}
             if estado is not None:
