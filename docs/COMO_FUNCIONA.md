@@ -500,7 +500,7 @@ Regras: só o visível; não nomear pessoas nem autor; não dizer onde foi tirad
 `derivacao.py`:
 - **Ano** só da data escrita (ano de 4 dígitos, ou `dd.mm.aa` → 19aa). O modelo não dá o ano em prancha.
 - **Tipo de desenho** pelo título, com 14 detectores nesta ordem: Implantação, Planta, Corte, Elevação/Fachada (tipo único, CAMP-051), Detalhe, Estrutura, Instalações, Mobiliário, Perspectiva, Croqui, Fotografia, Levantamento, Documento, Tabela. No máximo 3, juntos com " / ". Implantação suprime Planta.
-- **"É documento, não obra"**: título com documento, currículo, caderno, pasta, recorte, correspondência, memorial, contrato, ofício. Em S01 bloqueia a publicação (ficha) e impede sugestão de programa.
+- **"É documento, não obra"**: título com documento, currículo, caderno, pasta, recorte, correspondência, contrato, ofício; "memorial" só quando o título é SÓ o memorial ("Memorial", "Memorial descritivo", "Memorial justificativo 2/3"); "MEMORIAL / ISOMÉTRICA" ou "CONCURSO … MEMORIAL" não (CAMP-BLOQUEIO, 23/11/2026). Em S01 vira o bloqueio "ficha de documentação (não é obra)" no pacote (o painel o trata como aviso: não impede publicar) e impede sugestão de programa.
 - **Autoria divergente:** nomes com 4+ letras (sem títulos e palavras vazias) comparados com titular e coautores. Arquiteto vazio nunca dispara.
 - **Chaves de identidade** (fotos): uma pessoa só é nomeada quando os traços (barba, bigode, óculos) batem com **exatamente uma** chave escrita por gente no fundo. "só", "apenas" e "sem" tornam explícito o que não está. Qualquer ambiguidade = ninguém nomeado. O nome vai na frente da legenda, com ressalva.
 - **Fora do período:** ano fora do `periodo_atuacao` do fundo.
