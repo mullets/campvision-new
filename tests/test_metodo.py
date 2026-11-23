@@ -40,6 +40,18 @@ class TestTipoDeDesenho(unittest.TestCase):
         self.assertTrue(derivacao.e_documento("Documentos do escritório"))
         self.assertFalse(derivacao.e_documento("Edifício de Escritórios"))
 
+    def test_memorial_na_prancha_nao_e_ficha(self):
+        # CAMP-BLOQUEIO (Rafael, "sim, memorial"): prancha de concurso com MEMORIAL no título não é ficha de documentação
+        for titulo in ("MEMORIAL / ISOMÉTRICA", "CONCURSO PÚBLICO ESTADUAL · PAÇO MUNICIPAL / CENTRO CÍVICO · MEMORIAL",
+                       "Memorial - Planta do térreo", "MEMORIAL DA AMÉRICA LATINA", "Memorial descritivo · Implantação"):
+            self.assertFalse(derivacao.e_documento(titulo), titulo)
+        # o título que é SÓ o memorial continua ficha
+        for titulo in ("MEMORIAL DESCRITIVO", "Memorial", "Memorial justificativo 2/3", "MEMORIAL DESCRITIVO - FL. 1", "Memoriais descritivos"):
+            self.assertTrue(derivacao.e_documento(titulo), titulo)
+        # os documentos de verdade continuam
+        for titulo in ("CONTRATO", "OFÍCIO", "CURRÍCULO", "Correspondência", "Recortes de jornal", "Contrato de prestação de serviços"):
+            self.assertTrue(derivacao.e_documento(titulo), titulo)
+
     def test_ano_so_da_data_escrita(self):
         self.assertEqual(derivacao.ano_da_data("14.10.83"), "1983")
         self.assertEqual(derivacao.ano_da_data("abril de 1972"), "1972")

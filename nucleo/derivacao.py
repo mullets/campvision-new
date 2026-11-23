@@ -80,13 +80,27 @@ def tipo_de_desenho(titulo: str) -> str:
     return " / ".join(achados[:3])
 
 
+# CAMP-BLOQUEIO (23/11/2026, Rafael: "sim, memorial"): "memorial" saiu desta lista. Prancha de concurso traz "MEMORIAL" no
+# título ("MEMORIAL / ISOMÉTRICA", "CONCURSO PÚBLICO … MEMORIAL") e virava "ficha de documentação". Agora o memorial só é ficha
+# quando o título é SÓ o memorial ("MEMORIAL", "Memorial descritivo", "Memorial justificativo 2/3"): ver _so_memorial.
 TERMOS_DOCUMENTO = re.compile(
-    r"\b(documento\w*|curriculo\w*|caderno\w*|pasta\w*|recortes?|correspondenc\w*|memorial\w*|contrato\w*|oficios?)\b")
+    r"\b(documento\w*|curriculo\w*|caderno\w*|pasta\w*|recortes?|correspondenc\w*|contrato\w*|oficios?)\b")
+# palavras que podem acompanhar "memorial" num título que é só o memorial; qualquer outra palavra (planta, isométrica, concurso,
+# o nome da obra…) faz o título descrever a prancha, não um documento
+_PALAVRAS_DO_MEMORIAL = {"memorial", "memoriais", "descritivo", "descritiva", "descritivos", "justificativo", "justificativa",
+                         "tecnico", "tecnica", "de", "do", "da", "e", "fl", "folha", "pag", "pagina"}
+
+
+def _so_memorial(texto: str) -> bool:
+    """O título (já normalizado) é só "memorial", com descritivo/justificativo e número de página, e nada mais."""
+    palavras = [p for p in re.split(r"[\s/-]+", texto) if p and not p.isdigit()]
+    return bool({"memorial", "memoriais"} & set(palavras)) and all(p in _PALAVRAS_DO_MEMORIAL for p in palavras)
 
 
 def e_documento(titulo: str) -> bool:
     """Ficha de documentação, não obra (caso F023-P0181 'Documentos do escritório')."""
-    return bool(TERMOS_DOCUMENTO.search(normalizar(titulo)))
+    texto = normalizar(titulo)
+    return bool(TERMOS_DOCUMENTO.search(texto)) or _so_memorial(texto)
 
 
 # ---------------------------------------------------------------- autoria
